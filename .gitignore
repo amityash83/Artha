@@ -1,0 +1,47 @@
+# Dependency Directories
+node_modules/
+venv/
+.venv/
+env/
+
+# Production Bundles & Packager Outputs
+dist/
+dist-portable/
+build-out/
+out/
+backend/dist/
+backend/build/
+
+# PyInstaller Configuration Files
+*.spec
+
+# SQLite Database Files (Local Personal Data)
+data/
+*.db
+*.db-journal
+*.db-wal
+
+# Logging
+*.log
+backend_log.txt
+
+# Python Cache & Compiled Files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# OS/System Files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# IDE & Editor Settings
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp

@@ -1,0 +1,59 @@
+{
+  "name": "personal-finance-dashboard",
+  "version": "1.0.4",
+  "description": "Personal Finance Dashboard & Decision Support System",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev:frontend": "vite",
+    "build:frontend": "tsc && vite build",
+    "dev:backend": "venv\\Scripts\\python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload",
+    "dev:electron": "electron .",
+    "start": "concurrently --kill-others \"npm run dev:frontend\" \"electron .\"",
+    "build:backend": "venv\\Scripts\\pyinstaller --noconfirm --onedir --console --name \"main\" --clean --distpath backend/dist --workpath backend/build run.py",
+    "package:portable": "npm run build:frontend && npm run build:backend && electron-builder --win portable",
+    "build:exe": "powershell -ExecutionPolicy Bypass -File ./build_release.ps1"
+  },
+  "dependencies": {
+    "chart.js": "^4.4.3",
+    "lucide-react": "^0.395.0",
+    "react": "^18.3.1",
+    "react-chartjs-2": "^5.2.0",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "concurrently": "^8.2.2",
+    "electron": "^31.0.1",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.2.2",
+    "vite": "^5.3.1"
+  },
+  "build": {
+    "appId": "com.artha.desktop",
+    "productName": "Artha",
+    "directories": {
+      "output": "dist-portable"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "backend/dist/main",
+        "to": "backend/dist/main",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ]
+    }
+  }
+}
