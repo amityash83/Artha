@@ -1,8 +1,8 @@
-# FinanceOS 🚀
+# Artha 🚀
 
-FinanceOS is a lightweight, cross-platform **Financial Operating System** designed for high-level financial planning, retirement simulations, loan prepayments calculations, and strategic decision-making. 
+Artha is a lightweight, cross-platform **Financial Operating System** and Personal Financial Intelligence Platform designed for high-level financial planning, retirement simulations, loan prepayments calculations, and strategic decision-making. 
 
-Rather than standard accounting software, FinanceOS acts as a **decision sandbox** to help you plan your net worth progression and optimize debt reduction.
+Rather than standard accounting software, Artha acts as a **decision sandbox** and system of intelligence on top of your financial data to help you plan your net worth progression and optimize debt reduction.
 
 ---
 
@@ -20,14 +20,14 @@ Rather than standard accounting software, FinanceOS acts as a **decision sandbox
 
 ## 📦 Standalone Portable Format (Recommended)
 
-FinanceOS is packaged as a **single standalone portable executable**.
+Artha is packaged as a **single standalone portable executable**.
 - Requires no installation.
 - Creates and resolves the database folder (`data/`) **right next to the `.exe` file**.
 - Perfect for running entirely off a USB thumb drive—your financial data travels with the app.
 
 ### How to Get the Portable App:
 1. Go to the **Releases** section of this repository.
-2. Download `FinanceOS 1.0.0.exe`.
+2. Download `Artha 1.0.4.exe`.
 3. Double-click to launch!
 
 ---
@@ -42,8 +42,8 @@ FinanceOS is packaged as a **single standalone portable executable**.
 
 1. **Clone the repository:**
    ```bash
-   git clone <your-repository-url>
-   cd Antigravity
+   git clone https://github.com/my-private-repo/Artha.git
+   cd Artha
    ```
 
 2. **Set up Python Virtual Environment:**
@@ -78,7 +78,7 @@ To compile the source code into a single-file portable Windows executable yourse
 npm run package:portable
 ```
 
-The resulting standalone executable will be written to `dist-portable/FinanceOS 1.0.0.exe`.
+The resulting standalone executable will be written to `dist-portable/Artha 1.0.4.exe`.
 
 ---
 
@@ -86,11 +86,11 @@ The resulting standalone executable will be written to `dist-portable/FinanceOS 
 
 This repository is configured with a GitHub Actions workflow (`.github/workflows/build-and-publish.yml`) that:
 1. Runs compilation tests on pushes to the `main` branch.
-2. Automatically generates, signs, and uploads the portable `FinanceOS 1.0.0.exe` binary as a draft asset whenever you push a version tag (e.g. `v1.0.0`).
+2. Automatically generates, signs, and uploads the portable `Artha 1.0.4.exe` binary as a draft asset whenever you push a version tag (e.g. `v1.0.4`).
 
 ---
 
 ## 📜 Specification Document
 
-For the master design specification outlining FOS core principles, monthly snapshot layers, calculations matrices, decision warning engine, and long-term vision roadmap, please refer to the **[FOS Specification Document](file:///d:/AI/Antigravity/FOS.md)**.
+For the master design specification outlining Artha's core principles, monthly snapshot layers, calculations matrices, decision warning engine, and long-term vision roadmap, please refer to the **[Artha Specification Document](file:///d:/AI/Antigravity/Artha.md)**.
 
