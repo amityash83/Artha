@@ -1,6 +1,6 @@
 # Artha - Product Vision & Architecture Spec
 
-**Version:** 1.0
+**Version:** 1.0.4
 **Last Updated:** July 2026
 
 ---

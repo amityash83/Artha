@@ -1,4 +1,4 @@
-# Walkthrough — FOS Core Features Release
+# Walkthrough — Artha Core Features Release
 
 All Version 2 and 3 core features outlined in the roadmap have been fully built, verified, and packaged into the portable release.
 
@@ -56,10 +56,10 @@ All Version 2 and 3 core features outlined in the roadmap have been fully built,
 - [src/components/Accounts.tsx](file:///d:/AI/Antigravity/src/components/Accounts.tsx): Added `"Credit Card"` to standard bank account purposes.
 - [src/components/FinancialCalendar.tsx](file:///d:/AI/Antigravity/src/components/FinancialCalendar.tsx): [NEW] Chronological cash timeline agenda.
 - [src/components/LoanOptimizer.tsx](file:///d:/AI/Antigravity/src/components/LoanOptimizer.tsx): [NEW] Payoff curve visualizer workspace.
-- [FOS.md](file:///d:/AI/Antigravity/FOS.md): Updated spec files roadmap listings.
+- [Artha.md](file:///d:/AI/Antigravity/Artha.md): Updated spec files roadmap listings.
 
 ---
 
 ## Standalone Portable Executable
 The updated binary is packaged and ready for use:
-📂 **[FinanceOS 1.0.4.exe](file:///d:/AI/Antigravity/dist-portable/FinanceOS%201.0.4.exe)**
+📂 **[Artha 1.0.4.exe](file:///d:/AI/Antigravity/dist-portable/Artha%201.0.4.exe)**

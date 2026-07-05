@@ -1,6 +1,6 @@
-# Manual Build & Run Guide - FinanceOS 🛠️
+# Manual Build & Run Guide - Artha 🛠️
 
-This guide outlines step-by-step instructions to set up, run, and compile the **FinanceOS** desktop application manually from source code on a Windows machine.
+This guide outlines step-by-step instructions to set up, run, and compile the **Artha** desktop application manually from source code on a Windows machine.
 
 ---
 
@@ -120,4 +120,4 @@ npm run package:portable
 
 **Where to find the final build:**
 Your standalone, zero-installation portable binary will be written to:
-📂 **`D:\AI\Antigravity\dist-portable\FinanceOS 1.0.0.exe`**
+📂 **`D:\AI\Antigravity\dist-portable\Artha 1.0.4.exe`**
