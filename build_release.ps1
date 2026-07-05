@@ -7,8 +7,8 @@ Write-Host "   FINANCIAL OPERATING SYSTEM (FOS) RELEASE BUILD SYSTEM" -Foregroun
 Write-Host "==========================================================" -ForegroundColor Cyan
 
 # Step 1: Kill active application instances to prevent file locking
-Write-Host "[1/5] Terminating active FOS instances..." -ForegroundColor Yellow
-Stop-Process -Name "FinanceOS", "main" -Force -ErrorAction SilentlyContinue
+Write-Host "[1/5] Terminating active FOS/Artha instances..." -ForegroundColor Yellow
+Stop-Process -Name "Artha", "FinanceOS", "main" -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
 
 # Step 2: Compile React Frontend Assets
@@ -53,6 +53,19 @@ $version = $packageJson.version
 $productName = $packageJson.build.productName
 $exeName = "$productName $version.exe"
 $exePath = Join-Path (Get-Location) "dist-portable\$exeName"
+
+# Copy to external deployment path if it exists (e.g., D:\Artha)
+$targetDeployDir = "D:\Artha"
+if (Test-Path $targetDeployDir) {
+    Write-Host "`n[Deployment] Copying fresh binary to $targetDeployDir..." -ForegroundColor Yellow
+    
+    # Terminate any running instance of the app to prevent copy lock
+    Stop-Process -Name $productName, "FinanceOS" -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+    
+    Copy-Item -Path $exePath -Destination (Join-Path $targetDeployDir $exeName) -Force
+    Write-Host "Deployed successfully to $targetDeployDir\$exeName" -ForegroundColor Green
+}
 
 Write-Host "`n==========================================================" -ForegroundColor Green
 Write-Host "   BUILD SUCCESSFUL!" -ForegroundColor Green
