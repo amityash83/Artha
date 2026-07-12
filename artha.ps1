@@ -13,6 +13,18 @@ function Show-Header {
     Write-Host "=============================================" -ForegroundColor Cyan
 }
 
+function Free-Port([int]$port) {
+    $portConn = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
+    if ($portConn) {
+        $portPids = $portConn.OwningProcess | Select-Object -Unique
+        foreach ($activePid in $portPids) {
+            Write-Host "[!] Port $port is in use by PID $activePid. Terminating process to free the port..." -ForegroundColor Yellow
+            Stop-Process -Id $activePid -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 1
+        }
+    }
+}
+
 function Start-Services {
     Show-Header
     if (Test-Path $PID_FILE) {
@@ -32,16 +44,8 @@ function Start-Services {
         Remove-Item $PID_FILE
     }
 
-    # Free port 8000 if occupied
-    $portConn = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue
-    if ($portConn) {
-        $portPids = $portConn.OwningProcess | Select-Object -Unique
-        foreach ($activePid in $portPids) {
-            Write-Host "[!] Port 8000 is in use by PID $activePid. Terminating process to free the port..." -ForegroundColor Yellow
-            Stop-Process -Id $activePid -Force -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 1
-        }
-    }
+    Free-Port 8000
+    Free-Port 5173
 
     Write-Host "[+] Starting Backend FastAPI Server..." -ForegroundColor Green
     $backendProcess = Start-Process -FilePath "venv\Scripts\python.exe" -ArgumentList "-m uvicorn backend.main:app --host 127.0.0.1 --port 8000" -WorkingDirectory $PSScriptRoot -RedirectStandardOutput "$PSScriptRoot\backend_stdout.log" -RedirectStandardError "$PSScriptRoot\backend_stderr.log" -WindowStyle Hidden -PassThru
@@ -64,6 +68,8 @@ function Stop-Services {
     if (-not (Test-Path $PID_FILE)) {
         Write-Host "[!] No active services recorded in .artha.pid." -ForegroundColor Yellow
         Write-Host "[!] Cleaning up any runaway node, electron, or python instances..." -ForegroundColor Gray
+        Free-Port 8000
+        Free-Port 5173
         Stop-Process -Name "node" -Force -ErrorAction SilentlyContinue
         Stop-Process -Name "electron" -Force -ErrorAction SilentlyContinue
         
@@ -89,6 +95,8 @@ function Stop-Services {
     }
 
     # Ensure orphaned dependencies are stopped
+    Free-Port 8000
+    Free-Port 5173
     Stop-Process -Name "node" -Force -ErrorAction SilentlyContinue
     Stop-Process -Name "electron" -Force -ErrorAction SilentlyContinue
     Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object { $_.CommandLine -like "*uvicorn*" } | ForEach-Object {
