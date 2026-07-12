@@ -316,6 +316,49 @@ def get_init_data():
     finally:
         conn.close()
 
+def adjust_double_entry_balances(cursor, t_type: str, amount: float, account_id: int, related_entity_type: str, related_entity_id: int, operation: str = "add"):
+    """
+    Adjust balances of accounts, assets, liabilities based on double-entry transaction specs.
+    operation: 'add' (apply transaction impact), 'revert' (undo transaction impact)
+    """
+    if not account_id:
+        return
+        
+    factor = 1.0 if operation == "add" else -1.0
+    t_type_lower = t_type.lower()
+    
+    if t_type_lower == 'investment':
+        # Decrease Account balance, Increase Asset value
+        cursor.execute("UPDATE accounts SET current_balance = current_balance - ? WHERE id = ?", (amount * factor, account_id))
+        if related_entity_id:
+            cursor.execute("UPDATE assets SET current_value = current_value + ? WHERE id = ?", (amount * factor, related_entity_id))
+            
+    elif t_type_lower == 'redemption':
+        # Increase Account balance, Decrease Asset value
+        cursor.execute("UPDATE accounts SET current_balance = current_balance + ? WHERE id = ?", (amount * factor, account_id))
+        if related_entity_id:
+            cursor.execute("UPDATE assets SET current_value = current_value - ? WHERE id = ?", (amount * factor, related_entity_id))
+            
+    elif t_type_lower in ['emi', 'prepayment']:
+        # Decrease Account balance, Decrease Liability outstanding
+        cursor.execute("UPDATE accounts SET current_balance = current_balance - ? WHERE id = ?", (amount * factor, account_id))
+        if related_entity_id:
+            cursor.execute("UPDATE liabilities SET outstanding = outstanding - ? WHERE id = ?", (amount * factor, related_entity_id))
+            
+    elif t_type_lower == 'transfer':
+        # Decrease source Account balance, Increase destination Account balance
+        cursor.execute("UPDATE accounts SET current_balance = current_balance - ? WHERE id = ?", (amount * factor, account_id))
+        if related_entity_id:
+            cursor.execute("UPDATE accounts SET current_balance = current_balance + ? WHERE id = ?", (amount * factor, related_entity_id))
+            
+    elif t_type_lower in ['debit', 'expense']:
+        # Decrease Account balance
+        cursor.execute("UPDATE accounts SET current_balance = current_balance - ? WHERE id = ?", (amount * factor, account_id))
+        
+    elif t_type_lower in ['credit', 'income']:
+        # Increase Account balance
+        cursor.execute("UPDATE accounts SET current_balance = current_balance + ? WHERE id = ?", (amount * factor, account_id))
+
 # --- Generic CRUD REST API ---
 @app.get("/api/entities/{entity_type}")
 def get_entities(entity_type: str):
@@ -368,6 +411,18 @@ def create_entity(entity_type: str, payload: dict):
         query = f"INSERT INTO {entity_type} ({', '.join(columns)}) VALUES ({', '.join(placeholders)})"
         
         cursor.execute(query, standard_params)
+        
+        if entity_type == "transactions":
+            adjust_double_entry_balances(
+                cursor,
+                standard_params.get("type"),
+                float(standard_params.get("amount", 0.0)),
+                int(standard_params.get("account_id")) if standard_params.get("account_id") is not None else None,
+                standard_params.get("related_entity_type"),
+                int(standard_params.get("related_entity_id")) if standard_params.get("related_entity_id") is not None else None,
+                "add"
+            )
+            
         conn.commit()
         return {"status": "success", "id": cursor.lastrowid}
     except Exception as e:
@@ -394,6 +449,22 @@ def update_entity(entity_type: str, id: int, payload: dict):
             )
             payload["expected_completion"] = comp["expected_date"]
             
+        if entity_type == "transactions":
+            # Revert old balances first
+            cursor.execute("SELECT * FROM transactions WHERE id = ?", (id,))
+            old_row = cursor.fetchone()
+            if old_row:
+                old = dict(old_row)
+                adjust_double_entry_balances(
+                    cursor,
+                    old.get("type"),
+                    float(old.get("amount", 0.0)),
+                    int(old.get("account_id")) if old.get("account_id") is not None else None,
+                    old.get("related_entity_type"),
+                    int(old.get("related_entity_id")) if old.get("related_entity_id") is not None else None,
+                    "revert"
+                )
+                
         standard_params = serialize_entity_payload(cursor, entity_type, payload)
         
         set_clauses = [f"{c} = :{c}" for c in standard_params.keys()]
@@ -401,6 +472,19 @@ def update_entity(entity_type: str, id: int, payload: dict):
         query = f"UPDATE {entity_type} SET {', '.join(set_clauses)} WHERE id = :id"
         
         cursor.execute(query, standard_params)
+        
+        if entity_type == "transactions":
+            # Apply new balances
+            adjust_double_entry_balances(
+                cursor,
+                standard_params.get("type"),
+                float(standard_params.get("amount", 0.0)),
+                int(standard_params.get("account_id")) if standard_params.get("account_id") is not None else None,
+                standard_params.get("related_entity_type"),
+                int(standard_params.get("related_entity_id")) if standard_params.get("related_entity_id") is not None else None,
+                "add"
+            )
+            
         conn.commit()
         return {"status": "success"}
     except Exception as e:
@@ -418,6 +502,22 @@ def delete_entity(entity_type: str, id: int):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
+        if entity_type == "transactions":
+            # Revert old balances first
+            cursor.execute("SELECT * FROM transactions WHERE id = ?", (id,))
+            old_row = cursor.fetchone()
+            if old_row:
+                old = dict(old_row)
+                adjust_double_entry_balances(
+                    cursor,
+                    old.get("type"),
+                    float(old.get("amount", 0.0)),
+                    int(old.get("account_id")) if old.get("account_id") is not None else None,
+                    old.get("related_entity_type"),
+                    int(old.get("related_entity_id")) if old.get("related_entity_id") is not None else None,
+                    "revert"
+                )
+                
         cursor.execute(f"DELETE FROM {entity_type} WHERE id = ?", (id,))
         conn.commit()
         return {"status": "success"}

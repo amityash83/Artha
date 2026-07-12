@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { 
   Landmark, LandmarkIcon, PiggyBank, 
-  Target, FileText, Database, Compass, Calendar, Calculator, Zap, LineChart
+  Target, FileText, Database, Compass, Calendar, Calculator, Zap, LineChart, ArrowRightLeft
 } from 'lucide-react';
 import { InitData } from './types';
 import { Dashboard } from './components/Dashboard';
@@ -13,6 +13,7 @@ import { EmiCalculator } from './components/EmiCalculator';
 import { FinancialCalendar } from './components/FinancialCalendar';
 import { LoanOptimizer } from './components/LoanOptimizer';
 import { CashFlowPlanning } from './components/CashFlowPlanning';
+import { TransactionsLedger } from './components/TransactionsLedger';
 import { API_BASE_URL } from './config';
 
 const App: React.FC = () => {
@@ -173,6 +174,15 @@ const App: React.FC = () => {
             </li>
             <li>
               <div 
+                className={`sidebar-item ${activeTab === 'transactions' ? 'active' : ''}`}
+                onClick={() => handleNavigate('transactions')}
+              >
+                <ArrowRightLeft size={16} />
+                Transactions Ledger
+              </div>
+            </li>
+            <li>
+              <div 
                 className={`sidebar-item ${activeTab === 'financial-calendar' ? 'active' : ''}`}
                 onClick={() => handleNavigate('financial-calendar')}
               >
@@ -279,6 +289,9 @@ const App: React.FC = () => {
         )}
         {activeTab === 'cash-flow' && (
           <CashFlowPlanning data={data} onRefresh={fetchFinanceData} />
+        )}
+        {activeTab === 'transactions' && (
+          <TransactionsLedger data={data} onRefresh={fetchFinanceData} />
         )}
         {activeTab === 'accounts' && (
           <EntityGrid 
