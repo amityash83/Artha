@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { 
   Landmark, LandmarkIcon, PiggyBank, 
-  Target, FileText, Database, Compass, Calendar, Calculator, Zap, LineChart, ArrowRightLeft
+  Target, FileText, Database, Compass, Calendar, Calculator, Zap, LineChart, ArrowRightLeft, Sliders
 } from 'lucide-react';
 import { InitData } from './types';
 import { Dashboard } from './components/Dashboard';
@@ -14,6 +14,7 @@ import { FinancialCalendar } from './components/FinancialCalendar';
 import { LoanOptimizer } from './components/LoanOptimizer';
 import { CashFlowPlanning } from './components/CashFlowPlanning';
 import { TransactionsLedger } from './components/TransactionsLedger';
+import { BudgetPlanner } from './components/BudgetPlanner';
 import { API_BASE_URL } from './config';
 
 const App: React.FC = () => {
@@ -183,6 +184,15 @@ const App: React.FC = () => {
             </li>
             <li>
               <div 
+                className={`sidebar-item ${activeTab === 'budget-planner' ? 'active' : ''}`}
+                onClick={() => handleNavigate('budget-planner')}
+              >
+                <Sliders size={16} />
+                Budget Planner
+              </div>
+            </li>
+            <li>
+              <div 
                 className={`sidebar-item ${activeTab === 'financial-calendar' ? 'active' : ''}`}
                 onClick={() => handleNavigate('financial-calendar')}
               >
@@ -292,6 +302,9 @@ const App: React.FC = () => {
         )}
         {activeTab === 'transactions' && (
           <TransactionsLedger data={data} onRefresh={fetchFinanceData} />
+        )}
+        {activeTab === 'budget-planner' && (
+          <BudgetPlanner data={data} onRefresh={fetchFinanceData} />
         )}
         {activeTab === 'accounts' && (
           <EntityGrid 

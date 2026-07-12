@@ -3,6 +3,7 @@ export interface Category {
   name: string;
   entity_type: 'Asset' | 'Liability' | 'Income' | 'Expense';
   fields_definition: any; // JSON schema or record
+  monthly_budget?: number;
 }
 
 export interface Institution {

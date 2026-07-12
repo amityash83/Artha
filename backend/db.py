@@ -97,6 +97,14 @@ def init_db():
     except Exception as e:
         print("financial_rules migration warning:", e)
 
+    try:
+        cursor.execute("PRAGMA table_info('categories')")
+        existing_cols = [row['name'] for row in cursor.fetchall()]
+        if 'monthly_budget' not in existing_cols:
+            cursor.execute("ALTER TABLE categories ADD COLUMN monthly_budget REAL DEFAULT 0.0")
+    except Exception as e:
+        print("categories migration warning:", e)
+
     # 2. CORE ENTITY TABLES
 
     # Accounts
