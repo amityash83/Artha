@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { 
-  CreditCard, Plus, Edit2, Trash2, Award, ShieldAlert,
-  X, Calculator, PlusCircle
+  CreditCard as CardIcon, Plus, Edit2, Trash2, ShieldAlert,
+  X, Sparkles
 } from 'lucide-react';
 import { InitData } from '../types';
 import { API_BASE_URL } from '../config';
@@ -12,27 +12,117 @@ interface CreditCardsProps {
   showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
 
-interface CardRewardRule {
+interface CategoryMultiplierRule {
   category: string;
-  ratePct: number; // Reward rate in percent (e.g. 3.3% for Infinia on general, 10% on smartbuy)
+  multiplier: number;
+  isExcluded: boolean;
+  monthlyCapPoints?: number;
 }
+
+interface MilestoneThresholdRule {
+  spendThreshold: number;
+  bonusPointsRate: number; // e.g. 35 points instead of 12
+  pointsPerSpend: number;  // e.g. per 200 spent
+}
+
+interface RedemptionPartnerRatio {
+  partnerName: string;
+  transferRatio: number; // e.g. 0.8 for 5:4, 0.4 for 5:2
+}
+
+// Popular Premium Cards Preset Templates
+const PRESETS = [
+  {
+    name: 'HDFC Infinia (Metal/Visa)',
+    issuer: 'HDFC Bank',
+    network: 'Visa',
+    basePoints: 5,
+    baseSpend: 150,
+    pointValue: 1.0,
+    creditLimit: 1500000,
+    annualFee: 12500,
+    loungeVisitsLimit: 99, // Unlimited
+    loungeIntLimit: 99,
+    categoryRules: [
+      { category: 'Travel', multiplier: 5, isExcluded: false, monthlyCapPoints: 15000 }, // SmartBuy accelerated
+      { category: 'Dining', multiplier: 5, isExcluded: false, monthlyCapPoints: 5000 },
+      { category: 'Fuel', multiplier: 0, isExcluded: true },
+      { category: 'Rent', multiplier: 0, isExcluded: true },
+      { category: 'Utilities', multiplier: 1, isExcluded: false }
+    ],
+    milestoneRules: [] as MilestoneThresholdRule[],
+    partners: [
+      { partnerName: 'Club Vistara (1:1)', transferRatio: 1.0 },
+      { partnerName: 'KrisFlyer Singapore (1:1)', transferRatio: 1.0 }
+    ],
+    remarks: 'Premium dining, flights, and travel smartbuy accelerator.'
+  },
+  {
+    name: 'Axis Magnus (Standard)',
+    issuer: 'Axis Bank',
+    network: 'Visa',
+    basePoints: 12,
+    baseSpend: 200,
+    pointValue: 0.40,
+    creditLimit: 1000000,
+    annualFee: 12500,
+    loungeVisitsLimit: 8,
+    loungeIntLimit: 8,
+    categoryRules: [
+      { category: 'Travel', multiplier: 5, isExcluded: false, monthlyCapPoints: 20000 }, // Travel EDGE
+      { category: 'Fuel', multiplier: 0, isExcluded: true },
+      { category: 'Rent', multiplier: 0, isExcluded: true },
+      { category: 'Insurance', multiplier: 0, isExcluded: true },
+      { category: 'Utilities', multiplier: 0, isExcluded: true }
+    ],
+    milestoneRules: [
+      { spendThreshold: 150000, bonusPointsRate: 35, pointsPerSpend: 200 }
+    ],
+    partners: [
+      { partnerName: 'Singapore Airlines (5:2)', transferRatio: 0.4 },
+      { partnerName: 'ITC Club (5:2)', transferRatio: 0.4 }
+    ],
+    remarks: 'Incremental spends beyond 1.5L cross step-up milestone rewards.'
+  },
+  {
+    name: 'SBI Card ELITE',
+    issuer: 'SBI',
+    network: 'Mastercard',
+    basePoints: 2,
+    baseSpend: 100,
+    pointValue: 0.25,
+    creditLimit: 500000,
+    annualFee: 4999,
+    loungeVisitsLimit: 8,
+    loungeIntLimit: 6,
+    categoryRules: [
+      { category: 'Dining', multiplier: 5, isExcluded: false },
+      { category: 'Fuel', multiplier: 0, isExcluded: true }
+    ],
+    milestoneRules: [] as MilestoneThresholdRule[],
+    partners: [] as RedemptionPartnerRatio[],
+    remarks: 'Milestone spends release movie vouchers and extra points.'
+  }
+];
 
 export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showToast }) => {
   const { liabilities = [], categories = [], institutions = [] } = data;
 
-  // Filter liabilities where category is Credit Card
   const creditCards = useMemo(() => {
     return liabilities.filter((l: any) => l.category_name === 'Credit Card');
   }, [liabilities]);
 
-  const [activeSubTab, setActiveSubTab] = useState<'inventory' | 'milestones' | 'calculator' | 'lounges'>('inventory');
+  const [activeSubTab, setActiveSubTab] = useState<'inventory' | 'milestones' | 'calculator'>('inventory');
   
-  // Modals & Forms State
+  // Modals & Overlay forms
   const [modalOpen, setModalOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<any | null>(null);
   const [deletingCardId, setDeletingCardId] = useState<number | null>(null);
+  
+  // Overlay Tab navigation
+  const [activeModalTab, setActiveModalTab] = useState<'general' | 'rates' | 'categories' | 'milestones' | 'partners'>('general');
 
-  // Form Field States
+  // Form states
   const [name, setName] = useState('');
   const [lenderId, setLenderId] = useState('');
   const [outstanding, setOutstanding] = useState(0);
@@ -52,60 +142,101 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
   const [milestoneCurrent, setMilestoneCurrent] = useState(0);
   const [milestoneDesc, setMilestoneDesc] = useState('');
   const [remarks, setRemarks] = useState('');
-  
-  // Custom Card Reward Rules State (Temporary form storage)
-  const [rewardRules, setRewardRules] = useState<CardRewardRule[]>([]);
-  const [newRuleCategory, setNewRuleCategory] = useState('General');
-  const [newRuleRate, setNewRuleRate] = useState(1);
 
-  // Calculator State
+  // Redesigned reward engine configurator states
+  const [basePoints, setBasePoints] = useState(1);
+  const [baseSpend, setBaseSpend] = useState(100);
+  const [currentStatementSpend, setCurrentStatementSpend] = useState(0);
+  const [categoryRules, setCategoryRules] = useState<CategoryMultiplierRule[]>([]);
+  const [milestoneRules, setMilestoneRules] = useState<MilestoneThresholdRule[]>([]);
+  const [redemptionPartners, setRedemptionPartners] = useState<RedemptionPartnerRatio[]>([]);
+
+  // Rule Builders local states
+  const [newCatName, setNewCatName] = useState('General');
+  const [newCatMultiplier, setNewCatMultiplier] = useState(2);
+  const [newCatExcluded, setNewCatExcluded] = useState(false);
+  const [newCatCap, setNewCatCap] = useState('');
+
+  const [newMilestoneSpend, setNewMilestoneSpend] = useState(150000);
+  const [newMilestoneRate, setNewMilestoneRate] = useState(35);
+  const [newMilestoneSpendBlock, setNewMilestoneSpendBlock] = useState(200);
+
+  const [newPartnerName, setNewPartnerName] = useState('');
+  const [newPartnerRatio, setNewPartnerRatio] = useState(1.0);
+
+  // Calculator states
   const [calcCategory, setCalcCategory] = useState('General');
-  const [calcAmount, setCalcAmount] = useState<number>(10000);
+  const [calcAmount, setCalcAmount] = useState<number>(25000);
+  const [redemptionStrategy, setRedemptionStrategy] = useState<'cash' | 'miles'>('cash');
 
-  // Offers State (Local mockup stored in metadata for the specific card)
-  const [offersList, setOffersList] = useState<Array<{ id: string; merchant: string; desc: string; expiry: string }>>([]);
-  const [newOfferMerchant, setNewOfferMerchant] = useState('');
-  const [newOfferDesc, setNewOfferDesc] = useState('');
-  const [newOfferExpiry, setNewOfferExpiry] = useState('');
-
-  // Fetch Category ID for Credit Card
   const creditCardCategoryId = useMemo(() => {
     const cat = categories.find(c => c.name === 'Credit Card');
     return cat ? cat.id : null;
   }, [categories]);
 
-  // Seeding the form when editing a card
+  // Seeding presets
+  const applyPreset = (preset: typeof PRESETS[0]) => {
+    setName(preset.name);
+    const inst = institutions.find(i => i.name.toLowerCase().includes(preset.issuer.toLowerCase()));
+    setLenderId(inst ? inst.id.toString() : '');
+    setNetwork(preset.network);
+    setBasePoints(preset.basePoints);
+    setBaseSpend(preset.baseSpend);
+    setPointValue(preset.pointValue);
+    setCreditLimit(preset.creditLimit);
+    setAnnualFee(preset.annualFee);
+    setLoungeVisitsLimit(preset.loungeVisitsLimit);
+    setLoungeIntLimit(preset.loungeIntLimit);
+    setCategoryRules(preset.categoryRules as CategoryMultiplierRule[]);
+    setMilestoneRules(preset.milestoneRules as MilestoneThresholdRule[]);
+    setRedemptionPartners(preset.partners as RedemptionPartnerRatio[]);
+    setRemarks(preset.remarks);
+    if (showToast) showToast(`Preset template applied: ${preset.name}`, "info");
+  };
+
   const handleOpenEdit = (card: any) => {
     setEditingCard(card);
     setName(card.name);
     setLenderId(card.lender_institution_id?.toString() || '');
     setOutstanding(card.outstanding || 0);
-    
-    // Parse metadata
+
     const meta = card.metadata_json ? (typeof card.metadata_json === 'string' ? JSON.parse(card.metadata_json) : card.metadata_json) : {};
-    setCreditLimit(meta.credit_limit || card.credit_limit || 100000);
-    setStatementDate(meta.statement_date || card.statement_date || 15);
-    setDueDate(meta.due_date || card.due_date || 5);
-    setAnnualFee(meta.annual_fee || card.annual_fee || 0);
-    setRenewalDate(meta.renewal_date || card.renewal_date || '');
-    setRewardPoints(meta.reward_points || card.reward_points || 0);
-    setPointValue(meta.point_value || card.point_value || 0.25);
-    setNetwork(meta.network || card.network || 'Visa');
-    setLoungeVisitsLimit(meta.lounge_visits_limit || card.lounge_visits_limit || 4);
-    setLoungeVisitsUsed(meta.lounge_visits_used || card.lounge_visits_used || 0);
+    setCreditLimit(meta.credit_limit || 100000);
+    setStatementDate(meta.statement_date || 15);
+    setDueDate(meta.due_date || 5);
+    setAnnualFee(meta.annual_fee || 0);
+    setRenewalDate(meta.renewal_date || '');
+    setRewardPoints(meta.reward_points || 0);
+    setPointValue(meta.point_value || 0.25);
+    setNetwork(meta.network || 'Visa');
+    setLoungeVisitsLimit(meta.lounge_visits_limit || 4);
+    setLoungeVisitsUsed(meta.lounge_visits_used || 0);
     setLoungeIntLimit(meta.lounge_int_limit || 0);
     setLoungeIntUsed(meta.lounge_int_used || 0);
-    setMilestoneTarget(meta.milestone_spend_target || card.milestone_spend_target || 0);
-    setMilestoneCurrent(meta.milestone_spend_current || card.milestone_spend_current || 0);
-    setMilestoneDesc(meta.milestone_reward_desc || card.milestone_reward_desc || '');
-    setRemarks(meta.remarks || card.remarks || '');
+    setMilestoneTarget(meta.milestone_spend_target || 0);
+    setMilestoneCurrent(meta.milestone_spend_current || 0);
+    setMilestoneDesc(meta.milestone_reward_desc || '');
+    setRemarks(meta.remarks || '');
+
+    // Advanced Rewards structures
+    setBasePoints(meta.base_points || 1);
+    setBaseSpend(meta.base_spend || 100);
+    setCurrentStatementSpend(meta.current_statement_spend || 0);
     
-    // Load rules and offers from metadata
-    setRewardRules(meta.reward_rules || [
-      { category: 'General', ratePct: meta.point_value ? meta.point_value * 4 : 1 }
-    ]);
-    setOffersList(meta.offers || []);
+    // Parse category multipliers, milestones and partners from database JSON strings
+    try {
+      setCategoryRules(meta.category_rules_json ? JSON.parse(meta.category_rules_json) : []);
+    } catch { setCategoryRules([]); }
     
+    try {
+      setMilestoneRules(meta.milestone_rules_json ? JSON.parse(meta.milestone_rules_json) : []);
+    } catch { setMilestoneRules([]); }
+
+    try {
+      setRedemptionPartners(meta.redemption_partners_json ? JSON.parse(meta.redemption_partners_json) : []);
+    } catch { setRedemptionPartners([]); }
+
+    setActiveModalTab('general');
     setModalOpen(true);
   };
 
@@ -130,8 +261,15 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
     setMilestoneCurrent(0);
     setMilestoneDesc('');
     setRemarks('');
-    setRewardRules([{ category: 'General', ratePct: 1 }]);
-    setOffersList([]);
+
+    setBasePoints(1);
+    setBaseSpend(100);
+    setCurrentStatementSpend(0);
+    setCategoryRules([]);
+    setMilestoneRules([]);
+    setRedemptionPartners([]);
+    
+    setActiveModalTab('general');
     setModalOpen(true);
   };
 
@@ -143,20 +281,17 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
       if (res.ok) {
         onRefresh();
         setDeletingCardId(null);
-        if (showToast) showToast("Credit Card removed successfully", "success");
-      } else {
-        if (showToast) showToast("Failed to delete credit card", "error");
+        if (showToast) showToast("Credit Card deleted successfully", "success");
       }
     } catch (err) {
       console.error(err);
-      if (showToast) showToast("Error removing credit card", "error");
     }
   };
 
   const handleSaveCard = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !lenderId || !creditCardCategoryId) {
-      if (showToast) showToast("Please fill in required fields.", "error");
+      if (showToast) showToast("Please select issuer bank and name.", "error");
       return;
     }
 
@@ -177,8 +312,12 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
       milestone_spend_current: Number(milestoneCurrent),
       milestone_reward_desc: milestoneDesc,
       remarks,
-      reward_rules: rewardRules,
-      offers: offersList
+      base_points: Number(basePoints),
+      base_spend: Number(baseSpend),
+      current_statement_spend: Number(currentStatementSpend),
+      category_rules_json: JSON.stringify(categoryRules),
+      milestone_rules_json: JSON.stringify(milestoneRules),
+      redemption_partners_json: JSON.stringify(redemptionPartners)
     };
 
     const payload = {
@@ -208,56 +347,48 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
       if (res.ok) {
         setModalOpen(false);
         onRefresh();
-        if (showToast) showToast(isEdit ? "Card details updated" : "New Card added", "success");
-      } else {
-        const err = await res.json();
-        if (showToast) showToast(`Failed to save: ${err.detail || "Error"}`, "error");
+        if (showToast) showToast(isEdit ? "Card configuration saved" : "Credit Card registered", "success");
       }
     } catch (err) {
       console.error(err);
-      if (showToast) showToast("Network error saving card details", "error");
+      if (showToast) showToast("Error saving card settings", "error");
     }
   };
 
-  // Rule management helpers
-  const handleAddRule = () => {
-    if (rewardRules.some(r => r.category.toLowerCase() === newRuleCategory.toLowerCase())) {
-      if (showToast) showToast("Rule for this category already exists.", "info");
+  // Rule additions helpers
+  const handleAddCatRule = () => {
+    if (categoryRules.some(r => r.category.toLowerCase() === newCatName.toLowerCase())) {
+      if (showToast) showToast("Multiplier for category already configured.", "info");
       return;
     }
-    setRewardRules(prev => [...prev, { category: newRuleCategory, ratePct: Number(newRuleRate) }]);
-    setNewRuleCategory('General');
-    setNewRuleRate(1);
+    setCategoryRules(prev => [...prev, {
+      category: newCatName,
+      multiplier: Number(newCatMultiplier),
+      isExcluded: newCatExcluded,
+      monthlyCapPoints: newCatCap ? Number(newCatCap) : undefined
+    }]);
+    setNewCatCap('');
   };
 
-  const handleRemoveRule = (catToRemove: string) => {
-    if (catToRemove === 'General') {
-      if (showToast) showToast("Cannot remove General reward rate.", "info");
-      return;
-    }
-    setRewardRules(prev => prev.filter(r => r.category !== catToRemove));
+  const handleAddMilestoneRule = () => {
+    setMilestoneRules(prev => [...prev, {
+      spendThreshold: Number(newMilestoneSpend),
+      bonusPointsRate: Number(newMilestoneRate),
+      pointsPerSpend: Number(newMilestoneSpendBlock)
+    }]);
   };
 
-  // Offers management helpers
-  const handleAddOffer = () => {
-    if (!newOfferMerchant || !newOfferDesc) return;
-    const newOffer = {
-      id: Math.random().toString(36).substring(2, 7),
-      merchant: newOfferMerchant,
-      desc: newOfferDesc,
-      expiry: newOfferExpiry || 'N/A'
-    };
-    setOffersList(prev => [...prev, newOffer]);
-    setNewOfferMerchant('');
-    setNewOfferDesc('');
-    setNewOfferExpiry('');
+  const handleAddPartnerRule = () => {
+    if (!newPartnerName) return;
+    setRedemptionPartners(prev => [...prev, {
+      partnerName: newPartnerName,
+      transferRatio: Number(newPartnerRatio)
+    }]);
+    setNewPartnerName('');
+    setNewPartnerRatio(1.0);
   };
 
-  const handleRemoveOffer = (offerId: string) => {
-    setOffersList(prev => prev.filter(o => o.id !== offerId));
-  };
-
-  // Metrics
+  // Summary Metrics calculations
   const metrics = useMemo(() => {
     let totalLimit = 0;
     let totalOutstanding = 0;
@@ -267,13 +398,13 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
     creditCards.forEach((c: any) => {
       totalOutstanding += c.outstanding || 0;
       const meta = c.metadata_json ? (typeof c.metadata_json === 'string' ? JSON.parse(c.metadata_json) : c.metadata_json) : {};
-      totalLimit += Number(meta.credit_limit || c.credit_limit || 0);
+      totalLimit += Number(meta.credit_limit || 0);
       
-      const pts = Number(meta.reward_points || c.reward_points || 0);
-      const val = Number(meta.point_value || c.point_value || 0.25);
+      const pts = Number(meta.reward_points || 0);
+      const val = Number(meta.point_value || 0.25);
       totalRewardValue += pts * val;
       
-      totalFees += Number(meta.annual_fee || c.annual_fee || 0);
+      totalFees += Number(meta.annual_fee || 0);
     });
 
     return {
@@ -285,35 +416,117 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
     };
   }, [creditCards]);
 
-  // Merchant recommendation calculations
+  // --- MATHEMATICAL REWARD CALCULATOR SIMULATOR ENGINE ---
   const calculatorRecommendations = useMemo(() => {
     if (calcAmount <= 0) return [];
-    
+
     return creditCards.map((c: any) => {
       const meta = c.metadata_json ? (typeof c.metadata_json === 'string' ? JSON.parse(c.metadata_json) : c.metadata_json) : {};
-      const rules = meta.reward_rules || [];
+      
+      const basePts = Number(meta.base_points || 1);
+      const baseSpendAmt = Number(meta.base_spend || 100);
       const ptVal = Number(meta.point_value || 0.25);
       
-      // Resolve reward rate
-      let matchedRule = rules.find((r: any) => r.category.toLowerCase() === calcCategory.toLowerCase());
-      if (!matchedRule) {
-        matchedRule = rules.find((r: any) => r.category.toLowerCase() === 'general');
+      // Parse rules
+      let catRules: CategoryMultiplierRule[] = [];
+      try {
+        catRules = meta.category_rules_json ? JSON.parse(meta.category_rules_json) : [];
+      } catch { catRules = []; }
+
+      let msRules: MilestoneThresholdRule[] = [];
+      try {
+        msRules = meta.milestone_rules_json ? JSON.parse(meta.milestone_rules_json) : [];
+      } catch { msRules = []; }
+
+      let partnerRatios: RedemptionPartnerRatio[] = [];
+      try {
+        partnerRatios = meta.redemption_partners_json ? JSON.parse(meta.redemption_partners_json) : [];
+      } catch { partnerRatios = []; }
+
+      // 1. Check for Category Exclusions
+      const matchingCatRule = catRules.find(r => r.category.toLowerCase() === calcCategory.toLowerCase());
+      if (matchingCatRule && matchingCatRule.isExcluded) {
+        return {
+          cardId: c.id,
+          cardName: c.name,
+          pointsEarned: 0,
+          rewardValueInr: 0,
+          effectiveRate: 0,
+          details: 'Excluded category (no points earned).',
+          network: meta.network || 'Visa'
+        };
       }
-      
-      const rate = matchedRule ? Number(matchedRule.ratePct) : 1.0;
-      // If rules represent rate percentage (e.g. 3.3% on Infinia)
-      const cashBackVal = (calcAmount * rate) / 100;
-      
+
+      // 2. Resolve Multiplier Rate vs Base Rate
+      let multiplier = 1.0;
+      if (matchingCatRule) {
+        multiplier = Number(matchingCatRule.multiplier);
+      }
+
+      // 3. Check for Step-up Threshold Milestone Multipliers
+      // Uses Statement Spend + simulated spend to see if milestone rate triggers
+      const currentStmtSpend = Number(meta.current_statement_spend || 0);
+      const projectedSpendTotal = currentStmtSpend + calcAmount;
+
+      let resolvedPointsRate = basePts;
+      let resolvedSpendBlock = baseSpendAmt;
+      let isMilestoneTriggered = false;
+
+      // Find highest triggered milestone threshold
+      const triggeredMs = msRules
+        .filter(rule => projectedSpendTotal >= rule.spendThreshold)
+        .sort((a, b) => b.spendThreshold - a.spendThreshold)[0];
+
+      if (triggeredMs) {
+        resolvedPointsRate = triggeredMs.bonusPointsRate;
+        resolvedSpendBlock = triggeredMs.pointsPerSpend;
+        isMilestoneTriggered = true;
+      }
+
+      // 4. Calculate Raw Reward Points
+      // points = (Amount / SpendBlock) * Rate * Multiplier
+      let rawPoints = (calcAmount / resolvedSpendBlock) * resolvedPointsRate * multiplier;
+
+      // 5. Apply category monthly caps if configured
+      let isCapped = false;
+      if (matchingCatRule && matchingCatRule.monthlyCapPoints !== undefined) {
+        const cap = Number(matchingCatRule.monthlyCapPoints);
+        if (rawPoints > cap) {
+          rawPoints = cap;
+          isCapped = true;
+        }
+      }
+
+      rawPoints = Math.round(rawPoints);
+
+      // 6. Calculate True Yield in INR based on Redemption Strategy
+      let resolvedValue = rawPoints * ptVal;
+      let yieldDetails = `Redeemed at base value of ₹${ptVal} per point.`;
+
+      if (redemptionStrategy === 'miles' && partnerRatios.length > 0) {
+        // Find partner with best ratio
+        const bestPartner = [...partnerRatios].sort((a, b) => b.transferRatio - a.transferRatio)[0];
+        // Standard assumption: 1 Mile = ₹1.0 value
+        const effectiveMileValue = 1.0;
+        resolvedValue = rawPoints * bestPartner.transferRatio * effectiveMileValue;
+        yieldDetails = `Transferred to ${bestPartner.partnerName} at ratio ${bestPartner.transferRatio}x (estimated value of ₹1/mile).`;
+      } else if (redemptionStrategy === 'miles') {
+        yieldDetails = `No mileage partners configured. Defaulted to statement cash value.`;
+      }
+
+      const effectiveRate = calcAmount > 0 ? (resolvedValue / calcAmount) * 100 : 0;
+
       return {
         cardId: c.id,
         cardName: c.name,
-        rewardRate: rate,
-        estimatedPoints: Math.round(cashBackVal / ptVal),
-        estimatedCash: cashBackVal,
+        pointsEarned: rawPoints,
+        rewardValueInr: resolvedValue,
+        effectiveRate: Number(effectiveRate.toFixed(2)),
+        details: `${isMilestoneTriggered ? 'Milestone Step-up Active! ' : ''}${isCapped ? 'Category points capped. ' : ''}${yieldDetails}`,
         network: meta.network || 'Visa'
       };
-    }).sort((a, b) => b.estimatedCash - a.estimatedCash);
-  }, [creditCards, calcCategory, calcAmount]);
+    }).sort((a, b) => b.rewardValueInr - a.rewardValueInr);
+  }, [creditCards, calcCategory, calcAmount, redemptionStrategy]);
 
   const getInstitutionName = (id: number) => {
     const inst = institutions.find(i => i.id === id);
@@ -328,33 +541,22 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
     }).format(val);
   };
 
-  // Card theme helper
   const getCardTheme = (networkStr: string, index: number) => {
     const themes = [
-      { bg: 'linear-gradient(135deg, #1e1b4b 0%, #311042 50%, #090514 100%)', border: 'rgba(168, 85, 247, 0.4)', glow: 'rgba(168, 85, 247, 0.15)' }, // Purple glow
-      { bg: 'linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #020617 100%)', border: 'rgba(148, 163, 184, 0.3)', glow: 'rgba(255, 255, 255, 0.05)' }, // Slate
-      { bg: 'linear-gradient(135deg, #1e293b 0%, #1c1917 60%, #0c0a09 100%)', border: 'rgba(217, 119, 6 0.3)', glow: 'rgba(217, 119, 6, 0.1)' },    // Gold/Amber border
-      { bg: 'linear-gradient(135deg, #064e3b 0%, #022c22 70%, #020617 100%)', border: 'rgba(52, 211, 153, 0.3)', glow: 'rgba(52, 211, 153, 0.1)' }   // Emerald
+      { bg: 'linear-gradient(135deg, #1e1b4b 0%, #311042 50%, #090514 100%)', border: 'rgba(168, 85, 247, 0.45)', glow: 'rgba(168, 85, 247, 0.2)' },
+      { bg: 'linear-gradient(135deg, #090d16 0%, #152238 60%, #020509 100%)', border: 'rgba(56, 189, 248, 0.4)', glow: 'rgba(56, 189, 248, 0.15)' },
+      { bg: 'linear-gradient(135deg, #1c1917 0%, #2e2a24 60%, #0c0a09 100%)', border: 'rgba(251, 191, 36, 0.45)', glow: 'rgba(251, 191, 36, 0.15)' },
+      { bg: 'linear-gradient(135deg, #022c22 0%, #064e3b 60%, #020617 100%)', border: 'rgba(16, 185, 129, 0.4)', glow: 'rgba(16, 185, 129, 0.15)' }
     ];
 
     if (networkStr.toLowerCase() === 'amex') {
-      return { bg: 'linear-gradient(135deg, #134e5e 0%, #0f3747 60%, #05161e 100%)', border: 'rgba(34, 211, 238, 0.4)', glow: 'rgba(34, 211, 238, 0.15)' };
+      return { bg: 'linear-gradient(135deg, #113c4c 0%, #1c5e73 60%, #041217 100%)', border: 'rgba(34, 211, 238, 0.45)', glow: 'rgba(34, 211, 238, 0.2)' };
     }
     if (networkStr.toLowerCase() === 'diners') {
-      return { bg: 'linear-gradient(135deg, #3b0764 0%, #1e1b4b 70%, #03001e 100%)', border: 'rgba(236, 72, 153, 0.4)', glow: 'rgba(236, 72, 153, 0.15)' };
+      return { bg: 'linear-gradient(135deg, #2e0854 0%, #171544 70%, #03001e 100%)', border: 'rgba(236, 72, 153, 0.45)', glow: 'rgba(236, 72, 153, 0.2)' };
     }
 
     return themes[index % themes.length];
-  };
-
-  const getNetworkIconText = (networkStr: string) => {
-    const net = networkStr.toLowerCase();
-    if (net.includes('visa')) return 'VISA';
-    if (net.includes('master') || net.includes('mc')) return 'mastercard';
-    if (net.includes('rupay')) return 'RuPay';
-    if (net.includes('amex') || net.includes('american')) return 'AMEX';
-    if (net.includes('diner')) return 'Diners Club';
-    return networkStr;
   };
 
   return (
@@ -362,8 +564,8 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
       {/* Page Header */}
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <h1 className="page-title">Credit Card Workspace</h1>
-          <p className="page-subtitle">Track credit inventory, analyze reward yields, monitor spend milestones, and optimize transactions.</p>
+          <h1 className="page-title">Credit Card Earning &amp; Optimization Engine</h1>
+          <p className="page-subtitle">Simulate incremental spending, evaluate step-up milestone thresholds, and optimize reward yield rates.</p>
         </div>
         <button 
           className="btn btn-primary" 
@@ -371,14 +573,14 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
           onClick={handleOpenAdd}
         >
           <Plus size={16} />
-          Add Credit Card
+          Register Credit Card
         </button>
       </div>
 
-      {/* Top Metrics Cards Grid */}
+      {/* Top Indicators Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px', marginBottom: '24px' }}>
         <div className="glass-card" style={{ padding: '16px 20px' }}>
-          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Total Credit Limit</span>
+          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Combined Credit Limit</span>
           <h3 style={{ fontSize: '22px', fontWeight: 700, margin: '6px 0 2px 0', color: 'var(--text-primary)' }}>
             {formatCurrency(metrics.totalLimit)}
           </h3>
@@ -391,83 +593,76 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
             {formatCurrency(metrics.totalOutstanding)}
           </h3>
           <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-            Utilization: <strong style={{ color: metrics.utilizationRate > 30 ? 'var(--warning-light)' : 'var(--success-light)' }}>{metrics.utilizationRate.toFixed(1)}%</strong>
+            Combined Utilization: <strong style={{ color: metrics.utilizationRate > 30 ? 'var(--warning-light)' : 'var(--success-light)' }}>{metrics.utilizationRate.toFixed(1)}%</strong>
           </span>
         </div>
 
         <div className="glass-card" style={{ padding: '16px 20px' }}>
-          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Total Points Cash Value</span>
+          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Points Cash Value (INR)</span>
           <h3 style={{ fontSize: '22px', fontWeight: 700, margin: '6px 0 2px 0', color: 'var(--success-light)' }}>
             {formatCurrency(metrics.totalRewardValue)}
           </h3>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Unredeemed rewards inventory</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Total unredeemed rewards value</span>
         </div>
 
         <div className="glass-card" style={{ padding: '16px 20px' }}>
-          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Annual Card Fees Cost</span>
+          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Total Annual Fees</span>
           <h3 style={{ fontSize: '22px', fontWeight: 700, margin: '6px 0 2px 0', color: 'var(--warning-light)' }}>
             {formatCurrency(metrics.totalFees)}
           </h3>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Recurring yearly maintenance</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Yearly card maintenance cost</span>
         </div>
       </div>
 
-      {/* Tabs Switcher Navigation */}
+      {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border-glass)', marginBottom: '24px', gap: '8px' }}>
         <button 
           className={`tab-btn ${activeSubTab === 'inventory' ? 'active' : ''}`}
           onClick={() => setActiveSubTab('inventory')}
           style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === 'inventory' ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === 'inventory' ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
         >
-          Cards Inventory
+          Card Inventory
         </button>
         <button 
           className={`tab-btn ${activeSubTab === 'milestones' ? 'active' : ''}`}
           onClick={() => setActiveSubTab('milestones')}
           style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === 'milestones' ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === 'milestones' ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
         >
-          Waives &amp; Spend Milestones
+          Waivers &amp; Milestones
         </button>
         <button 
           className={`tab-btn ${activeSubTab === 'calculator' ? 'active' : ''}`}
           onClick={() => setActiveSubTab('calculator')}
           style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === 'calculator' ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === 'calculator' ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
         >
-          Merchant Rewards Calculator
-        </button>
-        <button 
-          className={`tab-btn ${activeSubTab === 'lounges' ? 'active' : ''}`}
-          onClick={() => setActiveSubTab('lounges')}
-          style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === 'lounges' ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === 'lounges' ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
-        >
-          Lounge Access Tracker
+          Smart Rewards Simulator
         </button>
       </div>
 
-      {/* --- SUB TAB 1: CARDS INVENTORY --- */}
+      {/* --- INVENTORY --- */}
       {activeSubTab === 'inventory' && (
         <div>
           {creditCards.length === 0 ? (
             <div style={{ padding: '48px', textAlign: 'center', background: 'rgba(255,255,255,0.01)', border: '1px dashed var(--border-glass)', borderRadius: '12px', color: 'var(--text-muted)' }}>
-              <CreditCard size={36} style={{ marginBottom: '12px', opacity: 0.5 }} />
+              <CardIcon size={36} style={{ marginBottom: '12px', opacity: 0.5 }} />
               <h4>No Credit Cards Registered</h4>
-              <p style={{ fontSize: '13px', margin: '4px 0 16px 0' }}>Register your active cards to monitor statement due cycles and compute reward multipliers.</p>
-              <button className="btn btn-primary" onClick={handleOpenAdd}>Add Card Now</button>
+              <p style={{ fontSize: '13px', margin: '4px 0 16px 0' }}>Configure card reward rates and step-ups to simulate incremental spending optimizations.</p>
+              <button className="btn btn-primary" onClick={handleOpenAdd}>Add Credit Card</button>
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '24px' }}>
               {creditCards.map((card: any, idx) => {
                 const meta = card.metadata_json ? (typeof card.metadata_json === 'string' ? JSON.parse(card.metadata_json) : card.metadata_json) : {};
-                const limit = Number(meta.credit_limit || card.credit_limit || 0);
-                const fee = Number(meta.annual_fee || card.annual_fee || 0);
-                const pts = Number(meta.reward_points || card.reward_points || 0);
-                const ptVal = Number(meta.point_value || card.point_value || 0.25);
+                const limit = Number(meta.credit_limit || 0);
+                const fee = Number(meta.annual_fee || 0);
+                const pts = Number(meta.reward_points || 0);
+                const ptVal = Number(meta.point_value || 0.25);
                 const theme = getCardTheme(meta.network || 'Visa', idx);
+                
+                const rewardVal = pts * ptVal;
+                const netYield = fee > 0 ? rewardVal - fee : rewardVal;
+                const isLowYield = fee > 0 && rewardVal < fee;
                 const isDeleting = deletingCardId === card.id;
-
-                const rewardMonetaryVal = pts * ptVal;
-                const netYield = fee > 0 ? rewardMonetaryVal - fee : rewardMonetaryVal;
-                const isLowYield = fee > 0 && rewardMonetaryVal < fee;
 
                 return (
                   <div 
@@ -480,119 +675,78 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                       gap: '16px',
                       background: theme.bg,
                       border: `1px solid ${theme.border}`,
-                      boxShadow: `0 15px 30px -10px ${theme.glow}`,
+                      boxShadow: `0 15px 35px -10px ${theme.glow}`,
                       position: 'relative',
                       overflow: 'hidden'
                     }}
                   >
-                    {/* Simulated Card Content Face */}
+                    {/* Header */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div>
-                        <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', color: 'rgba(255,255,255,0.6)' }}>
+                        <span style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', color: 'rgba(255,255,255,0.6)' }}>
                           {getInstitutionName(card.lender_institution_id)}
                         </span>
                         <h4 style={{ fontSize: '16px', fontWeight: 700, margin: '2px 0 0 0', color: '#fff' }}>{card.name}</h4>
                       </div>
-                      <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: '14px', fontWeight: 800, fontStyle: 'italic', fontFamily: 'monospace' }}>
-                        {getNetworkIconText(meta.network || 'Visa')}
-                      </div>
+                      <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: '13px', fontWeight: 800, fontStyle: 'italic', fontFamily: 'monospace' }}>
+                        {meta.network || 'Visa'}
+                      </span>
                     </div>
 
                     {/* Chip representation */}
-                    <div style={{ width: '38px', height: '28px', background: 'linear-gradient(135deg, #d4af37 0%, #f9e8a2 100%)', borderRadius: '6px', border: '1px solid rgba(0,0,0,0.2)' }}></div>
+                    <div style={{ width: '38px', height: '28px', background: 'linear-gradient(135deg, #d4af37 0%, #fde047 100%)', borderRadius: '6px', border: '1px solid rgba(0,0,0,0.15)' }}></div>
 
-                    {/* Limits and Balances */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', margin: '4px 0' }}>
+                    {/* Balances */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                       <div>
-                        <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase' }}>Outstanding Balance</span>
-                        <div style={{ fontSize: '18px', fontWeight: 700, color: card.outstanding > 0 ? '#f87171' : '#cbd5e1' }}>
+                        <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase' }}>Outstanding Balance</span>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: card.outstanding > 0 ? '#f87171' : '#e2e8f0' }}>
                           {formatCurrency(card.outstanding)}
                         </div>
                       </div>
                       <div>
-                        <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase' }}>Available Limit</span>
-                        <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--success-light)' }}>
-                          {formatCurrency(Math.max(limit - card.outstanding, 0))}
+                        <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase' }}>Statement Spend</span>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#60a5fa' }}>
+                          {formatCurrency(meta.current_statement_spend || 0)}
                         </div>
                       </div>
                     </div>
 
-                    {/* Limit Progress Bar */}
+                    {/* Limit Progress */}
                     <div>
                       <div style={{ height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
-                        <div style={{ height: '100%', width: `${Math.min((card.outstanding / (limit || 1)) * 100, 100)}%`, background: card.outstanding / limit > 0.4 ? '#f87171' : '#60a5fa' }}></div>
+                        <div style={{ height: '100%', width: `${Math.min((card.outstanding / (limit || 1)) * 100, 100)}%`, background: card.outstanding / limit > 0.4 ? '#ef4444' : '#10b981' }}></div>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: 'rgba(255,255,255,0.4)', marginTop: '4px' }}>
                         <span>Limit: {formatCurrency(limit)}</span>
-                        <span>Bill Cycle: {meta.statement_date || 15}th</span>
+                        <span>Statement Date: {meta.statement_date || 15}th</span>
                       </div>
                     </div>
 
-                    {/* Card Actions / Details Footer */}
-                    <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '12px', marginTop: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)' }}>Rewards Value (Net Yield)</span>
-                        <span style={{ fontSize: '11px', fontWeight: 600, color: '#fcd34d' }}>
-                          {pts.toLocaleString()} pts ({formatCurrency(rewardMonetaryVal)}) / Net: <strong style={{ color: netYield >= 0 ? 'var(--success-light)' : '#f87171' }}>{formatCurrency(netYield)}</strong>
+                    {/* Actions and Yields */}
+                    <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', display: 'block' }}>Reward Yield (Net)</span>
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: '#fcd34d' }}>
+                          {pts.toLocaleString()} pts ({formatCurrency(rewardVal)}) / Net: <strong style={{ color: netYield >= 0 ? '#34d399' : '#f87171' }}>{formatCurrency(netYield)}</strong>
                         </span>
                       </div>
 
                       {isDeleting ? (
-                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                          <span style={{ color: 'var(--danger-light)', fontSize: '11px', fontWeight: 500 }}>Delete?</span>
-                          <button 
-                            type="button" 
-                            className="btn btn-secondary" 
-                            style={{ padding: '2px 8px', fontSize: '10px', minWidth: 'auto', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444' }}
-                            onClick={() => handleDeleteCard(card.id)}
-                          >
-                            Confirm
-                          </button>
-                          <button 
-                            type="button" 
-                            className="btn btn-secondary" 
-                            style={{ padding: '2px 8px', fontSize: '10px', minWidth: 'auto' }}
-                            onClick={() => setDeletingCardId(null)}
-                          >
-                            Cancel
-                          </button>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '10px', background: 'rgba(239,68,68,0.2)', color: '#ef4444' }} onClick={() => handleDeleteCard(card.id)}>Confirm</button>
+                          <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '10px' }} onClick={() => setDeletingCardId(null)}>Cancel</button>
                         </div>
                       ) : (
                         <div style={{ display: 'flex', gap: '6px' }}>
-                          <button 
-                            className="btn btn-secondary" 
-                            style={{ padding: '5px 8px', fontSize: '11px', background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
-                            onClick={() => handleOpenEdit(card)}
-                          >
-                            <Edit2 size={11} />
-                          </button>
-                          <button 
-                            className="btn btn-secondary" 
-                            style={{ padding: '5px 8px', fontSize: '11px', background: 'rgba(255,255,255,0.05)', color: 'var(--danger-light)', border: '1px solid rgba(255,255,255,0.1)' }}
-                            onClick={() => setDeletingCardId(card.id)}
-                          >
-                            <Trash2 size={11} />
-                          </button>
+                          <button className="btn btn-secondary" style={{ padding: '5px 8px', background: 'rgba(255,255,255,0.05)', color: '#fff' }} onClick={() => handleOpenEdit(card)}><Edit2 size={11} /></button>
+                          <button className="btn btn-secondary" style={{ padding: '5px 8px', background: 'rgba(255,255,255,0.05)', color: 'var(--danger-light)' }} onClick={() => setDeletingCardId(card.id)}><Trash2 size={11} /></button>
                         </div>
                       )}
                     </div>
 
-                    {/* Offers sub-section in card face */}
-                    {meta.offers && meta.offers.length > 0 && (
-                      <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Active Targeted Offers</span>
-                        {meta.offers.map((o: any) => (
-                          <div key={o.id} style={{ fontSize: '10px', color: '#67e8f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span>• {o.merchant}: {o.desc}</span>
-                            <span style={{ opacity: 0.6, fontSize: '9px' }}>Exp: {o.expiry}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Low Yield warning badge */}
                     {isLowYield && (
-                      <div style={{ position: 'absolute', top: '10px', right: '10px', background: 'rgba(239, 68, 68, 0.8)', padding: '2px 8px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '9px', color: '#fff', fontWeight: 600 }}>
+                      <div style={{ position: 'absolute', top: '12px', right: '12px', background: 'rgba(239,68,68,0.85)', padding: '2px 8px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '9px', color: '#fff', fontWeight: 600 }}>
                         <ShieldAlert size={10} />
                         Low Yield Card
                       </div>
@@ -605,101 +759,126 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
         </div>
       )}
 
-      {/* --- SUB TAB 2: MILESTONES & WAIVES --- */}
+      {/* --- MILESTONES --- */}
       {activeSubTab === 'milestones' && (
-        <div className="glass-panel" style={{ padding: '20px' }}>
-          <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text-primary)' }}>Spend Milestones and Fee Waivers</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {creditCards.map((card: any) => {
-              const meta = card.metadata_json ? (typeof card.metadata_json === 'string' ? JSON.parse(card.metadata_json) : card.metadata_json) : {};
-              const target = Number(meta.milestone_spend_target || 0);
-              const current = Number(meta.milestone_spend_current || 0);
-              const renewalStr = meta.renewal_date || '';
-              
-              if (target <= 0) return null;
+        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '24px' }}>
+          {/* Spend Milestones list */}
+          <div className="glass-panel" style={{ padding: '20px' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text-primary)' }}>Fee Waivers &amp; Milestones</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {creditCards.map((card: any) => {
+                const meta = card.metadata_json ? (typeof card.metadata_json === 'string' ? JSON.parse(card.metadata_json) : card.metadata_json) : {};
+                const target = Number(meta.milestone_spend_target || 0);
+                const current = Number(meta.milestone_spend_current || 0);
+                const renewalStr = meta.renewal_date || '';
 
-              const percent = Math.min((current / target) * 100, 100);
-              const remaining = Math.max(target - current, 0);
-              
-              // Calculate daily run rate required
-              let dailyRateMsg = 'Milestone reached!';
-              let isOverdue = false;
-              if (remaining > 0) {
-                if (renewalStr) {
-                  const today = new Date();
-                  const renewal = new Date(renewalStr);
-                  const diffTime = renewal.getTime() - today.getTime();
-                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                  if (diffDays > 0) {
-                    const daily = remaining / diffDays;
-                    dailyRateMsg = `${formatCurrency(daily)}/day for the next ${diffDays} days`;
+                if (target <= 0) return null;
+
+                const percent = Math.min((current / target) * 100, 100);
+                const remaining = Math.max(target - current, 0);
+
+                let dailyRateMsg = 'Milestone reached!';
+                let isOverdue = false;
+                if (remaining > 0) {
+                  if (renewalStr) {
+                    const today = new Date();
+                    const renewal = new Date(renewalStr);
+                    const diffDays = Math.ceil((renewal.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                    if (diffDays > 0) {
+                      dailyRateMsg = `${formatCurrency(remaining / diffDays)}/day for the next ${diffDays} days`;
+                    } else {
+                      isOverdue = true;
+                      dailyRateMsg = 'Renewal date has passed.';
+                    }
                   } else {
-                    isOverdue = true;
-                    dailyRateMsg = 'Card renewal date has passed.';
+                    dailyRateMsg = 'Renewal date not set.';
                   }
-                } else {
-                  dailyRateMsg = 'Renewal date not configured.';
                 }
-              }
 
-              return (
-                <div key={card.id} style={{ padding: '16px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: '10px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <div>
-                      <strong style={{ fontSize: '13px', color: '#fff' }}>{card.name}</strong>
-                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '12px' }}>
-                        Renewal: {renewalStr || 'N/A'}
+                return (
+                  <div key={card.id} style={{ padding: '16px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <div>
+                        <strong style={{ fontSize: '13px', color: '#fff' }}>{card.name}</strong>
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '8px' }}>Renewal: {renewalStr || 'N/A'}</span>
+                      </div>
+                      <span style={{ fontSize: '12px', fontWeight: 600 }}>{formatCurrency(current)} / {formatCurrency(target)}</span>
+                    </div>
+
+                    <div style={{ height: '8px', background: 'rgba(255,255,255,0.04)', borderRadius: '4px', overflow: 'hidden', marginBottom: '10px' }}>
+                      <div style={{ height: '100%', width: `${percent}%`, background: percent >= 100 ? 'var(--success)' : 'var(--accent)' }}></div>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>
+                        {remaining > 0 ? <>Remaining: <strong style={{ color: '#fff' }}>{formatCurrency(remaining)}</strong></> : <strong style={{ color: 'var(--success-light)' }}>Waiver Target Cleared!</strong>}
                       </span>
+                      <span style={{ color: isOverdue ? 'var(--danger-light)' : 'var(--text-secondary)' }}>{remaining > 0 && `Required Rate: ${dailyRateMsg}`}</span>
                     </div>
-                    <span style={{ fontSize: '12px', fontWeight: 600, color: percent >= 100 ? 'var(--success-light)' : 'var(--text-muted)' }}>
-                      {formatCurrency(current)} / {formatCurrency(target)} ({percent.toFixed(0)}%)
-                    </span>
                   </div>
+                );
+              })}
+            </div>
+          </div>
 
-                  <div style={{ height: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', overflow: 'hidden', marginBottom: '10px' }}>
-                    <div style={{ height: '100%', width: `${percent}%`, background: percent >= 100 ? 'var(--success)' : 'var(--accent)' }}></div>
-                  </div>
+          {/* Lounge quota tracker */}
+          <div className="glass-panel" style={{ padding: '20px' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text-primary)' }}>Lounge Access Trackers</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {creditCards.map((card: any) => {
+                const meta = card.metadata_json ? (typeof card.metadata_json === 'string' ? JSON.parse(card.metadata_json) : card.metadata_json) : {};
+                const domLimit = Number(meta.lounge_visits_limit || 0);
+                const domUsed = Number(meta.lounge_visits_used || 0);
+                const intLimit = Number(meta.lounge_int_limit || 0);
+                const intUsed = Number(meta.lounge_int_used || 0);
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>
-                      {remaining > 0 ? (
-                        <>Remaining: <strong style={{ color: '#fff' }}>{formatCurrency(remaining)}</strong></>
-                      ) : (
-                        <span style={{ color: 'var(--success-light)', fontWeight: 600 }}>Target waiver met!</span>
+                if (domLimit <= 0 && intLimit <= 0) return null;
+
+                return (
+                  <div key={card.id} style={{ padding: '14px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: '10px' }}>
+                    <strong style={{ fontSize: '13px', color: '#fff', display: 'block', marginBottom: '10px' }}>{card.name}</strong>
+                    
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {domLimit > 0 && (
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                            <span>Domestic lounge visits</span>
+                            <span>{Math.max(domLimit - domUsed, 0)} Left of {domLimit}</span>
+                          </div>
+                          <div style={{ height: '6px', background: 'rgba(255,255,255,0.04)', borderRadius: '3px', overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: `${(domUsed / domLimit) * 100}%`, background: 'var(--accent)' }}></div>
+                          </div>
+                        </div>
                       )}
-                    </span>
-                    <span style={{ color: isOverdue ? 'var(--danger-light)' : 'var(--text-secondary)' }}>
-                      {remaining > 0 && `Required Rate: ${dailyRateMsg}`}
-                    </span>
-                  </div>
 
-                  {meta.milestone_reward_desc && (
-                    <div style={{ marginTop: '10px', display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(252,211,77,0.05)', border: '1px solid rgba(252,211,77,0.1)', padding: '4px 8px', borderRadius: '4px', fontSize: '10px', color: '#fcd34d' }}>
-                      <Award size={12} />
-                      <span>Reward: {meta.milestone_reward_desc}</span>
+                      {intLimit > 0 && (
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                            <span>International lounge visits</span>
+                            <span>{Math.max(intLimit - intUsed, 0)} Left of {intLimit}</span>
+                          </div>
+                          <div style={{ height: '6px', background: 'rgba(255,255,255,0.04)', borderRadius: '3px', overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: `${(intUsed / intLimit) * 100}%`, background: 'var(--success)' }}></div>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              );
-            })}
-            {creditCards.every((c: any) => {
-              const meta = c.metadata_json ? (typeof c.metadata_json === 'string' ? JSON.parse(c.metadata_json) : c.metadata_json) : {};
-              return !meta.milestone_spend_target;
-            }) && (
-              <span style={{ color: 'var(--text-muted)', fontSize: '12px', padding: '12px 0' }}>Configure milestone targets inside card settings to monitor waiver run rates.</span>
-            )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
 
-      {/* --- SUB TAB 3: MERCHANT CALCULATOR --- */}
+      {/* --- SMART REWARDS SIMULATOR --- */}
       {activeSubTab === 'calculator' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '24px' }}>
-          {/* Input Panel */}
+          {/* Simulator Panel Inputs */}
           <div className="glass-panel" style={{ padding: '20px', height: 'fit-content' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text-primary)' }}>Simulate Transaction</h3>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text-primary)' }}>Spend Calculator</h3>
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
                 <label className="form-label">Merchant Category</label>
                 <select 
@@ -707,13 +886,14 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                   value={calcCategory}
                   onChange={e => setCalcCategory(e.target.value)}
                 >
-                  <option value="General">General Retail</option>
+                  <option value="General">General / Retail</option>
                   <option value="Dining">Dining &amp; Food Delivery</option>
-                  <option value="Travel">Flights &amp; Hotels</option>
-                  <option value="Grocery">Supermarkets &amp; Groceries</option>
+                  <option value="Travel">Flights, Hotels &amp; Travel</option>
+                  <option value="Grocery">Grocery &amp; Supermarkets</option>
                   <option value="Utility">Electricity &amp; Utilities</option>
                   <option value="Fuel">Fuel Station</option>
-                  <option value="Online Shopping">Flipkart, Amazon, etc.</option>
+                  <option value="Rent">Rent Payment</option>
+                  <option value="Online Shopping">Online Shopping (Amazon/Flipkart)</option>
                 </select>
               </div>
 
@@ -727,58 +907,72 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                 />
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(139, 92, 246, 0.05)', border: '1px solid rgba(139, 92, 246, 0.1)', padding: '12px', borderRadius: '8px', marginTop: '8px' }}>
-                <Calculator size={16} style={{ color: 'var(--accent-light)', flexShrink: 0 }} />
-                <span style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
-                  The calculator evaluates card-specific rules to identify the card that maximizes cash-back or reward value.
-                </span>
+              <div>
+                <label className="form-label">Redemption Yield Strategy</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button 
+                    className={`btn ${redemptionStrategy === 'cash' ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ flex: 1, padding: '8px', fontSize: '12px' }}
+                    onClick={() => setRedemptionStrategy('cash')}
+                  >
+                    Cash / Statement Credit
+                  </button>
+                  <button 
+                    className={`btn ${redemptionStrategy === 'miles' ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ flex: 1, padding: '8px', fontSize: '12px' }}
+                    onClick={() => setRedemptionStrategy('miles')}
+                  >
+                    Air Miles / Hotels (Best Partner)
+                  </button>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Recommendations Panel */}
+          {/* Rank Results */}
           <div className="glass-panel" style={{ padding: '20px' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text-primary)' }}>Best Cards for this Transaction</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text-primary)' }}>Ranked Best Card Recommendations</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               {calculatorRecommendations.length === 0 ? (
-                <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>No active credit cards available for evaluation.</span>
+                <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Configure credit cards to simulate rewards yield optimizations.</span>
               ) : (
                 calculatorRecommendations.map((rec, index) => (
                   <div 
-                    key={rec.cardId} 
+                    key={rec.cardId}
                     style={{ 
-                      display: 'flex', 
-                      justifyContent: 'space-between', 
-                      alignItems: 'center', 
-                      padding: '12px 16px', 
-                      background: index === 0 ? 'rgba(139,92,246,0.06)' : 'rgba(255,255,255,0.01)', 
-                      border: index === 0 ? '1px solid rgba(139,92,246,0.2)' : '1px solid var(--border-glass)', 
-                      borderRadius: '10px'
+                      padding: '14px 18px', 
+                      background: index === 0 ? 'rgba(16,185,129,0.06)' : 'rgba(255,255,255,0.01)', 
+                      border: index === 0 ? '1px solid rgba(16,185,129,0.25)' : '1px solid var(--border-glass)', 
+                      borderRadius: '10px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center'
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <div style={{ 
-                        fontSize: '18px', 
-                        fontWeight: 700, 
-                        color: index === 0 ? 'var(--accent-light)' : 'var(--text-muted)',
-                        width: '24px'
-                      }}>
+                      <div style={{ fontSize: '18px', fontWeight: 800, color: index === 0 ? '#34d399' : 'var(--text-muted)' }}>
                         #{index + 1}
                       </div>
                       <div>
-                        <strong style={{ fontSize: '13px', color: '#fff' }}>{rec.cardName}</strong>
-                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                          Reward Rate: {rec.rewardRate}% ({getNetworkIconText(rec.network)})
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <strong style={{ fontSize: '13px', color: '#fff' }}>{rec.cardName}</strong>
+                          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>({rec.network})</span>
                         </div>
+                        <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '4px 0 0 0', maxWidth: '340px', lineHeight: '1.4' }}>
+                          {rec.details}
+                        </p>
                       </div>
                     </div>
 
                     <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '14px', fontWeight: 700, color: index === 0 ? 'var(--success-light)' : '#e2e8f0' }}>
-                        + {formatCurrency(rec.estimatedCash)}
+                      <div style={{ fontSize: '16px', fontWeight: 700, color: index === 0 ? '#34d399' : '#fff' }}>
+                        {formatCurrency(rec.rewardValueInr)}
                       </div>
-                      <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                        Est. Points: {rec.estimatedPoints}
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 500 }}>
+                        Rate: {rec.effectiveRate}% Yield
+                      </div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                        +{rec.pointsEarned} Points
                       </div>
                     </div>
                   </div>
@@ -789,69 +983,10 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
         </div>
       )}
 
-      {/* --- SUB TAB 4: LOUNGE ACCESS --- */}
-      {activeSubTab === 'lounges' && (
-        <div className="glass-panel" style={{ padding: '20px' }}>
-          <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text-primary)' }}>Lounge Access Trackers</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
-            {creditCards.map((card: any) => {
-              const meta = card.metadata_json ? (typeof card.metadata_json === 'string' ? JSON.parse(card.metadata_json) : card.metadata_json) : {};
-              const domLimit = Number(meta.lounge_visits_limit || 0);
-              const domUsed = Number(meta.lounge_visits_used || 0);
-              const intLimit = Number(meta.lounge_int_limit || 0);
-              const intUsed = Number(meta.lounge_int_used || 0);
-
-              if (domLimit <= 0 && intLimit <= 0) return null;
-
-              const domRemaining = Math.max(domLimit - domUsed, 0);
-              const intRemaining = Math.max(intLimit - intUsed, 0);
-
-              return (
-                <div key={card.id} style={{ padding: '16px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: '10px' }}>
-                  <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#fff', marginBottom: '12px' }}>{card.name}</h4>
-                  
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    {domLimit > 0 && (
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                          <span>Domestic Lounges</span>
-                          <span>{domRemaining} Left of {domLimit}</span>
-                        </div>
-                        <div style={{ height: '6px', background: 'rgba(255,255,255,0.04)', borderRadius: '3px', overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${((domLimit - domRemaining) / domLimit) * 100}%`, background: 'var(--accent)' }}></div>
-                        </div>
-                      </div>
-                    )}
-
-                    {intLimit > 0 && (
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                          <span>International Lounges</span>
-                          <span>{intRemaining} Left of {intLimit}</span>
-                        </div>
-                        <div style={{ height: '6px', background: 'rgba(255,255,255,0.04)', borderRadius: '3px', overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${((intLimit - intRemaining) / intLimit) * 100}%`, background: 'var(--success)' }}></div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-            {creditCards.every((c: any) => {
-              const meta = c.metadata_json ? (typeof c.metadata_json === 'string' ? JSON.parse(c.metadata_json) : c.metadata_json) : {};
-              return !meta.lounge_visits_limit && !meta.lounge_int_limit;
-            }) && (
-              <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Configure lounge visit limits to monitor remaining quotas.</span>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* --- ADD/EDIT CARD OVERLAY MODAL --- */}
+      {/* --- ADD/EDIT TABBED MODAL OVERLAY --- */}
       {modalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' }}>
-          <div className="glass-panel" style={{ width: '100%', maxWidth: '640px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', position: 'relative' }}>
+          <div className="glass-panel" style={{ width: '100%', maxWidth: '680px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', position: 'relative' }}>
             <button 
               style={{ position: 'absolute', top: '16px', right: '16px', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
               onClick={() => setModalOpen(false)}
@@ -860,391 +995,321 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
             </button>
 
             <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#fff', marginBottom: '18px' }}>
-              {editingCard ? `Edit Card: ${editingCard.name}` : 'Register New Credit Card'}
+              {editingCard ? `Configure Card: ${editingCard.name}` : 'Register Credit Card'}
             </h3>
 
+            {/* Presets Row (Only show when adding new card) */}
+            {!editingCard && (
+              <div style={{ background: 'rgba(139,92,246,0.04)', border: '1px solid rgba(139,92,246,0.12)', padding: '12px 16px', borderRadius: '10px', marginBottom: '20px' }}>
+                <span style={{ fontSize: '11px', color: '#a78bfa', fontWeight: 600, display: 'block', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Quick Fill Premium Presets
+                </span>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {PRESETS.map((p, pIdx) => (
+                    <button 
+                      key={pIdx}
+                      type="button" 
+                      className="btn btn-secondary" 
+                      style={{ padding: '6px 12px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-glass)' }}
+                      onClick={() => applyPreset(p)}
+                    >
+                      <Sparkles size={11} style={{ color: '#fcd34d' }} />
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Tabbed Navigation inside configurator modal */}
+            <div style={{ display: 'flex', borderBottom: '1px solid var(--border-glass)', marginBottom: '18px', gap: '6px' }}>
+              {['general', 'rates', 'categories', 'milestones', 'partners'].map((mTab) => (
+                <button
+                  key={mTab}
+                  type="button"
+                  onClick={() => setActiveModalTab(mTab as any)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: '8px 12px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    color: activeModalTab === mTab ? '#fff' : 'var(--text-muted)',
+                    borderBottom: activeModalTab === mTab ? '2px solid var(--accent)' : 'none'
+                  }}
+                >
+                  {mTab.toUpperCase()}
+                </button>
+              ))}
+            </div>
+
             <form onSubmit={handleSaveCard}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div>
-                  <label className="form-label">Card Name *</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    value={name}
-                    onChange={e => setName(e.target.value)}
-                    required 
-                    placeholder="Infinia, Eterna, Platinum..."
-                  />
-                </div>
-                <div>
-                  <label className="form-label">Issuer Bank *</label>
-                  <select 
-                    className="form-input"
-                    value={lenderId}
-                    onChange={e => setLenderId(e.target.value)}
-                    required
-                  >
-                    <option value="">-- Pick Issuer --</option>
-                    {institutions.map(i => (
-                      <option key={i.id} value={i.id}>{i.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div>
-                  <label className="form-label">Credit Limit (INR)</label>
-                  <input 
-                    type="number" 
-                    className="form-input" 
-                    value={creditLimit}
-                    onChange={e => setCreditLimit(Number(e.target.value))}
-                  />
-                </div>
-                <div>
-                  <label className="form-label">Current Outstanding Balance (INR)</label>
-                  <input 
-                    type="number" 
-                    className="form-input" 
-                    value={outstanding}
-                    onChange={e => setOutstanding(Number(e.target.value))}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div>
-                  <label className="form-label">Statement Date (Day of Month)</label>
-                  <input 
-                    type="number" 
-                    className="form-input" 
-                    value={statementDate}
-                    onChange={e => setStatementDate(Number(e.target.value))}
-                    min={1} max={31}
-                  />
-                </div>
-                <div>
-                  <label className="form-label">Payment Due Date (Day of Month)</label>
-                  <input 
-                    type="number" 
-                    className="form-input" 
-                    value={dueDate}
-                    onChange={e => setDueDate(Number(e.target.value))}
-                    min={1} max={31}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div>
-                  <label className="form-label">Annual Fee (INR)</label>
-                  <input 
-                    type="number" 
-                    className="form-input" 
-                    value={annualFee}
-                    onChange={e => setAnnualFee(Number(e.target.value))}
-                  />
-                </div>
-                <div>
-                  <label className="form-label">Renewal Date</label>
-                  <input 
-                    type="date" 
-                    className="form-input" 
-                    value={renewalDate}
-                    onChange={e => setRenewalDate(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div>
-                  <label className="form-label">Reward Points Balance</label>
-                  <input 
-                    type="number" 
-                    className="form-input" 
-                    value={rewardPoints}
-                    onChange={e => setRewardPoints(Number(e.target.value))}
-                  />
-                </div>
-                <div>
-                  <label className="form-label">Point Value (INR)</label>
-                  <input 
-                    type="number" 
-                    step="0.01"
-                    className="form-input" 
-                    value={pointValue}
-                    onChange={e => setPointValue(Number(e.target.value))}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div>
-                  <label className="form-label">Card Network</label>
-                  <select 
-                    className="form-input"
-                    value={network}
-                    onChange={e => setNetwork(e.target.value)}
-                  >
-                    <option value="Visa">Visa</option>
-                    <option value="Mastercard">Mastercard</option>
-                    <option value="RuPay">RuPay</option>
-                    <option value="Amex">Amex</option>
-                    <option value="Diners">Diners Club</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="form-label">Remarks</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    value={remarks}
-                    onChange={e => setRemarks(e.target.value)}
-                    placeholder="Remarks..."
-                  />
-                </div>
-              </div>
-
-              <div style={{ borderTop: '1px solid var(--border-glass)', padding: '14px 0', marginTop: '14px' }}>
-                <h4 style={{ fontSize: '12px', fontWeight: 600, color: '#fff', marginBottom: '10px' }}>Lounge &amp; Milestones</h4>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '10px' }}>
-                  <div>
-                    <label className="form-label">Domestic Lounge Access (Visits/yr)</label>
-                    <input 
-                      type="number" 
-                      className="form-input" 
-                      value={loungeVisitsLimit}
-                      onChange={e => setLoungeVisitsLimit(Number(e.target.value))}
-                    />
-                  </div>
-                  <div>
-                    <label className="form-label">Domestic Lounges Used</label>
-                    <input 
-                      type="number" 
-                      className="form-input" 
-                      value={loungeVisitsUsed}
-                      onChange={e => setLoungeVisitsUsed(Number(e.target.value))}
-                    />
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '10px' }}>
-                  <div>
-                    <label className="form-label">Intl Lounge Access (Visits/yr)</label>
-                    <input 
-                      type="number" 
-                      className="form-input" 
-                      value={loungeIntLimit}
-                      onChange={e => setLoungeIntLimit(Number(e.target.value))}
-                    />
-                  </div>
-                  <div>
-                    <label className="form-label">Intl Lounges Used</label>
-                    <input 
-                      type="number" 
-                      className="form-input" 
-                      value={loungeIntUsed}
-                      onChange={e => setLoungeIntUsed(Number(e.target.value))}
-                    />
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '10px' }}>
-                  <div>
-                    <label className="form-label">Milestone Spend Target (INR)</label>
-                    <input 
-                      type="number" 
-                      className="form-input" 
-                      value={milestoneTarget}
-                      onChange={e => setMilestoneTarget(Number(e.target.value))}
-                    />
-                  </div>
-                  <div>
-                    <label className="form-label">Current Milestone Spend</label>
-                    <input 
-                      type="number" 
-                      className="form-input" 
-                      value={milestoneCurrent}
-                      onChange={e => setMilestoneCurrent(Number(e.target.value))}
-                    />
-                  </div>
-                </div>
-                
-                <div style={{ marginBottom: '10px' }}>
-                  <label className="form-label">Milestone Reward Details</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    value={milestoneDesc}
-                    onChange={e => setMilestoneDesc(e.target.value)}
-                    placeholder="e.g. Waived Annual Fee, 10k Bonus Points..."
-                  />
-                </div>
-              </div>
-
-              {/* Reward Rules Sub-section */}
-              <div style={{ borderTop: '1px solid var(--border-glass)', padding: '14px 0', marginTop: '14px' }}>
-                <h4 style={{ fontSize: '12px', fontWeight: 600, color: '#fff', marginBottom: '8px' }}>Card Reward Multiplier Rules</h4>
-                
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
-                  {rewardRules.map((rule, rIdx) => (
-                    <div 
-                      key={rIdx} 
-                      style={{ 
-                        display: 'inline-flex', 
-                        alignItems: 'center', 
-                        gap: '6px', 
-                        padding: '4px 10px', 
-                        background: 'rgba(255,255,255,0.03)', 
-                        border: '1px solid var(--border-glass)', 
-                        borderRadius: '6px', 
-                        fontSize: '11px' 
-                      }}
-                    >
-                      <span style={{ fontWeight: 600 }}>{rule.category}</span>
-                      <span style={{ color: 'var(--accent-light)' }}>{rule.ratePct}%</span>
-                      {rule.category !== 'General' && (
-                        <button 
-                          type="button"
-                          style={{ background: 'none', border: 'none', color: '#f87171', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                          onClick={() => handleRemoveRule(rule.category)}
-                        >
-                          <X size={10} />
-                        </button>
-                      )}
+              {/* MODAL TAB 1: GENERAL */}
+              {activeModalTab === 'general' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                    <div>
+                      <label className="form-label">Card Name *</label>
+                      <input type="text" className="form-input" value={name} onChange={e => setName(e.target.value)} required placeholder="e.g. Infinia" />
                     </div>
-                  ))}
-                </div>
-
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
-                  <div style={{ flex: 1 }}>
-                    <label className="form-label" style={{ fontSize: '10px' }}>Rule Category</label>
-                    <select 
-                      className="form-input" 
-                      style={{ padding: '4px 8px', fontSize: '12px' }}
-                      value={newRuleCategory}
-                      onChange={e => setNewRuleCategory(e.target.value)}
-                    >
-                      <option value="General">General</option>
-                      <option value="Dining">Dining</option>
-                      <option value="Travel">Travel</option>
-                      <option value="Grocery">Grocery</option>
-                      <option value="Utility">Utility</option>
-                      <option value="Fuel">Fuel</option>
-                      <option value="Online Shopping">Online Shopping</option>
-                    </select>
+                    <div>
+                      <label className="form-label">Issuer Bank *</label>
+                      <select className="form-input" value={lenderId} onChange={e => setLenderId(e.target.value)} required>
+                        <option value="">-- Pick Issuer --</option>
+                        {institutions.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+                      </select>
+                    </div>
                   </div>
 
-                  <div style={{ flex: 1 }}>
-                    <label className="form-label" style={{ fontSize: '10px' }}>Reward Rate (%)</label>
-                    <input 
-                      type="number" 
-                      step="0.1"
-                      className="form-input" 
-                      style={{ padding: '4px 8px', fontSize: '12px' }}
-                      value={newRuleRate}
-                      onChange={e => setNewRuleRate(Number(e.target.value))}
-                    />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                    <div>
+                      <label className="form-label">Credit Limit (INR)</label>
+                      <input type="number" className="form-input" value={creditLimit} onChange={e => setCreditLimit(Number(e.target.value))} />
+                    </div>
+                    <div>
+                      <label className="form-label">Outstanding Balance (INR)</label>
+                      <input type="number" className="form-input" value={outstanding} onChange={e => setOutstanding(Number(e.target.value))} />
+                    </div>
                   </div>
 
-                  <button 
-                    type="button" 
-                    className="btn btn-secondary" 
-                    style={{ padding: '6px 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                    onClick={handleAddRule}
-                  >
-                    <PlusCircle size={12} /> Add Rule
-                  </button>
-                </div>
-              </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                    <div>
+                      <label className="form-label">Statement Date (Day of Month)</label>
+                      <input type="number" className="form-input" value={statementDate} onChange={e => setStatementDate(Number(e.target.value))} min={1} max={31} />
+                    </div>
+                    <div>
+                      <label className="form-label">Payment Due Date (Day of Month)</label>
+                      <input type="number" className="form-input" value={dueDate} onChange={e => setDueDate(Number(e.target.value))} min={1} max={31} />
+                    </div>
+                  </div>
 
-              {/* Offers Sub-section */}
-              <div style={{ borderTop: '1px solid var(--border-glass)', padding: '14px 0', marginTop: '14px' }}>
-                <h4 style={{ fontSize: '12px', fontWeight: 600, color: '#fff', marginBottom: '8px' }}>Active Targeted Offers</h4>
-                
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
-                  {offersList.map((offer) => (
-                    <div 
-                      key={offer.id} 
-                      style={{ 
-                        display: 'flex', 
-                        justifyContent: 'space-between', 
-                        alignItems: 'center', 
-                        padding: '6px 10px', 
-                        background: 'rgba(255,255,255,0.03)', 
-                        border: '1px solid var(--border-glass)', 
-                        borderRadius: '6px', 
-                        fontSize: '11px' 
-                      }}
-                    >
-                      <div>
-                        <span style={{ fontWeight: 600, color: '#67e8f9' }}>{offer.merchant}</span>: {offer.desc} 
-                        <span style={{ color: 'var(--text-muted)', marginLeft: '8px' }}>(Exp: {offer.expiry})</span>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                    <div>
+                      <label className="form-label">Annual Fee (INR)</label>
+                      <input type="number" className="form-input" value={annualFee} onChange={e => setAnnualFee(Number(e.target.value))} />
+                    </div>
+                    <div>
+                      <label className="form-label">Renewal Date</label>
+                      <input type="date" className="form-input" value={renewalDate} onChange={e => setRenewalDate(e.target.value)} />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                    <div>
+                      <label className="form-label">Card Network</label>
+                      <select className="form-input" value={network} onChange={e => setNetwork(e.target.value)}>
+                        <option value="Visa">Visa</option>
+                        <option value="Mastercard">Mastercard</option>
+                        <option value="RuPay">RuPay</option>
+                        <option value="Amex">Amex</option>
+                        <option value="Diners">Diners Club</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">Remarks</label>
+                      <input type="text" className="form-input" value={remarks} onChange={e => setRemarks(e.target.value)} />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* MODAL TAB 2: BASE RATES */}
+              {activeModalTab === 'rates' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                    <div>
+                      <label className="form-label">Base Points Earning</label>
+                      <input type="number" className="form-input" value={basePoints} onChange={e => setBasePoints(Number(e.target.value))} />
+                    </div>
+                    <div>
+                      <label className="form-label">Per Spend Amount (INR)</label>
+                      <input type="number" className="form-input" value={baseSpend} onChange={e => setBaseSpend(Number(e.target.value))} />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                    <div>
+                      <label className="form-label">Cash Value per Point (INR)</label>
+                      <input type="number" step="0.01" className="form-input" value={pointValue} onChange={e => setPointValue(Number(e.target.value))} />
+                    </div>
+                    <div>
+                      <label className="form-label">Current Statement Spend (INR)</label>
+                      <input type="number" className="form-input" value={currentStatementSpend} onChange={e => setCurrentStatementSpend(Number(e.target.value))} />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                    <div>
+                      <label className="form-label">Current reward points balance</label>
+                      <input type="number" className="form-input" value={rewardPoints} onChange={e => setRewardPoints(Number(e.target.value))} />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* MODAL TAB 3: CATEGORY RULES */}
+              {activeModalTab === 'categories' && (
+                <div>
+                  <h4 style={{ fontSize: '12px', fontWeight: 600, color: '#fff', marginBottom: '10px' }}>Category Multipliers &amp; Exclusions</h4>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px', maxHeight: '160px', overflowY: 'auto' }}>
+                    {categoryRules.map((rule, rIdx) => (
+                      <div key={rIdx} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 12px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '6px', fontSize: '12px' }}>
+                        <div>
+                          <strong>{rule.category}</strong>: {rule.isExcluded ? <span style={{ color: 'var(--danger-light)' }}>Excluded (0 points)</span> : <span style={{ color: 'var(--accent-light)' }}>{rule.multiplier}x multiplier</span>}
+                          {rule.monthlyCapPoints && <span style={{ color: 'var(--text-muted)', marginLeft: '8px' }}>(Cap: {rule.monthlyCapPoints} pts)</span>}
+                        </div>
+                        <button type="button" style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer' }} onClick={() => setCategoryRules(prev => prev.filter((_, i) => i !== rIdx))}><X size={12} /></button>
                       </div>
-                      <button 
-                        type="button"
-                        style={{ background: 'none', border: 'none', color: '#f87171', padding: 0, cursor: 'pointer' }}
-                        onClick={() => handleRemoveOffer(offer.id)}
-                      >
-                        <X size={12} />
-                      </button>
+                    ))}
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr auto', gap: '10px', alignItems: 'flex-end', background: 'rgba(255,255,255,0.01)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
+                    <div>
+                      <label className="form-label" style={{ fontSize: '10px' }}>Category</label>
+                      <select className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newCatName} onChange={e => setNewCatName(e.target.value)}>
+                        <option value="General">General / Retail</option>
+                        <option value="Dining">Dining</option>
+                        <option value="Travel">Travel</option>
+                        <option value="Grocery">Grocery</option>
+                        <option value="Utility">Utility</option>
+                        <option value="Fuel">Fuel</option>
+                        <option value="Rent">Rent</option>
+                        <option value="Online Shopping">Online Shopping</option>
+                      </select>
                     </div>
-                  ))}
+
+                    <div>
+                      <label className="form-label" style={{ fontSize: '10px' }}>Multiplier</label>
+                      <input type="number" step="0.1" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newCatMultiplier} onChange={e => setNewCatMultiplier(Number(e.target.value))} disabled={newCatExcluded} />
+                    </div>
+
+                    <div>
+                      <label className="form-label" style={{ fontSize: '10px' }}>Monthly Points Cap</label>
+                      <input type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newCatCap} onChange={e => setNewCatCap(e.target.value)} placeholder="None" disabled={newCatExcluded} />
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', justifyContent: 'center', height: '100%', paddingBottom: '6px' }}>
+                      <label style={{ fontSize: '10px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={newCatExcluded} onChange={e => setNewCatExcluded(e.target.checked)} />
+                        Exclude
+                      </label>
+                    </div>
+
+                    <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={handleAddCatRule}>Add Rule</button>
+                  </div>
                 </div>
+              )}
 
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
-                  <div style={{ flex: 1.5 }}>
-                    <label className="form-label" style={{ fontSize: '10px' }}>Merchant</label>
-                    <input 
-                      type="text" 
-                      className="form-input" 
-                      style={{ padding: '4px 8px', fontSize: '12px' }}
-                      value={newOfferMerchant}
-                      onChange={e => setNewOfferMerchant(e.target.value)}
-                      placeholder="e.g. Amazon"
-                    />
+              {/* MODAL TAB 4: MILESTONES */}
+              {activeModalTab === 'milestones' && (
+                <div>
+                  <h4 style={{ fontSize: '12px', fontWeight: 600, color: '#fff', marginBottom: '10px' }}>Threshold Milestone step-ups</h4>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }}>
+                    {milestoneRules.map((rule, idx) => (
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 12px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '6px', fontSize: '12px' }}>
+                        <span>Cross <strong>{formatCurrency(rule.spendThreshold)}</strong> monthly spend to earn <strong>{rule.bonusPointsRate} pts</strong> per <strong>₹{rule.pointsPerSpend} spent</strong>.</span>
+                        <button type="button" style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer' }} onClick={() => setMilestoneRules(prev => prev.filter((_, i) => i !== idx))}><X size={12} /></button>
+                      </div>
+                    ))}
                   </div>
 
-                  <div style={{ flex: 2 }}>
-                    <label className="form-label" style={{ fontSize: '10px' }}>Offer Deal</label>
-                    <input 
-                      type="text" 
-                      className="form-input" 
-                      style={{ padding: '4px 8px', fontSize: '12px' }}
-                      value={newOfferDesc}
-                      onChange={e => setNewOfferDesc(e.target.value)}
-                      placeholder="e.g. 10% instant discount"
-                    />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr auto', gap: '10px', alignItems: 'flex-end', background: 'rgba(255,255,255,0.01)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
+                    <div>
+                      <label className="form-label" style={{ fontSize: '10px' }}>Spend Threshold (INR)</label>
+                      <input type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newMilestoneSpend} onChange={e => setNewMilestoneSpend(Number(e.target.value))} />
+                    </div>
+
+                    <div>
+                      <label className="form-label" style={{ fontSize: '10px' }}>Milestone Points Rate</label>
+                      <input type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newMilestoneRate} onChange={e => setNewMilestoneRate(Number(e.target.value))} />
+                    </div>
+
+                    <div>
+                      <label className="form-label" style={{ fontSize: '10px' }}>Spend block (INR)</label>
+                      <input type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newMilestoneSpendBlock} onChange={e => setNewMilestoneSpendBlock(Number(e.target.value))} />
+                    </div>
+
+                    <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={handleAddMilestoneRule}>Add</button>
                   </div>
 
-                  <div style={{ flex: 1.2 }}>
-                    <label className="form-label" style={{ fontSize: '10px' }}>Expiry</label>
-                    <input 
-                      type="text" 
-                      className="form-input" 
-                      style={{ padding: '4px 8px', fontSize: '12px' }}
-                      value={newOfferExpiry}
-                      onChange={e => setNewOfferExpiry(e.target.value)}
-                      placeholder="e.g. 31-Jul"
-                    />
+                  {/* Lounge limits fields */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginTop: '20px' }}>
+                    <div>
+                      <label className="form-label">Domestic Lounge Access (Visits/yr)</label>
+                      <input type="number" className="form-input" value={loungeVisitsLimit} onChange={e => setLoungeVisitsLimit(Number(e.target.value))} />
+                    </div>
+                    <div>
+                      <label className="form-label">Domestic Lounges Used</label>
+                      <input type="number" className="form-input" value={loungeVisitsUsed} onChange={e => setLoungeVisitsUsed(Number(e.target.value))} />
+                    </div>
                   </div>
 
-                  <button 
-                    type="button" 
-                    className="btn btn-secondary" 
-                    style={{ padding: '6px 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                    onClick={handleAddOffer}
-                  >
-                    <PlusCircle size={12} /> Add Offer
-                  </button>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginTop: '10px' }}>
+                    <div>
+                      <label className="form-label">Intl Lounge Access (Visits/yr)</label>
+                      <input type="number" className="form-input" value={loungeIntLimit} onChange={e => setLoungeIntLimit(Number(e.target.value))} />
+                    </div>
+                    <div>
+                      <label className="form-label">Intl Lounges Used</label>
+                      <input type="number" className="form-input" value={loungeIntUsed} onChange={e => setLoungeIntUsed(Number(e.target.value))} />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginTop: '10px' }}>
+                    <div>
+                      <label className="form-label">Waiver Spend Target (INR)</label>
+                      <input type="number" className="form-input" value={milestoneTarget} onChange={e => setMilestoneTarget(Number(e.target.value))} />
+                    </div>
+                    <div>
+                      <label className="form-label">Current Waiver Spend (INR)</label>
+                      <input type="number" className="form-input" value={milestoneCurrent} onChange={e => setMilestoneCurrent(Number(e.target.value))} />
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: '10px' }}>
+                    <label className="form-label">Milestone Reward Details</label>
+                    <input type="text" className="form-input" value={milestoneDesc} onChange={e => setMilestoneDesc(e.target.value)} placeholder="e.g. Waived Annual Fee, 10k Bonus Points..." />
+                  </div>
                 </div>
-              </div>
+              )}
 
-              {/* Form Submits */}
-              <div style={{ borderTop: '1px solid var(--border-glass)', padding: '16px 0 0 0', marginTop: '16px', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              {/* MODAL TAB 5: PARTNERS */}
+              {activeModalTab === 'partners' && (
+                <div>
+                  <h4 style={{ fontSize: '12px', fontWeight: 600, color: '#fff', marginBottom: '10px' }}>Redemption Partners &amp; Airline Miles</h4>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }}>
+                    {redemptionPartners.map((ratio, idx) => (
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 12px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '6px', fontSize: '12px' }}>
+                        <span><strong>{ratio.partnerName}</strong>: {ratio.transferRatio} mile/point ratio</span>
+                        <button type="button" style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer' }} onClick={() => setRedemptionPartners(prev => prev.filter((_, i) => i !== idx))}><X size={12} /></button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr auto', gap: '10px', alignItems: 'flex-end', background: 'rgba(255,255,255,0.01)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
+                    <div>
+                      <label className="form-label" style={{ fontSize: '10px' }}>Partner Airline / Hotel</label>
+                      <input type="text" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newPartnerName} onChange={e => setNewPartnerName(e.target.value)} placeholder="e.g. KrisFlyer Singapore" />
+                    </div>
+
+                    <div>
+                      <label className="form-label" style={{ fontSize: '10px' }}>Conversion Ratio</label>
+                      <input type="number" step="0.1" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newPartnerRatio} onChange={e => setNewPartnerRatio(Number(e.target.value))} />
+                    </div>
+
+                    <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={handleAddPartnerRule}>Add Partner</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Form Actions footer */}
+              <div style={{ borderTop: '1px solid var(--border-glass)', padding: '16px 0 0 0', marginTop: '20px', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Save Card</button>
+                <button type="submit" className="btn btn-primary">Save Configuration</button>
               </div>
             </form>
           </div>
