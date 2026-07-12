@@ -175,7 +175,21 @@ def get_init_data():
             FROM accounts a
             LEFT JOIN institutions i ON a.institution_id = i.id
         """)
-        accounts = [dict(row) for row in cursor.fetchall()]
+        accounts = []
+        for row in cursor.fetchall():
+            d = dict(row)
+            if d.get("metadata_json"):
+                try:
+                    meta = json.loads(d["metadata_json"])
+                    d.update(meta)
+                    if "category_id" in meta:
+                        cursor.execute("SELECT name FROM categories WHERE id = ?", (meta["category_id"],))
+                        cat_row = cursor.fetchone()
+                        if cat_row:
+                            d["category_name"] = cat_row["name"]
+                except:
+                    pass
+            accounts.append(d)
         
         # Assets (Mutual funds, stocks, gold, EPFO, property, insurance etc.)
         cursor.execute("""

@@ -27,8 +27,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
   const [isAdding, setIsAdding] = useState(false);
   const [deletingEntityId, setDeletingEntityId] = useState<number | null>(null);
 
-  // Filter categories by the corresponding entity type
-  const typeCategories = categories.filter((c) => c.entity_type.toLowerCase() === entityType.replace(/s$/, '').toLowerCase() || (entityType === 'accounts' && c.entity_type === 'Asset')); // accounts seed under Asset institution details
+  const typeCategories = categories.filter((c) => c.entity_type.toLowerCase() === entityType.replace(/s$/, '').toLowerCase());
 
   // Filter entities
   const filteredEntities = entities.filter((e) => {
@@ -106,6 +105,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
     if (entityType === 'accounts') {
       return [
         { label: 'Name', key: 'name' },
+        { label: 'Category', key: 'category_name' },
         { label: 'Institution', key: 'institution_name' },
         { label: 'Balance', key: 'current_balance', alignRight: true },
         { label: 'Owner', key: 'owner' },
