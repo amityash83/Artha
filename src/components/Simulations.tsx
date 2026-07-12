@@ -39,6 +39,12 @@ export const Simulations: React.FC<SimulationsProps> = ({ data, initialParams })
   const [prepaymentFrequency, setPrepaymentFrequency] = useState<string>('monthly');
   const [prepaymentAmount, setPrepaymentAmount] = useState<number>(50000);
   const [prepaymentMonth, setPrepaymentMonth] = useState<number>(3);
+
+  // Net Worth Forecast states
+  const [horizonYears, setHorizonYears] = useState<number>(10);
+  const [expectedReturn, setExpectedReturn] = useState<number>(12.0);
+  const [monthlySavings, setMonthlySavings] = useState<number>(20000);
+  const [inflationRate, setInflationRate] = useState<number>(6.0);
   
   // Dynamic parameters depending on selection
   const [loanId, setLoanId] = useState<number>(0);
@@ -101,6 +107,30 @@ export const Simulations: React.FC<SimulationsProps> = ({ data, initialParams })
         roi: Number(loanRoi),
         tenure_months: Number(loanTenureMonths)
       };
+    }
+
+    if (scenarioType === 'net_worth_forecast') {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/simulations/net_worth_forecast`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            horizon_years: Number(horizonYears),
+            expected_return: Number(expectedReturn),
+            monthly_savings: Number(monthlySavings),
+            inflation_rate: Number(inflationRate)
+          })
+        });
+        if (res.ok) {
+          const d = await res.json();
+          setResult(d);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+      return;
     }
 
     if (scenarioType === 'debt_payoff') {
@@ -166,6 +196,7 @@ export const Simulations: React.FC<SimulationsProps> = ({ data, initialParams })
             <select className="form-input" value={scenarioType} onChange={e => setScenarioType(e.target.value)}>
               <option value="close_loan">What if I close/prepay a Loan?</option>
               <option value="debt_payoff">What if I prepay multiple loans? (Payoff Planner)</option>
+              <option value="net_worth_forecast">What if I project my Net Worth? (Forecast)</option>
               <option value="delay_goal">What if a Villa/Goal is delayed?</option>
               <option value="increase_sip">What if I increase monthly SIP?</option>
               <option value="salary_change">What if my Salary changes?</option>
@@ -329,6 +360,35 @@ export const Simulations: React.FC<SimulationsProps> = ({ data, initialParams })
             </>
           )}
 
+          {scenarioType === 'net_worth_forecast' && (
+            <>
+              <div className="form-group">
+                <label className="form-label">Forecast Horizon (Years)</label>
+                <select className="form-input" value={horizonYears} onChange={e => setHorizonYears(Number(e.target.value))}>
+                  <option value={5}>5 Years</option>
+                  <option value={10}>10 Years</option>
+                  <option value={20}>20 Years</option>
+                  <option value={30}>30 Years</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Expected Annual Return (%)</label>
+                <input type="number" step="0.1" className="form-input" value={expectedReturn} onChange={e => setExpectedReturn(parseFloat(e.target.value) || 0)} />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Monthly Additional Savings (₹)</label>
+                <input type="number" className="form-input" value={monthlySavings} onChange={e => setMonthlySavings(parseFloat(e.target.value) || 0)} />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Expected Inflation Rate (%)</label>
+                <input type="number" step="0.1" className="form-input" value={inflationRate} onChange={e => setInflationRate(parseFloat(e.target.value) || 0)} />
+              </div>
+            </>
+          )}
+
           <button 
             type="button" 
             className="btn btn-primary" 
@@ -344,7 +404,134 @@ export const Simulations: React.FC<SimulationsProps> = ({ data, initialParams })
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           {result ? (
             <>
-              {scenarioType === 'debt_payoff' ? (
+              {scenarioType === 'net_worth_forecast' ? (
+                <>
+                  {/* Summary Metric Projections */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '20px' }}>
+                    <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Nominal Net Worth</span>
+                      <h2 style={{ fontSize: '22px', fontWeight: 700, margin: '4px 0', color: 'var(--accent-light)' }}>
+                        {formatCurrency(result.final_net_worth_nominal)}
+                      </h2>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                        Valuation in {horizonYears} years (compounded)
+                      </span>
+                    </div>
+
+                    <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Real Net Worth</span>
+                      <h2 style={{ fontSize: '22px', fontWeight: 700, margin: '4px 0', color: '#10b981' }}>
+                        {formatCurrency(result.final_net_worth_real)}
+                      </h2>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                        Adjusted for {inflationRate}% inflation (purchasing power)
+                      </span>
+                    </div>
+
+                    <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Total Growth</span>
+                      <h2 style={{ fontSize: '22px', fontWeight: 700, margin: '4px 0', color: '#8b5cf6' }}>
+                        {((result.final_net_worth_nominal / (result.initial_net_worth || 1) - 1) * 100).toFixed(0)}%
+                      </h2>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                        Multiplier of {((result.final_net_worth_nominal / (result.initial_net_worth || 1))).toFixed(1)}x over start
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Projections Line Chart */}
+                  {(() => {
+                    const chartLabels = result.schedule.map((s: any) => `Yr ${s.year}`);
+                    const nominalNW = result.schedule.map((s: any) => s.net_worth_nominal);
+                    const realNW = result.schedule.map((s: any) => s.net_worth_real);
+                    const debtPath = result.schedule.map((s: any) => s.debt);
+
+                    const forecastData = {
+                      labels: chartLabels,
+                      datasets: [
+                        {
+                          label: 'Nominal Net Worth',
+                          data: nominalNW,
+                          borderColor: '#8b5cf6',
+                          backgroundColor: 'rgba(139, 92, 246, 0.03)',
+                          borderWidth: 2.5,
+                          tension: 0.3,
+                          pointRadius: 3,
+                          pointBackgroundColor: '#8b5cf6'
+                        },
+                        {
+                          label: 'Real Net Worth (Inflation-Adj)',
+                          data: realNW,
+                          borderColor: '#10b981',
+                          backgroundColor: 'rgba(16, 185, 129, 0.03)',
+                          borderWidth: 2,
+                          tension: 0.3,
+                          pointRadius: 3,
+                          pointBackgroundColor: '#10b981'
+                        },
+                        {
+                          label: 'Outstanding Liabilities',
+                          data: debtPath,
+                          borderColor: '#ef4444',
+                          borderDash: [4, 4],
+                          borderWidth: 1.5,
+                          tension: 0.3,
+                          pointRadius: 0
+                        }
+                      ]
+                    };
+
+                    const forecastOptions = {
+                      responsive: true,
+                      maintainAspectRatio: false,
+                      plugins: {
+                        legend: {
+                          labels: { color: '#94a3b8', font: { family: 'Inter', size: 11 } }
+                        },
+                        tooltip: {
+                          backgroundColor: '#0d111d',
+                          titleFont: { family: 'Outfit' },
+                          bodyFont: { family: 'Inter' },
+                          borderColor: 'rgba(255,255,255,0.08)',
+                          borderWidth: 1,
+                          callbacks: {
+                            label: (context: any) => ` Value: ${new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(context.parsed.y)}`
+                          }
+                        }
+                      },
+                      scales: {
+                        x: {
+                          grid: { display: false },
+                          ticks: { color: '#64748b', font: { family: 'Inter', size: 10 } }
+                        },
+                        y: {
+                          grid: { color: 'rgba(255,255,255,0.04)' },
+                          ticks: { 
+                            color: '#64748b', 
+                            font: { family: 'Inter', size: 10 },
+                            callback: (value: any) => {
+                              if (value >= 10000000) return `₹${(value/10000000).toFixed(1)}Cr`;
+                              if (value >= 100000) return `₹${(value/100000).toFixed(0)}L`;
+                              return `₹${value}`;
+                            }
+                          }
+                        }
+                      }
+                    };
+
+                    return (
+                      <div className="glass-panel" style={{ height: '320px', display: 'flex', flexDirection: 'column', padding: '24px' }}>
+                        <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '16px' }}>
+                          Long-Term Asset &amp; Wealth Projection Trajectory
+                        </h3>
+                        <div style={{ flex: 1, position: 'relative' }}>
+                          <Line data={forecastData} options={forecastOptions} />
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </>
+              ) : scenarioType === 'debt_payoff' ? (
                 <>
                   {/* Debt Payoff Summary Grid Cards */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>

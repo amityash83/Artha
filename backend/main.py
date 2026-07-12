@@ -157,6 +157,12 @@ class DebtPayoffRequest(BaseModel):
     prepayment_amount: float = 0.0
     prepayment_month: int = 3
 
+class NetWorthForecastRequest(BaseModel):
+    horizon_years: int = 10
+    expected_return: float = 12.0
+    monthly_savings: float = 20000.0
+    inflation_rate: float = 6.0
+
 # --- Core Dynamic Aggregate / Dashboard Data ---
 @app.get("/api/init")
 def get_init_data():
@@ -920,6 +926,76 @@ def run_debt_payoff_simulation(req: DebtPayoffRequest):
         return {
             "baseline": baseline,
             "optimized": optimized
+        }
+    finally:
+        conn.close()
+
+@app.post("/api/simulations/net_worth_forecast")
+def run_net_worth_forecast(req: NetWorthForecastRequest):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT current_balance FROM accounts")
+        liquid = sum(row["current_balance"] for row in cursor.fetchall())
+        cursor.execute("SELECT current_value FROM assets")
+        assets_val = sum(row["current_value"] for row in cursor.fetchall())
+        initial_assets = liquid + assets_val
+        
+        cursor.execute("SELECT name, outstanding, interest_rate, emi FROM liabilities WHERE outstanding > 0")
+        liabs_raw = cursor.fetchall()
+        liabilities = [dict(row) for row in liabs_raw]
+        initial_debt = sum(l["outstanding"] for l in liabilities)
+        
+        sim_loans = [
+            {
+                "outstanding": float(l["outstanding"]),
+                "roi": float(l["interest_rate"]),
+                "emi": float(l["emi"])
+            }
+            for l in liabilities
+        ]
+        
+        schedule = []
+        current_assets = initial_assets
+        annual_savings = req.monthly_savings * 12.0
+        
+        schedule.append({
+            "year": 0,
+            "assets": round(current_assets, 2),
+            "debt": round(initial_debt, 2),
+            "net_worth_nominal": round(current_assets - initial_debt, 2),
+            "net_worth_real": round(current_assets - initial_debt, 2)
+        })
+        
+        for y in range(1, req.horizon_years + 1):
+            current_assets = current_assets * (1.0 + req.expected_return / 100.0) + annual_savings * ((1.0 + req.inflation_rate / 100.0) ** (y - 1))
+            
+            for _ in range(12):
+                for loan in sim_loans:
+                    if loan["outstanding"] > 0:
+                        interest = loan["outstanding"] * (loan["roi"] / 100.0) / 12.0
+                        payment = min(loan["emi"], loan["outstanding"] + interest)
+                        principal = payment - interest
+                        loan["outstanding"] = max(loan["outstanding"] - principal, 0.0)
+                        
+            current_debt = sum(l["outstanding"] for l in sim_loans)
+            nominal_nw = current_assets - current_debt
+            inflation_factor = (1.0 + req.inflation_rate / 100.0) ** y
+            real_nw = nominal_nw / inflation_factor
+            
+            schedule.append({
+                "year": y,
+                "assets": round(current_assets, 2),
+                "debt": round(current_debt, 2),
+                "net_worth_nominal": round(nominal_nw, 2),
+                "net_worth_real": round(real_nw, 2)
+            })
+            
+        return {
+            "schedule": schedule,
+            "final_net_worth_nominal": round(schedule[-1]["net_worth_nominal"], 2),
+            "final_net_worth_real": round(schedule[-1]["net_worth_real"], 2),
+            "initial_net_worth": round(initial_assets - initial_debt, 2)
         }
     finally:
         conn.close()
