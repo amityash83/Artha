@@ -57,7 +57,7 @@ def serialize_entity_payload(cursor, table_name: str, payload: dict) -> dict:
 class AccountSchema(BaseModel):
     name: str
     institution: str
-    current_balance: float
+    current_balance: Optional[float] = 0.0
     remarks: Optional[str] = ""
 
 class LoanSchema(BaseModel):
@@ -169,9 +169,20 @@ def get_init_data():
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        # Accounts
+        # Accounts (derived balances computed on the fly)
         cursor.execute("""
-            SELECT a.*, i.name as institution_name 
+            SELECT 
+                a.*, 
+                i.name as institution_name,
+                (
+                    SELECT COALESCE(SUM(t.amount), 0.0) 
+                    FROM transactions t 
+                    WHERE t.dest_ref_type = 'Account' AND t.dest_ref_id = a.id
+                ) - (
+                    SELECT COALESCE(SUM(t.amount), 0.0) 
+                    FROM transactions t 
+                    WHERE t.source_ref_type = 'Account' AND t.source_ref_id = a.id
+                ) AS current_balance
             FROM accounts a
             LEFT JOIN institutions i ON a.institution_id = i.id
         """)
@@ -343,48 +354,29 @@ def get_init_data():
     finally:
         conn.close()
 
-def adjust_double_entry_balances(cursor, t_type: str, amount: float, account_id: int, related_entity_type: str, related_entity_id: int, operation: str = "add"):
+def adjust_double_entry_balances(cursor, t_type: str, amount: float, source_type: str, source_id: int, dest_type: str, dest_id: int, operation: str = "add"):
     """
-    Adjust balances of accounts, assets, liabilities based on double-entry transaction specs.
+    Adjust balances of assets and liabilities based on double-entry transaction specs.
+    (Account balances are derived dynamically from transaction history, so they are not stored/updated).
     operation: 'add' (apply transaction impact), 'revert' (undo transaction impact)
     """
-    if not account_id:
+    if not source_type and not dest_type:
         return
         
     factor = 1.0 if operation == "add" else -1.0
     t_type_lower = t_type.lower()
     
-    if t_type_lower == 'investment':
-        # Decrease Account balance, Increase Asset value
-        cursor.execute("UPDATE accounts SET current_balance = current_balance - ? WHERE id = ?", (amount * factor, account_id))
-        if related_entity_id:
-            cursor.execute("UPDATE assets SET current_value = current_value + ? WHERE id = ?", (amount * factor, related_entity_id))
-            
-    elif t_type_lower == 'redemption':
-        # Increase Account balance, Decrease Asset value
-        cursor.execute("UPDATE accounts SET current_balance = current_balance + ? WHERE id = ?", (amount * factor, account_id))
-        if related_entity_id:
-            cursor.execute("UPDATE assets SET current_value = current_value - ? WHERE id = ?", (amount * factor, related_entity_id))
-            
-    elif t_type_lower in ['emi', 'prepayment']:
-        # Decrease Account balance, Decrease Liability outstanding
-        cursor.execute("UPDATE accounts SET current_balance = current_balance - ? WHERE id = ?", (amount * factor, account_id))
-        if related_entity_id:
-            cursor.execute("UPDATE liabilities SET outstanding = outstanding - ? WHERE id = ?", (amount * factor, related_entity_id))
-            
-    elif t_type_lower == 'transfer':
-        # Decrease source Account balance, Increase destination Account balance
-        cursor.execute("UPDATE accounts SET current_balance = current_balance - ? WHERE id = ?", (amount * factor, account_id))
-        if related_entity_id:
-            cursor.execute("UPDATE accounts SET current_balance = current_balance + ? WHERE id = ?", (amount * factor, related_entity_id))
-            
-    elif t_type_lower in ['debit', 'expense']:
-        # Decrease Account balance
-        cursor.execute("UPDATE accounts SET current_balance = current_balance - ? WHERE id = ?", (amount * factor, account_id))
+    # 1. Update Asset values
+    if source_type == 'Asset' and source_id:
+        cursor.execute("UPDATE assets SET current_value = current_value - ? WHERE id = ?", (amount * factor, source_id))
+    if dest_type == 'Asset' and dest_id:
+        cursor.execute("UPDATE assets SET current_value = current_value + ? WHERE id = ?", (amount * factor, dest_id))
         
-    elif t_type_lower in ['credit', 'income']:
-        # Increase Account balance
-        cursor.execute("UPDATE accounts SET current_balance = current_balance + ? WHERE id = ?", (amount * factor, account_id))
+    # 2. Update Liability outstanding
+    if t_type_lower in ['emi', 'prepayment'] and dest_id:
+        cursor.execute("SELECT id FROM liabilities WHERE id = ?", (dest_id,))
+        if cursor.fetchone():
+            cursor.execute("UPDATE liabilities SET outstanding = outstanding - ? WHERE id = ?", (amount * factor, dest_id))
 
 # --- Generic CRUD REST API ---
 @app.get("/api/entities/{entity_type}")
@@ -396,7 +388,23 @@ def get_entities(entity_type: str):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute(f"SELECT * FROM {entity_type}")
+        if entity_type == "accounts":
+            cursor.execute("""
+                SELECT 
+                    a.*,
+                    (
+                        SELECT COALESCE(SUM(t.amount), 0.0) 
+                        FROM transactions t 
+                        WHERE t.dest_ref_type = 'Account' AND t.dest_ref_id = a.id
+                    ) - (
+                        SELECT COALESCE(SUM(t.amount), 0.0) 
+                        FROM transactions t 
+                        WHERE t.source_ref_type = 'Account' AND t.source_ref_id = a.id
+                    ) AS current_balance
+                FROM accounts a
+            """)
+        else:
+            cursor.execute(f"SELECT * FROM {entity_type}")
         rows = cursor.fetchall()
         
         result = []
@@ -422,6 +430,65 @@ def create_entity(entity_type: str, payload: dict):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
+        initial_balance = 0.0
+        if entity_type == "accounts":
+            payload["owner_id"] = payload.get("owner_id", 1)
+            initial_balance = float(payload.pop("current_balance", 0.0))
+            
+        if entity_type == "transactions":
+            if "source_ref_type" not in payload:
+                acc_id = payload.get("account_id")
+                ttype = payload.get("type")
+                rel_type = payload.get("related_entity_type")
+                rel_id = payload.get("related_entity_id")
+                
+                source_type = 'None'
+                source_id = None
+                dest_type = 'None'
+                dest_id = None
+                new_type = 'Credit'
+                
+                if ttype == 'Credit':
+                    source_type = 'None'
+                    dest_type = 'Account'
+                    dest_id = acc_id
+                    new_type = 'Credit'
+                elif ttype == 'Debit':
+                    source_type = 'Account'
+                    source_id = acc_id
+                    dest_type = 'None'
+                    new_type = 'Debit'
+                elif ttype == 'Transfer':
+                    source_type = 'Account'
+                    source_id = acc_id
+                    dest_type = 'Account'
+                    dest_id = rel_id
+                    new_type = 'Transfer'
+                elif ttype in ('Investment', 'Buy'):
+                    source_type = 'Account'
+                    source_id = acc_id
+                    dest_type = 'Asset'
+                    dest_id = rel_id
+                    new_type = 'Buy'
+                elif ttype in ('Redemption', 'Sell'):
+                    source_type = 'Asset'
+                    source_id = rel_id
+                    dest_type = 'Account'
+                    dest_id = acc_id
+                    new_type = 'Sell'
+                elif ttype in ('EMI', 'Prepayment'):
+                    source_type = 'Account'
+                    source_id = acc_id
+                    dest_type = 'None'
+                    dest_id = rel_id
+                    new_type = ttype
+                    
+                payload["source_ref_type"] = source_type
+                payload["source_ref_id"] = source_id
+                payload["dest_ref_type"] = dest_type
+                payload["dest_ref_id"] = dest_id
+                payload["type"] = new_type
+
         # Preprocess custom fields and map expected dates for Goals
         if entity_type == "goals" and "target_amount" in payload and "current_amount" in payload and "monthly_contribution" in payload:
             comp = calc.calculate_goal_expected_completion(
@@ -439,19 +506,28 @@ def create_entity(entity_type: str, payload: dict):
         
         cursor.execute(query, standard_params)
         
+        entity_id = cursor.lastrowid
+        
+        if entity_type == "accounts" and initial_balance > 0.0:
+            cursor.execute("""
+            INSERT INTO transactions (source_ref_type, source_ref_id, dest_ref_type, dest_ref_id, type, amount, transaction_date, notes)
+            VALUES ('None', NULL, 'Account', ?, 'Credit', ?, ?, 'Initial balance registration')
+            """, (entity_id, initial_balance, date.today().isoformat(), 'Initial Balance'))
+            
         if entity_type == "transactions":
             adjust_double_entry_balances(
                 cursor,
                 standard_params.get("type"),
                 float(standard_params.get("amount", 0.0)),
-                int(standard_params.get("account_id")) if standard_params.get("account_id") is not None else None,
-                standard_params.get("related_entity_type"),
-                int(standard_params.get("related_entity_id")) if standard_params.get("related_entity_id") is not None else None,
+                standard_params.get("source_ref_type"),
+                int(standard_params.get("source_ref_id")) if standard_params.get("source_ref_id") is not None else None,
+                standard_params.get("dest_ref_type"),
+                int(standard_params.get("dest_ref_id")) if standard_params.get("dest_ref_id") is not None else None,
                 "add"
             )
             
         conn.commit()
-        return {"status": "success", "id": cursor.lastrowid}
+        return {"status": "success", "id": entity_id}
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -486,9 +562,10 @@ def update_entity(entity_type: str, id: int, payload: dict):
                     cursor,
                     old.get("type"),
                     float(old.get("amount", 0.0)),
-                    int(old.get("account_id")) if old.get("account_id") is not None else None,
-                    old.get("related_entity_type"),
-                    int(old.get("related_entity_id")) if old.get("related_entity_id") is not None else None,
+                    old.get("source_ref_type"),
+                    int(old.get("source_ref_id")) if old.get("source_ref_id") is not None else None,
+                    old.get("dest_ref_type"),
+                    int(old.get("dest_ref_id")) if old.get("dest_ref_id") is not None else None,
                     "revert"
                 )
                 
@@ -506,9 +583,10 @@ def update_entity(entity_type: str, id: int, payload: dict):
                 cursor,
                 standard_params.get("type"),
                 float(standard_params.get("amount", 0.0)),
-                int(standard_params.get("account_id")) if standard_params.get("account_id") is not None else None,
-                standard_params.get("related_entity_type"),
-                int(standard_params.get("related_entity_id")) if standard_params.get("related_entity_id") is not None else None,
+                standard_params.get("source_ref_type"),
+                int(standard_params.get("source_ref_id")) if standard_params.get("source_ref_id") is not None else None,
+                standard_params.get("dest_ref_type"),
+                int(standard_params.get("dest_ref_id")) if standard_params.get("dest_ref_id") is not None else None,
                 "add"
             )
             
@@ -539,9 +617,10 @@ def delete_entity(entity_type: str, id: int):
                     cursor,
                     old.get("type"),
                     float(old.get("amount", 0.0)),
-                    int(old.get("account_id")) if old.get("account_id") is not None else None,
-                    old.get("related_entity_type"),
-                    int(old.get("related_entity_id")) if old.get("related_entity_id") is not None else None,
+                    old.get("source_ref_type"),
+                    int(old.get("source_ref_id")) if old.get("source_ref_id") is not None else None,
+                    old.get("dest_ref_type"),
+                    int(old.get("dest_ref_id")) if old.get("dest_ref_id") is not None else None,
                     "revert"
                 )
                 
@@ -712,8 +791,14 @@ def run_simulation(req: SimulationRequestSchema):
     cursor = conn.cursor()
     try:
         # Load current state
-        cursor.execute("SELECT current_balance FROM accounts")
-        total_liquid = sum(row["current_balance"] for row in cursor.fetchall())
+        cursor.execute("""
+            SELECT COALESCE(SUM(
+                (SELECT COALESCE(SUM(t.amount), 0.0) FROM transactions t WHERE t.dest_ref_type = 'Account' AND t.dest_ref_id = a.id) -
+                (SELECT COALESCE(SUM(t.amount), 0.0) FROM transactions t WHERE t.source_ref_type = 'Account' AND t.source_ref_id = a.id)
+            ), 0.0) AS total_liquid
+            FROM accounts a
+        """)
+        total_liquid = cursor.fetchone()["total_liquid"]
         
         cursor.execute("SELECT id, name, interest_rate as roi, emi, outstanding FROM liabilities")
         loans = [dict(row) for row in cursor.fetchall()]
@@ -952,8 +1037,14 @@ def run_net_worth_forecast(req: NetWorthForecastRequest):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT current_balance FROM accounts")
-        liquid = sum(row["current_balance"] for row in cursor.fetchall())
+        cursor.execute("""
+            SELECT COALESCE(SUM(
+                (SELECT COALESCE(SUM(t.amount), 0.0) FROM transactions t WHERE t.dest_ref_type = 'Account' AND t.dest_ref_id = a.id) -
+                (SELECT COALESCE(SUM(t.amount), 0.0) FROM transactions t WHERE t.source_ref_type = 'Account' AND t.source_ref_id = a.id)
+            ), 0.0) AS total_liquid
+            FROM accounts a
+        """)
+        liquid = cursor.fetchone()["total_liquid"]
         cursor.execute("SELECT current_value FROM assets")
         assets_val = sum(row["current_value"] for row in cursor.fetchall())
         initial_assets = liquid + assets_val
