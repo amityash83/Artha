@@ -937,6 +937,23 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
               <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent-light)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px', borderBottom: '1px dashed rgba(255,255,255,0.05)', paddingBottom: '4px' }}>
                 Financial Institutions
               </h4>
+              
+              {/* Inline Simplified Creator Form */}
+              <form onSubmit={handleAddInstitution} style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                <input 
+                  type="text" 
+                  className="form-control" 
+                  style={{ flex: 1, padding: '6px 12px', fontSize: '12px', height: '32px' }}
+                  placeholder="Register new institution... (e.g. Chase)" 
+                  required 
+                  value={newInstName} 
+                  onChange={e => setNewInstName(e.target.value)} 
+                />
+                <button type="submit" className="btn btn-primary" style={{ padding: '0 16px', fontSize: '12px', height: '32px' }}>
+                  Add
+                </button>
+              </form>
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', overflowY: 'auto', paddingRight: '4px' }}>
                 {institutions.map((inst: any) => (
                   <div key={inst.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: '8px', fontSize: '12px' }}>
@@ -1112,29 +1129,6 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
                     </button>
                   )}
                 </div>
-              </form>
-            </div>
-
-            {/* Institution Creator Form */}
-            <div className="glass-panel" style={{ padding: '24px' }}>
-              <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Plus size={16} /> Register Financial Institution
-              </h3>
-              <form onSubmit={handleAddInstitution} style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Institution / Lender Name</label>
-                  <input 
-                    type="text" 
-                    className="form-control" 
-                    placeholder="e.g. Groww" 
-                    required 
-                    value={newInstName} 
-                    onChange={e => setNewInstName(e.target.value)} 
-                  />
-                </div>
-                <button type="submit" className="btn btn-primary" style={{ height: '36px' }}>
-                  Register
-                </button>
               </form>
             </div>
 
