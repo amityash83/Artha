@@ -9,6 +9,7 @@ import { API_BASE_URL } from '../config';
 interface TransactionsLedgerProps {
   data: InitData;
   onRefresh: () => void;
+  showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
 
 interface Transaction {
@@ -23,11 +24,12 @@ interface Transaction {
   related_entity_id?: number;
 }
 
-export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, onRefresh }) => {
+export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, onRefresh, showToast }) => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [modalOpen, setModalOpen] = useState<boolean>(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [deletingTxId, setDeletingTxId] = useState<number | null>(null);
 
   // Search & Filter states
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -85,7 +87,8 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!accountId || !amount || !date) {
-      alert("Please fill in all required fields.");
+      if (showToast) showToast("Please fill in all required fields.", "error");
+      else alert("Please fill in all required fields.");
       return;
     }
 
@@ -144,13 +147,17 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
         setCounterpartId('');
         fetchTransactions();
         onRefresh();
+        if (showToast) showToast("Transaction saved successfully!", "success");
       } else {
         const err = await res.json();
-        alert("Failed to save transaction: " + (err.detail || "Unknown error"));
+        const msg = "Failed to save transaction: " + (err.detail || "Unknown error");
+        if (showToast) showToast(msg, "error");
+        else alert(msg);
       }
     } catch (err) {
       console.error(err);
-      alert("Error saving transaction details");
+      if (showToast) showToast("Error saving transaction details", "error");
+      else alert("Error saving transaction details");
     }
   };
 
@@ -173,7 +180,6 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm("Are you sure you want to delete this transaction? Balance adjustments will be reverted!")) return;
     try {
       const res = await fetch(`${API_BASE_URL}/api/entities/transactions/${id}`, {
         method: 'DELETE'
@@ -181,8 +187,10 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
       if (res.ok) {
         fetchTransactions();
         onRefresh();
+        if (showToast) showToast("Transaction deleted successfully!", "success");
       } else {
-        alert("Failed to delete transaction");
+        if (showToast) showToast("Failed to delete transaction", "error");
+        else alert("Failed to delete transaction");
       }
     } catch (err) {
       console.error(err);
@@ -474,14 +482,37 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
                     {tx.notes || '-'}
                   </td>
                   <td style={{ padding: '14px 20px', fontSize: '13px', textAlign: 'right' }}>
-                    <div style={{ display: 'inline-flex', gap: '8px' }}>
-                      <button className="btn btn-secondary" style={{ padding: '4px 8px' }} onClick={() => handleEdit(tx)}>
-                        <Edit2 size={12} />
-                      </button>
-                      <button className="btn btn-danger" style={{ padding: '4px 8px' }} onClick={() => handleDelete(tx.id)}>
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
+                    {deletingTxId === tx.id ? (
+                      <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
+                        <span style={{ color: 'var(--danger-light)', fontSize: '11px', fontWeight: 500 }}>Confirm?</span>
+                        <button 
+                          className="btn btn-secondary" 
+                          style={{ padding: '3px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444' }}
+                          onClick={() => {
+                            handleDelete(tx.id);
+                            setDeletingTxId(null);
+                          }}
+                        >
+                          Yes
+                        </button>
+                        <button 
+                          className="btn btn-secondary" 
+                          style={{ padding: '3px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px' }}
+                          onClick={() => setDeletingTxId(null)}
+                        >
+                          No
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'inline-flex', gap: '8px' }}>
+                        <button className="btn btn-secondary" style={{ padding: '4px 8px' }} onClick={() => handleEdit(tx)}>
+                          <Edit2 size={12} />
+                        </button>
+                        <button className="btn btn-danger" style={{ padding: '4px 8px' }} onClick={() => setDeletingTxId(tx.id)}>
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}

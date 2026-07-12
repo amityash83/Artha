@@ -6,9 +6,10 @@ import { API_BASE_URL } from '../config';
 interface ReportsProps {
   data: InitData;
   onRefresh: () => void;
+  showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
 
-export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
+export const Reports: React.FC<ReportsProps> = ({ data, onRefresh, showToast }) => {
   const [backupsList, setBackupsList] = useState<string[]>([]);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
@@ -45,6 +46,7 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
   const [editingInstName, setEditingInstName] = useState<string>('');
   const [deletingCategoryId, setDeletingCategoryId] = useState<number | null>(null);
   const [deletingInstId, setDeletingInstId] = useState<number | null>(null);
+  const [restoringBackupFilename, setRestoringBackupFilename] = useState<string | null>(null);
   const [customFields, setCustomFields] = useState<Array<{ name: string; label: string; type: 'text' | 'number' | 'date' }>>([]);
 
   const [ruleSaveStatus, setRuleSaveStatus] = useState<Record<string, string>>({});
@@ -357,7 +359,8 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
   const handleSelectDatabase = async (mode: 'open' | 'create') => {
     const electron = (window as any).require ? (window as any).require('electron') : null;
     if (!electron) {
-      alert("Database switching is only supported inside the Desktop application wrapper.");
+      if (showToast) showToast("Database switching is only supported inside the Desktop application wrapper.", "info");
+      else alert("Database switching is only supported inside the Desktop application wrapper.");
       return;
     }
     
@@ -372,17 +375,22 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
       });
       
       if (res.ok) {
-        alert(`Successfully switched active database file to:\n${selectedPath}`);
+        const successMsg = `Successfully switched active database file to:\n${selectedPath}`;
+        if (showToast) showToast(successMsg, "success");
+        else alert(successMsg);
         onRefresh();
         fetchDatabaseSettings();
         fetchBackups();
       } else {
         const err = await res.json();
-        alert(`Failed to switch: ${err.detail || "Unknown error"}`);
+        const failMsg = `Failed to switch: ${err.detail || "Unknown error"}`;
+        if (showToast) showToast(failMsg, "error");
+        else alert(failMsg);
       }
     } catch (err) {
       console.error(err);
-      alert("Error picking database file");
+      if (showToast) showToast("Error picking database file", "error");
+      else alert("Error picking database file");
     }
   };
 
@@ -394,16 +402,20 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
         body: JSON.stringify({ path })
       });
       if (res.ok) {
+        if (showToast) showToast(`Successfully switched to database at:\n${path}`, "success");
         onRefresh();
         fetchDatabaseSettings();
         fetchBackups();
       } else {
         const err = await res.json();
-        alert(`Failed to switch: ${err.detail}`);
+        const failMsg = `Failed to switch: ${err.detail}`;
+        if (showToast) showToast(failMsg, "error");
+        else alert(failMsg);
       }
     } catch (err) {
       console.error(err);
-      alert("Network error");
+      if (showToast) showToast("Network error", "error");
+      else alert("Network error");
     }
   };
 
@@ -455,8 +467,6 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
   };
 
   const handleRestoreBackup = async (filename: string) => {
-    if (!confirm(`Are you sure you want to restore the backup: ${filename}? This will overwrite current data.`)) return;
-
     try {
       const formData = new FormData();
       formData.append('backup_name', filename);
@@ -465,13 +475,16 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
         body: formData
       });
       if (res.ok) {
-        alert("Backup restored successfully!");
+        if (showToast) showToast("Backup restored successfully!", "success");
+        else alert("Backup restored successfully!");
         onRefresh();
       } else {
-        alert("Restore failed");
+        if (showToast) showToast("Restore failed", "error");
+        else alert("Restore failed");
       }
     } catch (err) {
-      alert("Network error");
+      if (showToast) showToast("Network error", "error");
+      else alert("Network error");
     }
   };
 
@@ -759,14 +772,42 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
                 <h4 style={{ fontSize: '12px', fontWeight: 600, marginBottom: '12px' }}>Available Backup Snapshots</h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '180px', overflowY: 'auto' }}>
                   {backupsList.length > 0 ? (
-                    backupsList.map((filename, idx) => (
-                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-sm)', fontSize: '12px' }}>
-                        <span style={{ fontFamily: 'monospace', fontSize: '11px', wordBreak: 'break-all', maxWidth: '200px' }} title={filename}>{filename}</span>
-                        <button className="btn btn-secondary" style={{ padding: '3px 8px', fontSize: '10px' }} onClick={() => handleRestoreBackup(filename)}>
-                          Restore
-                        </button>
-                      </div>
-                    ))
+                    backupsList.map((filename, idx) => {
+                      const isRestoring = restoringBackupFilename === filename;
+                      return (
+                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-sm)', fontSize: '12px' }}>
+                          <span style={{ fontFamily: 'monospace', fontSize: '11px', wordBreak: 'break-all', maxWidth: '200px' }} title={filename}>{filename}</span>
+                          {isRestoring ? (
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                              <span style={{ color: 'var(--warning-light)', fontSize: '11px', fontWeight: 500 }}>Overwrite?</span>
+                              <button 
+                                type="button" 
+                                className="btn btn-secondary" 
+                                style={{ padding: '2px 6px', fontSize: '10px', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', color: '#f59e0b', minWidth: 'auto' }}
+                                onClick={() => {
+                                  handleRestoreBackup(filename);
+                                  setRestoringBackupFilename(null);
+                                }}
+                              >
+                                Confirm
+                              </button>
+                              <button 
+                                type="button" 
+                                className="btn btn-secondary" 
+                                style={{ padding: '2px 6px', fontSize: '10px', minWidth: 'auto' }}
+                                onClick={() => setRestoringBackupFilename(null)}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button className="btn btn-secondary" style={{ padding: '3px 8px', fontSize: '10px' }} onClick={() => setRestoringBackupFilename(filename)}>
+                              Restore
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })
                   ) : (
                     <span style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '12px 0' }}>No backups found.</span>
                   )}

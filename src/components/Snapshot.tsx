@@ -6,9 +6,10 @@ import { API_BASE_URL } from '../config';
 interface SnapshotProps {
   data: InitData;
   onRefresh: () => void;
+  showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
 
-export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh }) => {
+export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh, showToast }) => {
   const [month, setMonth] = useState('');
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -100,12 +101,15 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh }) => {
       if (res.ok) {
         setSuccess(true);
         onRefresh();
+        if (showToast) showToast("Snapshot saved successfully!", "success");
       } else {
-        alert("Snapshot save failed");
+        if (showToast) showToast("Snapshot save failed", "error");
+        else alert("Snapshot save failed");
       }
     } catch (err) {
       console.error(err);
-      alert("Error saving snapshot details");
+      if (showToast) showToast("Error saving snapshot details", "error");
+      else alert("Error saving snapshot details");
     } finally {
       setSaving(false);
     }

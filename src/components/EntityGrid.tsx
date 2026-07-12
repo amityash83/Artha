@@ -10,6 +10,7 @@ interface EntityGridProps {
   categories: Category[];
   institutions: Institution[];
   onRefresh: () => void;
+  showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
 
 export const EntityGrid: React.FC<EntityGridProps> = ({
@@ -18,11 +19,13 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
   categories,
   institutions,
   onRefresh,
+  showToast,
 }) => {
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [editingEntity, setEditingEntity] = useState<any | null>(null);
   const [isAdding, setIsAdding] = useState(false);
+  const [deletingEntityId, setDeletingEntityId] = useState<number | null>(null);
 
   // Filter categories by the corresponding entity type
   const typeCategories = categories.filter((c) => c.entity_type.toLowerCase() === entityType.replace(/s$/, '').toLowerCase() || (entityType === 'accounts' && c.entity_type === 'Asset')); // accounts seed under Asset institution details
@@ -37,15 +40,17 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
   });
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm('Are you sure you want to delete this entity?')) return;
     try {
       const res = await fetch(`${API_BASE_URL}/api/entities/${entityType}/${id}`, {
         method: 'DELETE',
       });
       if (res.ok) {
         onRefresh();
+        const singularType = entityType.replace(/s$/, '');
+        if (showToast) showToast(`${singularType.charAt(0).toUpperCase() + singularType.slice(1)} deleted successfully!`, "success");
       } else {
-        alert('Failed to delete entity');
+        if (showToast) showToast('Failed to delete entity', "error");
+        else alert('Failed to delete entity');
       }
     } catch (err) {
       console.error(err);
@@ -76,9 +81,13 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
         setIsAdding(false);
         setEditingEntity(null);
         onRefresh();
+        const singularType = entityType.replace(/s$/, '');
+        if (showToast) showToast(`${singularType.charAt(0).toUpperCase() + singularType.slice(1)} saved successfully!`, "success");
       } else {
         const errorData = await res.json();
-        alert(`Error saving entity: ${errorData.detail || 'Unknown error'}`);
+        const msg = `Error saving entity: ${errorData.detail || 'Unknown error'}`;
+        if (showToast) showToast(msg, "error");
+        else alert(msg);
       }
     } catch (err) {
       console.error(err);
@@ -387,20 +396,45 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
                   })}
                   <td style={{ padding: '14px 16px', textAlign: 'right' }}>
                     <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                      <button 
-                        className="btn btn-secondary" 
-                        style={{ padding: '6px', minWidth: 'auto', borderRadius: '8px' }}
-                        onClick={() => setEditingEntity(ent)}
-                      >
-                        <Edit2 size={13} style={{ color: '#a78bfa' }} />
-                      </button>
-                      <button 
-                        className="btn btn-secondary" 
-                        style={{ padding: '6px', minWidth: 'auto', borderRadius: '8px' }}
-                        onClick={() => handleDelete(ent.id)}
-                      >
-                        <Trash2 size={13} style={{ color: '#ef4444' }} />
-                      </button>
+                      {deletingEntityId === ent.id ? (
+                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                          <span style={{ color: 'var(--danger-light)', fontSize: '11px', fontWeight: 500 }}>Confirm?</span>
+                          <button 
+                            className="btn btn-secondary" 
+                            style={{ padding: '3px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444' }}
+                            onClick={() => {
+                              handleDelete(ent.id);
+                              setDeletingEntityId(null);
+                            }}
+                          >
+                            Yes
+                          </button>
+                          <button 
+                            className="btn btn-secondary" 
+                            style={{ padding: '3px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px' }}
+                            onClick={() => setDeletingEntityId(null)}
+                          >
+                            No
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <button 
+                            className="btn btn-secondary" 
+                            style={{ padding: '6px', minWidth: 'auto', borderRadius: '8px' }}
+                            onClick={() => setEditingEntity(ent)}
+                          >
+                            <Edit2 size={13} style={{ color: '#a78bfa' }} />
+                          </button>
+                          <button 
+                            className="btn btn-secondary" 
+                            style={{ padding: '6px', minWidth: 'auto', borderRadius: '8px' }}
+                            onClick={() => setDeletingEntityId(ent.id)}
+                          >
+                            <Trash2 size={13} style={{ color: '#ef4444' }} />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>

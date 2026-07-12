@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { 
   Landmark, LandmarkIcon, PiggyBank, 
-  Target, FileText, Database, Compass, Calendar, Calculator, Zap, LineChart, ArrowRightLeft, Sliders
+  Target, FileText, Database, Compass, Calendar, Calculator, Zap, LineChart, ArrowRightLeft, Sliders,
+  CheckCircle2, AlertCircle, Info, X
 } from 'lucide-react';
 import { InitData } from './types';
 import { Dashboard } from './components/Dashboard';
@@ -25,6 +26,22 @@ const App: React.FC = () => {
   
   // Cache scenario arguments for simulation redirect
   const [simRedirectParams, setSimRedirectParams] = useState<any>(null);
+
+  // Toast notifications state
+  interface Toast {
+    id: string;
+    message: string;
+    type: 'success' | 'error' | 'info';
+  }
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 4000);
+  };
 
   const fetchFinanceData = async () => {
     let attempts = 0;
@@ -295,16 +312,16 @@ const App: React.FC = () => {
           <Dashboard data={data} onNavigate={handleNavigate} />
         )}
         {activeTab === 'snapshot' && (
-          <Snapshot data={data} onRefresh={fetchFinanceData} />
+          <Snapshot data={data} onRefresh={fetchFinanceData} showToast={showToast} />
         )}
         {activeTab === 'cash-flow' && (
-          <CashFlowPlanning data={data} onRefresh={fetchFinanceData} />
+          <CashFlowPlanning data={data} onRefresh={fetchFinanceData} showToast={showToast} />
         )}
         {activeTab === 'transactions' && (
-          <TransactionsLedger data={data} onRefresh={fetchFinanceData} />
+          <TransactionsLedger data={data} onRefresh={fetchFinanceData} showToast={showToast} />
         )}
         {activeTab === 'budget-planner' && (
-          <BudgetPlanner data={data} onRefresh={fetchFinanceData} />
+          <BudgetPlanner data={data} onRefresh={fetchFinanceData} showToast={showToast} />
         )}
         {activeTab === 'accounts' && (
           <EntityGrid 
@@ -313,6 +330,7 @@ const App: React.FC = () => {
             categories={data.categories} 
             institutions={data.institutions} 
             onRefresh={fetchFinanceData} 
+            showToast={showToast}
           />
         )}
         {activeTab === 'assets' && (
@@ -322,6 +340,7 @@ const App: React.FC = () => {
             categories={data.categories} 
             institutions={data.institutions} 
             onRefresh={fetchFinanceData} 
+            showToast={showToast}
           />
         )}
         {activeTab === 'liabilities' && (
@@ -331,6 +350,7 @@ const App: React.FC = () => {
             categories={data.categories} 
             institutions={data.institutions} 
             onRefresh={fetchFinanceData} 
+            showToast={showToast}
           />
         )}
         {activeTab === 'goals' && (
@@ -340,6 +360,7 @@ const App: React.FC = () => {
             categories={data.categories} 
             institutions={data.institutions} 
             onRefresh={fetchFinanceData} 
+            showToast={showToast}
           />
         )}
         {activeTab === 'simulations' && (
@@ -352,12 +373,94 @@ const App: React.FC = () => {
           <LoanOptimizer data={data} />
         )}
         {activeTab === 'emi-calculator' && (
-          <EmiCalculator />
+          <EmiCalculator showToast={showToast} />
         )}
         {activeTab === 'reports' && (
-          <Reports data={data} onRefresh={fetchFinanceData} />
+          <Reports data={data} onRefresh={fetchFinanceData} showToast={showToast} />
         )}
       </main>
+
+      {/* Toast Notifications container */}
+      <div style={{
+        position: 'fixed',
+        bottom: '24px',
+        right: '24px',
+        zIndex: 9999,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+        pointerEvents: 'none'
+      }}>
+        {toasts.map(toast => {
+          let bg = 'rgba(15, 23, 42, 0.8)';
+          let border = 'rgba(148, 163, 184, 0.2)';
+          let iconColor = 'var(--text-muted)';
+          
+          if (toast.type === 'success') {
+            bg = 'rgba(16, 185, 129, 0.1)';
+            border = 'rgba(16, 185, 129, 0.2)';
+            iconColor = 'var(--success-light)';
+          } else if (toast.type === 'error') {
+            bg = 'rgba(239, 68, 68, 0.1)';
+            border = 'rgba(239, 68, 68, 0.2)';
+            iconColor = 'var(--danger-light)';
+          } else if (toast.type === 'info') {
+            bg = 'rgba(139, 92, 246, 0.1)';
+            border = 'rgba(139, 92, 246, 0.2)';
+            iconColor = 'var(--accent-light)';
+          }
+
+          return (
+            <div 
+              key={toast.id} 
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                padding: '12px 18px',
+                borderRadius: '10px',
+                background: bg,
+                backdropFilter: 'blur(16px)',
+                border: `1px solid ${border}`,
+                color: '#fff',
+                fontSize: '13px',
+                fontWeight: 500,
+                minWidth: '280px',
+                maxWidth: '400px',
+                boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)',
+                animation: 'slideIn 0.3s ease forwards',
+                pointerEvents: 'auto'
+              }}
+            >
+              {toast.type === 'success' && <CheckCircle2 size={16} style={{ color: iconColor, flexShrink: 0 }} />}
+              {toast.type === 'error' && <AlertCircle size={16} style={{ color: iconColor, flexShrink: 0 }} />}
+              {toast.type === 'info' && <Info size={16} style={{ color: iconColor, flexShrink: 0 }} />}
+              <span style={{ flex: 1 }}>{toast.message}</span>
+              <button 
+                onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
+                style={{ 
+                  background: 'none', 
+                  border: 'none', 
+                  color: 'rgba(255,255,255,0.4)', 
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  padding: '2px',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          );
+        })}
+        <style>{`
+          @keyframes slideIn {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+          }
+        `}</style>
+      </div>
     </div>
   );
 };

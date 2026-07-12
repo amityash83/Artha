@@ -8,13 +8,14 @@ import { API_BASE_URL } from '../config';
 interface BudgetPlannerProps {
   data: InitData;
   onRefresh: () => void;
+  showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
 
 interface MonthSpent {
   [categoryName: string]: number;
 }
 
-export const BudgetPlanner: React.FC<BudgetPlannerProps> = ({ data, onRefresh }) => {
+export const BudgetPlanner: React.FC<BudgetPlannerProps> = ({ data, onRefresh, showToast }) => {
   const categories = data.categories.filter(c => c.entity_type === 'Expense');
   
   // Selected Month (YYYY-MM)
@@ -91,8 +92,10 @@ export const BudgetPlanner: React.FC<BudgetPlannerProps> = ({ data, onRefresh })
       if (res.ok) {
         setEditingCategoryId(null);
         onRefresh();
+        if (showToast) showToast("Budget updated successfully!", "success");
       } else {
-        alert("Failed to update budget.");
+        if (showToast) showToast("Failed to update budget.", "error");
+        else alert("Failed to update budget.");
       }
     } catch (err) {
       console.error(err);

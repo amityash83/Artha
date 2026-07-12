@@ -28,7 +28,11 @@ interface EmiResult {
   }>;
 }
 
-export const EmiCalculator: React.FC = () => {
+interface EmiCalculatorProps {
+  showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
+}
+
+export const EmiCalculator: React.FC<EmiCalculatorProps> = ({ showToast }) => {
   // Inputs state
   const [loanAmount, setLoanAmount] = useState<number>(5000000); // 50 Lakhs default
   const [roi, setRoi] = useState<number>(8.5); // 8.5% default
@@ -49,6 +53,7 @@ export const EmiCalculator: React.FC = () => {
   const [savedProfiles, setSavedProfiles] = useState<any[]>([]);
   const [profileName, setProfileName] = useState<string>('');
   const [activeProfileId, setActiveProfileId] = useState<number | null>(null);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState<boolean>(false);
 
   // Load profiles on mount
   useEffect(() => {
@@ -87,7 +92,8 @@ export const EmiCalculator: React.FC = () => {
       });
 
       if (res.ok) {
-        alert("Profile saved successfully!");
+        if (showToast) showToast("Profile saved successfully!", "success");
+        else alert("Profile saved successfully!");
         fetchProfiles();
         const refreshedRes = await fetch(`${API_BASE_URL}/api/settings/emi-profiles`);
         if (refreshedRes.ok) {
@@ -99,11 +105,13 @@ export const EmiCalculator: React.FC = () => {
           }
         }
       } else {
-        alert("Failed to save profile");
+        if (showToast) showToast("Failed to save profile", "error");
+        else alert("Failed to save profile");
       }
     } catch (err) {
       console.error(err);
-      alert("Error saving profile");
+      if (showToast) showToast("Error saving profile", "error");
+      else alert("Error saving profile");
     }
   };
 
@@ -129,23 +137,25 @@ export const EmiCalculator: React.FC = () => {
 
   const handleDeleteProfile = async () => {
     if (!activeProfileId) return;
-    if (!confirm(`Are you sure you want to delete profile "${profileName}"?`)) return;
 
     try {
       const res = await fetch(`${API_BASE_URL}/api/settings/emi-profiles/${activeProfileId}`, {
         method: 'DELETE'
       });
       if (res.ok) {
-        alert("Profile deleted successfully!");
         setActiveProfileId(null);
         setProfileName('');
+        setIsConfirmingDelete(false);
         fetchProfiles();
+        if (showToast) showToast("Profile deleted successfully!", "success");
       } else {
-        alert("Failed to delete profile");
+        if (showToast) showToast("Failed to delete profile", "error");
+        else alert("Failed to delete profile");
       }
     } catch (err) {
       console.error(err);
-      alert("Error deleting profile");
+      if (showToast) showToast("Error deleting profile", "error");
+      else alert("Error deleting profile");
     }
   };
 
@@ -311,11 +321,13 @@ export const EmiCalculator: React.FC = () => {
         a.click();
         a.remove();
       } else {
-        alert("Failed to export Excel sheet");
+        if (showToast) showToast("Failed to export Excel sheet", "error");
+        else alert("Failed to export Excel sheet");
       }
     } catch (err) {
       console.error(err);
-      alert("Network error during Excel export");
+      if (showToast) showToast("Network error during Excel export", "error");
+      else alert("Network error during Excel export");
     }
   };
 
@@ -339,7 +351,8 @@ export const EmiCalculator: React.FC = () => {
     if (!optimized) return;
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
-      alert("Please allow popups to export PDF.");
+      if (showToast) showToast("Please allow popups to export PDF.", "info");
+      else alert("Please allow popups to export PDF.");
       return;
     }
     
@@ -458,9 +471,31 @@ export const EmiCalculator: React.FC = () => {
             ))}
           </select>
           {activeProfileId && (
-            <button className="btn btn-secondary" style={{ color: 'var(--danger)', padding: '6px 12px', fontSize: '12px' }} onClick={handleDeleteProfile}>
-              Delete Profile
-            </button>
+            isConfirmingDelete ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '8px', padding: '2px 8px' }}>
+                <span style={{ color: 'var(--danger-light)', fontSize: '12px', fontWeight: 500 }}>Delete?</span>
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  style={{ padding: '3px 8px', fontSize: '11px', color: '#ef4444', border: 'none', background: 'transparent', minWidth: 'auto' }}
+                  onClick={handleDeleteProfile}
+                >
+                  Yes
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  style={{ padding: '3px 8px', fontSize: '11px', border: 'none', background: 'transparent', minWidth: 'auto' }}
+                  onClick={() => setIsConfirmingDelete(false)}
+                >
+                  No
+                </button>
+              </div>
+            ) : (
+              <button className="btn btn-secondary" style={{ color: 'var(--danger)', padding: '6px 12px', fontSize: '12px' }} onClick={() => setIsConfirmingDelete(true)}>
+                Delete Profile
+              </button>
+            )
           )}
         </div>
 

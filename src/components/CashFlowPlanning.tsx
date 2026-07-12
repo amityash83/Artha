@@ -9,9 +9,10 @@ import { API_BASE_URL } from '../config';
 interface CashFlowPlanningProps {
   data: InitData;
   onRefresh: () => void;
+  showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
 
-export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefresh }) => {
+export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefresh, showToast }) => {
   const { cash_flows = [], liabilities, assets, goals, accounts } = data;
   const loans = liabilities.filter((l: any) => l.category_name !== 'Credit Card');
   const properties = assets.filter((a: any) => a.category_name === 'Property');
@@ -23,6 +24,7 @@ export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefr
   // Form State for new/editing snapshot
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [deletingCfId, setDeletingCfId] = useState<number | null>(null);
   
   const [month, setMonth] = useState('');
   const [netSalary, setNetSalary] = useState<number>(150000);
@@ -141,8 +143,10 @@ export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefr
         setOneTimeExpenses(0);
         setNotes('');
         onRefresh();
+        if (showToast) showToast("Cash flow snapshot saved successfully!", "success");
       } else {
-        alert("Failed to save snapshot");
+        if (showToast) showToast("Failed to save snapshot", "error");
+        else alert("Failed to save snapshot");
       }
     } catch (err) {
       console.error(err);
@@ -166,7 +170,6 @@ export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefr
 
   // Handle delete
   const handleDelete = async (id: number) => {
-    if (!confirm("Are you sure you want to delete this monthly cash flow log?")) return;
     try {
       const res = await fetch(`${API_BASE_URL}/api/cash-flows/${id}`, {
         method: 'DELETE'
@@ -576,14 +579,36 @@ export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefr
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 600 }}>{cfRate.toFixed(1)}%</td>
                       <td>
-                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
-                          <button className="btn btn-secondary" style={{ padding: '4px' }} onClick={() => openEdit(cf)}>
-                            <Edit2 size={12} />
-                          </button>
-                          <button className="btn btn-danger" style={{ padding: '4px' }} onClick={() => handleDelete(cf.id)}>
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
+                        {deletingCfId === cf.id ? (
+                          <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', alignItems: 'center' }}>
+                            <button 
+                              className="btn btn-secondary" 
+                              style={{ padding: '2px 6px', fontSize: '10px', minWidth: 'auto', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444' }}
+                              onClick={() => {
+                                handleDelete(cf.id);
+                                setDeletingCfId(null);
+                              }}
+                            >
+                              Yes
+                            </button>
+                            <button 
+                              className="btn btn-secondary" 
+                              style={{ padding: '2px 6px', fontSize: '10px', minWidth: 'auto' }}
+                              onClick={() => setDeletingCfId(null)}
+                            >
+                              No
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                            <button className="btn btn-secondary" style={{ padding: '4px' }} onClick={() => openEdit(cf)}>
+                              <Edit2 size={12} />
+                            </button>
+                            <button className="btn btn-danger" style={{ padding: '4px' }} onClick={() => setDeletingCfId(cf.id)}>
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );
