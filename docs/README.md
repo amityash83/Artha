@@ -26,6 +26,7 @@ The documentation is organized strictly under the **Enterprise Design Methodolog
 *   **[Step 8.2 - Screen Specifications](file:///d:/AI/Antigravity/Artha/docs/12-Screen-Specifications.md):** Purpose, data displays, filters, and actions for each screen view.
 *   **[Step 8.3 - UI Design System](file:///d:/AI/Antigravity/Artha/docs/13-UI-Design-System.md):** Design tokens, primary colors, typography scales, and cards styling.
 *   **[Step 8.4 - Form Engine](file:///d:/AI/Antigravity/Artha/docs/14-Form-Engine.md):** Metadata-driven form validations and dynamic layout parameters.
+*   **[Step 9 - AI Architecture](file:///d:/AI/Antigravity/Artha/docs/15-AI.md):** Prompt strategy, context limits, planning models, and forecasting.
 *   **[Memory Log](file:///d:/AI/Antigravity/Artha/docs/memory.md):** Session learning tracker and design constraints.
 
 ### Legacy Specification Archive
