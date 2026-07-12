@@ -150,6 +150,13 @@ class SimulationRequestSchema(BaseModel):
     scenario_type: str # close_loan, delay_goal, increase_sip, salary_change, receive_bonus, roi_reduction, brother_property
     params: dict # parameters specific to the scenario
 
+class DebtPayoffRequest(BaseModel):
+    extra_monthly: float = 0.0
+    strategy: str = "avalanche"
+    prepayment_frequency: str = "monthly"
+    prepayment_amount: float = 0.0
+    prepayment_month: int = 3
+
 # --- Core Dynamic Aggregate / Dashboard Data ---
 @app.get("/api/init")
 def get_init_data():
@@ -865,6 +872,54 @@ def run_simulation(req: SimulationRequestSchema):
                 "tenure_months": diff_tenure_val
             },
             "recommendation": recommendation
+        }
+    finally:
+        conn.close()
+
+@app.post("/api/simulations/debt_payoff")
+def run_debt_payoff_simulation(req: DebtPayoffRequest):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT name, outstanding, interest_rate as roi, emi FROM liabilities WHERE outstanding > 0")
+        rows = cursor.fetchall()
+        
+        loans_list = [
+            {
+                "name": row["name"],
+                "outstanding": float(row["outstanding"]),
+                "roi": float(row["roi"]),
+                "emi": float(row["emi"])
+            }
+            for row in rows
+        ]
+        
+        if not loans_list:
+            return {
+                "baseline": {"total_interest": 0.0, "months": 0, "schedule": []},
+                "optimized": {"total_interest": 0.0, "months": 0, "schedule": []}
+            }
+            
+        baseline = calc.simulate_multi_loan_payoff(
+            loans_list=json.loads(json.dumps(loans_list)),
+            extra_monthly=0.0,
+            strategy="baseline",
+            prepayment_frequency="none",
+            prepayment_amount=0.0
+        )
+        
+        optimized = calc.simulate_multi_loan_payoff(
+            loans_list=json.loads(json.dumps(loans_list)),
+            extra_monthly=req.extra_monthly,
+            strategy=req.strategy,
+            prepayment_frequency=req.prepayment_frequency,
+            prepayment_amount=req.prepayment_amount,
+            prepayment_month=req.prepayment_month
+        )
+        
+        return {
+            "baseline": baseline,
+            "optimized": optimized
         }
     finally:
         conn.close()
