@@ -32,18 +32,29 @@ function Start-Services {
         Remove-Item $PID_FILE
     }
 
+    # Free port 8000 if occupied
+    $portConn = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue
+    if ($portConn) {
+        $portPids = $portConn.OwningProcess | Select-Object -Unique
+        foreach ($pId in $portPids) {
+            Write-Host "[!] Port 8000 is in use by PID $pId. Terminating process to free the port..." -ForegroundColor Yellow
+            Stop-Process -Id $pId -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 1
+        }
+    }
+
     Write-Host "[+] Starting Backend FastAPI Server..." -ForegroundColor Green
-    $backendProcess = Start-Process -FilePath "venv\Scripts\python.exe" -ArgumentList "-m uvicorn backend.main:app --host 127.0.0.1 --port 8000" -WindowStyle Hidden -PassThru
+    $backendProcess = Start-Process -FilePath "venv\Scripts\python.exe" -ArgumentList "-m uvicorn backend.main:app --host 127.0.0.1 --port 8000" -WorkingDirectory $PSScriptRoot -RedirectStandardOutput "$PSScriptRoot\backend_stdout.log" -RedirectStandardError "$PSScriptRoot\backend_stderr.log" -WindowStyle Hidden -PassThru
 
     Write-Host "[+] Starting Frontend & Desktop Client..." -ForegroundColor Green
-    $frontendProcess = Start-Process -FilePath "npm.cmd" -ArgumentList "run start" -WindowStyle Normal -PassThru
+    $frontendProcess = Start-Process -FilePath "npm.cmd" -ArgumentList "run start" -WorkingDirectory $PSScriptRoot -WindowStyle Normal -PassThru
 
     # Write PIDs to file
     $pids = @($backendProcess.Id, $frontendProcess.Id)
     $pids | Out-File -FilePath $PID_FILE -Encoding ascii
 
     Write-Host "[+] Services launched successfully!" -ForegroundColor Green
-    Write-Host "    - Backend PID: $($backendProcess.Id) (running hidden on port 8000)" -ForegroundColor Gray
+    Write-Host "    - Backend PID: $($backendProcess.Id) (Logs: backend_stdout.log / backend_stderr.log)" -ForegroundColor Gray
     Write-Host "    - Frontend PID: $($frontendProcess.Id)" -ForegroundColor Gray
     Write-Host "    - Run '.\artha.ps1 stop' to terminate." -ForegroundColor Yellow
 }
