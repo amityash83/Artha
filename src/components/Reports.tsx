@@ -39,12 +39,13 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
   // Form states for creating custom metadata
   const [newCatName, setNewCatName] = useState('');
   const [newCatType, setNewCatType] = useState('Asset');
-  const [newCatFields, setNewCatFields] = useState('');
   const [newInstName, setNewInstName] = useState('');
+  const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
+  const [customFields, setCustomFields] = useState<Array<{ name: string; label: string; type: 'text' | 'number' | 'date' }>>([]);
 
   const [ruleSaveStatus, setRuleSaveStatus] = useState<Record<string, string>>({});
   const [metaStatus, setMetaStatus] = useState<string | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'database' | 'metadata' | 'data'>('database');
+  const [activeSubTab, setActiveSubTab] = useState<'database' | 'rules' | 'categories' | 'data'>('database');
 
   useEffect(() => {
     fetchBackups();
@@ -111,34 +112,45 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
     e.preventDefault();
     if (!newCatName) return;
     try {
-      setMetaStatus("Adding Category...");
-      let parsedFields = null;
-      if (newCatFields.trim()) {
-        parsedFields = JSON.parse(newCatFields);
-      }
+      const isEdit = editingCategoryId !== null;
+      setMetaStatus(isEdit ? "Updating Category..." : "Adding Category...");
       
-      const res = await fetch(`${API_BASE_URL}/api/metadata/categories`, {
-        method: 'POST',
+      const cleanedFields = customFields
+        .filter(f => f.name.trim() !== '')
+        .map(f => ({
+          name: f.name.trim(),
+          label: f.label.trim() || f.name.trim(),
+          type: f.type || 'text'
+        }));
+
+      const payload = {
+        entity_type: newCatType,
+        name: newCatName.trim(),
+        fields_definition: cleanedFields.length > 0 ? JSON.stringify(cleanedFields) : null
+      };
+      
+      const url = isEdit 
+        ? `${API_BASE_URL}/api/metadata/categories/${editingCategoryId}`
+        : `${API_BASE_URL}/api/metadata/categories`;
+        
+      const res = await fetch(url, {
+        method: isEdit ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          entity_type: newCatType,
-          name: newCatName,
-          fields_definition: parsedFields
-        })
+        body: JSON.stringify(payload)
       });
       if (res.ok) {
-        setMetaStatus("Category added successfully!");
-        setNewCatName('');
-        setNewCatFields('');
+        setMetaStatus(isEdit ? "Category updated successfully!" : "Category added successfully!");
+        resetCategoryForm();
         fetchCategoriesList();
         onRefresh();
         setTimeout(() => setMetaStatus(null), 3000);
       } else {
-        setMetaStatus("Failed to add category");
+        const err = await res.json();
+        setMetaStatus(`Failed to save category: ${err.detail || 'Unknown error'}`);
       }
     } catch (err) {
       console.error(err);
-      setMetaStatus("Error parsing custom fields JSON schema: " + (err as Error).message);
+      setMetaStatus("Error saving category");
     }
   };
 
@@ -189,37 +201,84 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
     }
   };
 
-  const handleEditMetadata = async (type: 'categories' | 'institutions', id: number, currentName: string, currentFieldsDefinition?: any) => {
-    const newName = window.prompt(`Rename this ${type === 'categories' ? 'category' : 'institution'}:`, currentName);
+  const handleEditMetadata = async (type: 'categories' | 'institutions', id: number, currentName: string) => {
+    if (type === 'categories') {
+      const cat = categories.find(c => c.id === id);
+      if (cat) {
+        handleEditCategorySchema(cat);
+      }
+      return;
+    }
+    const newName = window.prompt("Rename this institution:", currentName);
     if (!newName || newName.trim() === '' || newName === currentName) return;
 
-    let payload: any = { name: newName.trim() };
-    if (type === 'categories') {
-      payload.entity_type = categories.find(c => c.id === id)?.entity_type || 'Asset';
-      payload.fields_definition = currentFieldsDefinition;
-    }
-
     try {
-      setMetaStatus(`Updating ${type === 'categories' ? 'category' : 'institution'}...`);
-      const res = await fetch(`${API_BASE_URL}/api/metadata/${type}/${id}`, {
+      setMetaStatus("Updating institution...");
+      const res = await fetch(`${API_BASE_URL}/api/metadata/institutions/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ name: newName.trim() })
       });
       if (res.ok) {
-        setMetaStatus("Metadata item updated successfully.");
-        if (type === 'categories') fetchCategoriesList();
-        else fetchInstitutionsList();
+        setMetaStatus("Institution updated successfully.");
+        fetchInstitutionsList();
         onRefresh();
         setTimeout(() => setMetaStatus(null), 3000);
       } else {
         const err = await res.json();
-        setMetaStatus(`Failed to update metadata item: ${err.detail || 'Unknown error'}`);
+        setMetaStatus(`Failed to update institution: ${err.detail || 'Unknown error'}`);
       }
     } catch (err) {
       console.error(err);
-      setMetaStatus("Error updating metadata item");
+      setMetaStatus("Error updating institution");
     }
+  };
+
+  const handleEditCategorySchema = (cat: any) => {
+    setEditingCategoryId(cat.id);
+    setNewCatName(cat.name);
+    setNewCatType(cat.entity_type);
+    
+    let parsed: any[] = [];
+    if (cat.fields_definition) {
+      try {
+        const fields = typeof cat.fields_definition === 'string'
+          ? JSON.parse(cat.fields_definition)
+          : cat.fields_definition;
+        if (Array.isArray(fields)) {
+          parsed = fields;
+        } else if (typeof fields === 'object' && fields !== null) {
+          parsed = Object.keys(fields).map(key => ({
+            name: key,
+            label: key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+            type: fields[key] || 'text'
+          }));
+        }
+      } catch (e) {
+        console.error("Error parsing fields definition:", e);
+      }
+    }
+    setCustomFields(parsed);
+    setActiveSubTab('categories');
+  };
+
+  const addFieldRow = () => {
+    setCustomFields(prev => [...prev, { name: '', label: '', type: 'text' }]);
+  };
+
+  const removeFieldRow = (idx: number) => {
+    setCustomFields(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const updateFieldRow = (idx: number, key: 'name' | 'label' | 'type', value: string) => {
+    setCustomFields(prev => prev.map((f, i) => i === idx ? { ...f, [key]: value } : f));
+  };
+
+  const resetCategoryForm = () => {
+    setNewCatName('');
+    setNewCatType('Asset');
+    setCustomFields([]);
+    setEditingCategoryId(null);
   };
 
   const fetchDatabaseSettings = () => {
@@ -510,11 +569,18 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
           Database &amp; Backups
         </button>
         <button 
-          onClick={() => setActiveSubTab('metadata')} 
-          className={`sidebar-item ${activeSubTab === 'metadata' ? 'active' : ''}`}
+          onClick={() => setActiveSubTab('rules')} 
+          className={`sidebar-item ${activeSubTab === 'rules' ? 'active' : ''}`}
           style={{ padding: '8px 16px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '13px' }}
         >
-          Metadata &amp; Rules Engine
+          Rules Engine
+        </button>
+        <button 
+          onClick={() => setActiveSubTab('categories')} 
+          className={`sidebar-item ${activeSubTab === 'categories' ? 'active' : ''}`}
+          style={{ padding: '8px 16px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '13px' }}
+        >
+          Category Schema Builder
         </button>
         <button 
           onClick={() => setActiveSubTab('data')} 
@@ -679,71 +745,174 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
         </div>
       )}
 
-      {/* TAB 2: METADATA & RULES ENGINE */}
-      {activeSubTab === 'metadata' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '32px' }}>
-          {/* Policy Rules Parameters */}
-          <div>
-            <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '16px', borderBottom: '1px solid var(--border-glass)', paddingBottom: '8px' }}>
-              Policy Rules Parameters
-            </h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              {rules.map((rule: any) => (
-                <div key={rule.rule_key} className="glass-panel" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', background: 'rgba(255,255,255,0.01)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                      <strong style={{ fontSize: '13px', color: '#fff' }}>{rule.rule_name}</strong>
-                      <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>{rule.description}</p>
-                    </div>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-secondary)', cursor: 'pointer' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={rule.is_enabled === 1}
-                        onChange={e => handleUpdateRule(rule.rule_key, rule.value, e.target.checked)}
-                      />
-                      Active
-                    </label>
+      {/* TAB 2: RULES PARAMETERS */}
+      {activeSubTab === 'rules' && (
+        <div>
+          <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '16px', borderBottom: '1px solid var(--border-glass)', paddingBottom: '8px' }}>
+            Policy Rules Parameters
+          </h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+            {rules.map((rule: any) => (
+              <div key={rule.rule_key} className="glass-panel" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', background: 'rgba(255,255,255,0.01)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <strong style={{ fontSize: '13px', color: '#fff' }}>{rule.rule_name}</strong>
+                    <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>{rule.description}</p>
                   </div>
-
-                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-secondary)', cursor: 'pointer' }}>
                     <input 
-                      type="number" 
-                      className="form-control" 
-                      style={{ padding: '6px 12px', fontSize: '12px', flex: 1 }}
-                      value={rule.value} 
-                      onChange={e => {
-                        const val = parseFloat(e.target.value) || 0;
-                        setRules(rules.map(r => r.rule_key === rule.rule_key ? { ...r, value: val } : r));
-                      }} 
+                      type="checkbox" 
+                      checked={rule.is_enabled === 1}
+                      onChange={e => handleUpdateRule(rule.rule_key, rule.value, e.target.checked)}
                     />
-                    <button 
-                      className="btn btn-primary" 
-                      style={{ padding: '6px 12px', fontSize: '11px' }}
-                      onClick={() => handleUpdateRule(rule.rule_key, rule.value, rule.is_enabled === 1)}
-                    >
-                      {ruleSaveStatus[rule.rule_key] || 'Update'}
-                    </button>
+                    Active
+                  </label>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <input 
+                    type="number" 
+                    className="form-control" 
+                    style={{ padding: '6px 12px', fontSize: '12px', flex: 1 }}
+                    value={rule.value} 
+                    onChange={e => {
+                      const val = parseFloat(e.target.value) || 0;
+                      setRules(rules.map(r => r.rule_key === rule.rule_key ? { ...r, value: val } : r));
+                    }} 
+                  />
+                  <button 
+                    className="btn btn-primary" 
+                    style={{ padding: '6px 12px', fontSize: '11px' }}
+                    onClick={() => handleUpdateRule(rule.rule_key, rule.value, rule.is_enabled === 1)}
+                  >
+                    {ruleSaveStatus[rule.rule_key] || 'Update'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: CATEGORY SCHEMA BUILDER */}
+      {activeSubTab === 'categories' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '32px' }}>
+          
+          {/* Left Column: Category Schema Explorer */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-glass)', paddingBottom: '8px' }}>
+              Active Schema Registry
+            </h3>
+
+            {/* Group Categories by Entity Type */}
+            {['Account', 'Asset', 'Liability', 'Income', 'Expense'].map(type => {
+              const typeCats = categories.filter(c => c.entity_type === type);
+              if (typeCats.length === 0) return null;
+              
+              return (
+                <div key={type} style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: '12px', padding: '16px' }}>
+                  <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent-light)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px', borderBottom: '1px dashed rgba(255,255,255,0.05)', paddingBottom: '4px' }}>
+                    {type} Categories
+                  </h4>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    {typeCats.map(cat => {
+                      let fieldsList: any[] = [];
+                      if (cat.fields_definition) {
+                        try {
+                          const parsed = typeof cat.fields_definition === 'string'
+                            ? JSON.parse(cat.fields_definition)
+                            : cat.fields_definition;
+                          if (Array.isArray(parsed)) {
+                            fieldsList = parsed;
+                          }
+                        } catch(e) {}
+                      }
+
+                      return (
+                        <div key={cat.id} className="glass-panel" style={{ padding: '12px', background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.04)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <strong style={{ fontSize: '13px', color: '#fff' }}>{cat.name}</strong>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <Edit2 
+                                size={12} 
+                                style={{ color: 'var(--info)', cursor: 'pointer', opacity: 0.8 }} 
+                                onClick={() => handleEditCategorySchema(cat)} 
+                              />
+                              <Trash2 
+                                size={12} 
+                                style={{ color: '#ef4444', cursor: 'pointer', opacity: 0.8 }} 
+                                onClick={() => handleDeleteMetadata('categories', cat.id)} 
+                              />
+                            </div>
+                          </div>
+
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                            {fieldsList.length > 0 ? (
+                              <ul style={{ paddingLeft: '14px', margin: 0 }}>
+                                {fieldsList.map((f, i) => (
+                                  <li key={i}>
+                                    <span style={{ color: '#e2e8f0' }}>{f.label || f.name}</span> <span style={{ color: '#a78bfa', fontSize: '9px' }}>({f.type})</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <span style={{ fontStyle: 'italic' }}>Standard fields only</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-              ))}
+              );
+            })}
+
+            {/* Institutions Management List */}
+            <div style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: '12px', padding: '16px', marginTop: '12px' }}>
+              <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent-light)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px', borderBottom: '1px dashed rgba(255,255,255,0.05)', paddingBottom: '4px' }}>
+                Financial Institutions
+              </h4>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                {institutions.map((inst: any) => (
+                  <div key={inst.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '6px', fontSize: '11px' }}>
+                    <span>{inst.name}</span>
+                    <div style={{ display: 'inline-flex', gap: '6px', marginLeft: '4px' }}>
+                      <Edit2 
+                        size={12} 
+                        style={{ color: 'var(--info)', cursor: 'pointer' }} 
+                        onClick={() => handleEditMetadata('institutions', inst.id, inst.name)} 
+                      />
+                      <Trash2 
+                        size={12} 
+                        style={{ color: '#ef4444', cursor: 'pointer' }} 
+                        onClick={() => handleDeleteMetadata('institutions', inst.id)} 
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* Categories, Institutions & Metadata Registry */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-            {/* Category Creator */}
-            <div className="glass-panel" style={{ padding: '20px' }}>
-              <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Plus size={16} /> Add Custom Product Category
+          {/* Right Column: Visual Interactive Builder & Institution Form */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            
+            {/* Visual Schema Builder Form */}
+            <div className="glass-panel" style={{ padding: '24px' }}>
+              <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Plus size={16} /> 
+                {editingCategoryId !== null ? 'Modify Category Schema' : 'Add Custom Product Category'}
               </h3>
-              <form onSubmit={handleAddCategory} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              
+              <form onSubmit={handleAddCategory} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Category Name</label>
                     <input 
                       type="text" 
                       className="form-control" 
-                      placeholder="e.g. Fine Art" 
+                      placeholder="e.g. Mutual Fund" 
                       required 
                       value={newCatName} 
                       onChange={e => setNewCatName(e.target.value)} 
@@ -755,6 +924,7 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
                       className="form-control" 
                       value={newCatType} 
                       onChange={e => setNewCatType(e.target.value)}
+                      disabled={editingCategoryId !== null}
                     >
                       <option value="Asset">Asset</option>
                       <option value="Liability">Liability</option>
@@ -765,29 +935,78 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <label style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)' }}>
-                    <span>Dynamic Custom Fields JSON (Optional)</span>
-                    <span style={{ color: '#a78bfa', fontFamily: 'monospace', fontSize: '10px' }}>[&#123;"name":"foo","type":"text"&#125;]</span>
-                  </label>
-                  <textarea 
-                    className="form-control" 
-                    placeholder='e.g. [{"name": "artist", "type": "text", "label": "Artist"}]'
-                    style={{ fontSize: '12px', fontFamily: 'monospace', height: '60px', resize: 'none' }}
-                    value={newCatFields}
-                    onChange={e => setNewCatFields(e.target.value)}
-                  />
+                {/* Field Spec Builder */}
+                <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '14px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Custom Properties Schema</span>
+                    <button type="button" className="btn btn-secondary" style={{ padding: '3px 8px', fontSize: '10px' }} onClick={addFieldRow}>
+                      + Add Field Row
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
+                    {customFields.length > 0 ? (
+                      customFields.map((field, idx) => (
+                        <div key={idx} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <input 
+                            type="text"
+                            placeholder="database_key (e.g. units)"
+                            className="form-control"
+                            style={{ flex: 1.2, padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}
+                            value={field.name}
+                            onChange={e => updateFieldRow(idx, 'name', e.target.value)}
+                            required
+                          />
+                          <input 
+                            type="text"
+                            placeholder="Field Label (e.g. Units)"
+                            className="form-control"
+                            style={{ flex: 1.5, padding: '4px 8px', fontSize: '11px' }}
+                            value={field.label}
+                            onChange={e => updateFieldRow(idx, 'label', e.target.value)}
+                            required
+                          />
+                          <select
+                            className="form-control"
+                            style={{ width: '90px', padding: '4px', fontSize: '11px' }}
+                            value={field.type}
+                            onChange={e => updateFieldRow(idx, 'type', e.target.value as any)}
+                          >
+                            <option value="text">Text</option>
+                            <option value="number">Number</option>
+                            <option value="date">Date</option>
+                          </select>
+                          <Trash2 
+                            size={14} 
+                            style={{ color: '#ef4444', cursor: 'pointer', flexShrink: 0 }} 
+                            onClick={() => removeFieldRow(idx)}
+                          />
+                        </div>
+                      ))
+                    ) : (
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic', padding: '10px 0' }}>
+                        No custom fields spec. Category will use core properties only. Click Add to append properties.
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                <button type="submit" className="btn btn-primary" style={{ marginTop: '4px' }}>
-                  Register Category
-                </button>
+                <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
+                  <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
+                    {editingCategoryId !== null ? 'Update Category Schema' : 'Register Category'}
+                  </button>
+                  {editingCategoryId !== null && (
+                    <button type="button" className="btn btn-secondary" onClick={resetCategoryForm}>
+                      Cancel
+                    </button>
+                  )}
+                </div>
               </form>
             </div>
 
-            {/* Institution Creator */}
-            <div className="glass-panel" style={{ padding: '20px' }}>
-              <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {/* Institution Creator Form */}
+            <div className="glass-panel" style={{ padding: '24px' }}>
+              <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <Plus size={16} /> Register Financial Institution
               </h3>
               <form onSubmit={handleAddInstitution} style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
@@ -796,7 +1015,7 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
                   <input 
                     type="text" 
                     className="form-control" 
-                    placeholder="e.g. Vanguard" 
+                    placeholder="e.g. Groww" 
                     required 
                     value={newInstName} 
                     onChange={e => setNewInstName(e.target.value)} 
@@ -808,64 +1027,11 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
               </form>
             </div>
 
-            {/* List & Clean-up Metadata */}
-            <div className="glass-panel" style={{ padding: '20px' }}>
-              <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '12px' }}>
-                Active System Metadata Registry
-              </h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '200px', overflowY: 'auto' }}>
-                <div>
-                  <h4 style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>Dynamic Categories</h4>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                    {categories.map((cat: any) => (
-                      <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '6px', fontSize: '11px' }}>
-                        <span>{cat.name} <strong style={{ color: 'var(--text-muted)', fontSize: '10px' }}>({cat.entity_type})</strong></span>
-                        <div style={{ display: 'inline-flex', gap: '6px', marginLeft: '4px' }}>
-                          <Edit2 
-                            size={12} 
-                            style={{ color: 'var(--info)', cursor: 'pointer' }} 
-                            onClick={() => handleEditMetadata('categories', cat.id, cat.name, cat.fields_definition)} 
-                          />
-                          <Trash2 
-                            size={12} 
-                            style={{ color: '#ef4444', cursor: 'pointer' }} 
-                            onClick={() => handleDeleteMetadata('categories', cat.id)} 
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <h4 style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>Dynamic Institutions</h4>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                    {institutions.map((inst: any) => (
-                      <div key={inst.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '6px', fontSize: '11px' }}>
-                        <span>{inst.name}</span>
-                        <div style={{ display: 'inline-flex', gap: '6px', marginLeft: '4px' }}>
-                          <Edit2 
-                            size={12} 
-                            style={{ color: 'var(--info)', cursor: 'pointer' }} 
-                            onClick={() => handleEditMetadata('institutions', inst.id, inst.name)} 
-                          />
-                          <Trash2 
-                            size={12} 
-                            style={{ color: '#ef4444', cursor: 'pointer' }} 
-                            onClick={() => handleDeleteMetadata('institutions', inst.id)} 
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       )}
 
-      {/* TAB 3: IMPORT & EXPORT HUB */}
+      {/* TAB 4: IMPORT & EXPORT HUB */}
       {activeSubTab === 'data' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '32px' }}>
           {/* MMex Import Panel */}
