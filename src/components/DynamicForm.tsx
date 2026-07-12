@@ -63,16 +63,28 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
 
     // 2. Append custom fields defined in metadata
     if (category && category.fields_definition) {
-      const customDefs = typeof category.fields_definition === 'string' 
-        ? JSON.parse(category.fields_definition) 
-        : category.fields_definition;
-        
-      Object.keys(customDefs).forEach((k) => {
-        // Avoid overwriting standard fields
-        if (!standardFields[k]) {
-          standardFields[k] = customDefs[k];
+      try {
+        const customDefs = typeof category.fields_definition === 'string' 
+          ? JSON.parse(category.fields_definition) 
+          : category.fields_definition;
+          
+        if (Array.isArray(customDefs)) {
+          customDefs.forEach((item: any) => {
+            if (item && item.name && !standardFields[item.name]) {
+              standardFields[item.name] = item.type || 'text';
+            }
+          });
+        } else if (typeof customDefs === 'object' && customDefs !== null) {
+          Object.keys(customDefs).forEach((k) => {
+            // Avoid overwriting standard fields
+            if (!standardFields[k]) {
+              standardFields[k] = customDefs[k];
+            }
+          });
         }
-      });
+      } catch (e) {
+        console.error("Error parsing fields_definition:", e);
+      }
     }
 
     setFields(standardFields);
@@ -120,6 +132,22 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
   };
 
   const getLabel = (key: string) => {
+    if (category && category.fields_definition) {
+      try {
+        const customDefs = typeof category.fields_definition === 'string'
+          ? JSON.parse(category.fields_definition)
+          : category.fields_definition;
+        if (Array.isArray(customDefs)) {
+          const found = customDefs.find((item: any) => item && item.name === key);
+          if (found && found.label) {
+            return found.label;
+          }
+        }
+      } catch (e) {
+        // Fallback to normal key split
+      }
+    }
+
     return key
       .split('_')
       .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
