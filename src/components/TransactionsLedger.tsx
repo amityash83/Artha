@@ -29,6 +29,20 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
   const [modalOpen, setModalOpen] = useState<boolean>(false);
   const [editingId, setEditingId] = useState<number | null>(null);
 
+  // Search & Filter states
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [filterType, setFilterType] = useState<string>('All');
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+  
+  // Sorting states
+  const [sortColumn, setSortColumn] = useState<string>('date');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize] = useState<number>(10);
+
   // Form State
   const [type, setType] = useState<string>('Debit');
   const [accountId, setAccountId] = useState<string>('');
@@ -236,6 +250,64 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
     return false;
   });
 
+  const handleSort = (col: string) => {
+    if (sortColumn === col) {
+      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(col);
+      setSortOrder('asc');
+    }
+  };
+
+  const filteredTransactions = transactions.filter(tx => {
+    const notesMatch = tx.notes ? tx.notes.toLowerCase().includes(searchQuery.toLowerCase()) : false;
+    const accountMatch = getAccountName(tx.account_id).toLowerCase().includes(searchQuery.toLowerCase());
+    const counterpartMatch = getCounterpartText(tx).toLowerCase().includes(searchQuery.toLowerCase());
+    const typeMatch = tx.type.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const matchesSearch = searchQuery === '' || notesMatch || accountMatch || counterpartMatch || typeMatch;
+    const matchesType = filterType === 'All' || tx.type === filterType;
+
+    const txDate = new Date(tx.transaction_date).getTime();
+    const matchesStart = startDate === '' || txDate >= new Date(startDate).getTime();
+    const matchesEnd = endDate === '' || txDate <= new Date(endDate).getTime();
+
+    return matchesSearch && matchesType && matchesStart && matchesEnd;
+  });
+
+  const sortedTransactions = [...filteredTransactions].sort((a, b) => {
+    let valA: any = a.transaction_date;
+    let valB: any = b.transaction_date;
+
+    if (sortColumn === 'date') {
+      valA = new Date(a.transaction_date).getTime();
+      valB = new Date(b.transaction_date).getTime();
+    } else if (sortColumn === 'type') {
+      valA = a.type;
+      valB = b.type;
+    } else if (sortColumn === 'account') {
+      valA = getAccountName(a.account_id);
+      valB = getAccountName(b.account_id);
+    } else if (sortColumn === 'counterpart') {
+      valA = getCounterpartText(a);
+      valB = getCounterpartText(b);
+    } else if (sortColumn === 'amount') {
+      valA = a.amount;
+      valB = b.amount;
+    } else if (sortColumn === 'notes') {
+      valA = a.notes || '';
+      valB = b.notes || '';
+    }
+
+    if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+    if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const totalItems = sortedTransactions.length;
+  const totalPages = Math.ceil(totalItems / pageSize);
+  const paginatedTransactions = sortedTransactions.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
   return (
     <div style={{ paddingBottom: '40px' }}>
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -260,16 +332,83 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
         </div>
       </div>
 
+      {!loading && (
+        <div className="glass-panel" style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1.2fr 1.2fr auto', gap: '16px', padding: '16px', marginBottom: '20px', alignItems: 'flex-end' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <label style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 500 }}>Search Notes / Accounts / Counterpart</label>
+            <input 
+              type="text" 
+              className="form-input" 
+              style={{ padding: '8px 12px', fontSize: '13px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#fff' }}
+              placeholder="Search..." 
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <label style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 500 }}>Type</label>
+            <select 
+              className="form-input" 
+              style={{ padding: '8px 12px', fontSize: '13px', background: 'rgba(15,23,42,0.8)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#fff' }}
+              value={filterType} 
+              onChange={(e) => { setFilterType(e.target.value); setCurrentPage(1); }}
+            >
+              <option value="All">All Types</option>
+              <option value="Debit">Debit</option>
+              <option value="Credit">Credit</option>
+              <option value="Transfer">Transfer</option>
+              <option value="Investment">Investment</option>
+              <option value="Redemption">Redemption</option>
+              <option value="EMI">EMI</option>
+              <option value="Prepayment">Prepayment</option>
+            </select>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <label style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 500 }}>From Date</label>
+            <input 
+              type="date" 
+              className="form-input" 
+              style={{ padding: '8px 12px', fontSize: '13px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#fff' }}
+              value={startDate}
+              onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <label style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 500 }}>To Date</label>
+            <input 
+              type="date" 
+              className="form-input" 
+              style={{ padding: '8px 12px', fontSize: '13px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#fff' }}
+              value={endDate}
+              onChange={(e) => { setEndDate(e.target.value); setCurrentPage(1); }}
+            />
+          </div>
+          <button 
+            className="btn btn-secondary" 
+            style={{ height: '38px', fontSize: '12px', padding: '0 16px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
+            onClick={() => {
+              setSearchQuery('');
+              setFilterType('All');
+              setStartDate('');
+              setEndDate('');
+              setCurrentPage(1);
+            }}
+          >
+            Clear Filters
+          </button>
+        </div>
+      )}
+
       {loading ? (
         <div style={{ padding: '48px', textTransform: 'uppercase', textAlign: 'center', color: 'var(--text-muted)' }}>
           Loading Transactions Ledger...
         </div>
-      ) : transactions.length === 0 ? (
+      ) : filteredTransactions.length === 0 ? (
         <div className="glass-panel" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-muted)' }}>
           <Info size={40} style={{ margin: '0 auto 16px auto', opacity: 0.5 }} />
-          <h3>No Transactions Logged</h3>
+          <h3>No Matching Transactions</h3>
           <p style={{ maxWidth: '400px', margin: '8px auto 20px auto', fontSize: '13px' }}>
-            Post your first transaction above. Changes will dynamically adjust balances in your dashboard.
+            No transaction records matched your search query or filters. Try adjusting your parameters.
           </p>
         </div>
       ) : (
@@ -277,17 +416,47 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
           <table className="entity-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-glass)', textAlign: 'left' }}>
-                <th style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>Date</th>
-                <th style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>Type</th>
-                <th style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>Primary Account</th>
-                <th style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>Post / Counterpart</th>
-                <th style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>Amount</th>
-                <th style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>Notes</th>
+                <th 
+                  style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}
+                  onClick={() => handleSort('date')}
+                >
+                  Date {sortColumn === 'date' ? (sortOrder === 'asc' ? ' ▲' : ' ▼') : ''}
+                </th>
+                <th 
+                  style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}
+                  onClick={() => handleSort('type')}
+                >
+                  Type {sortColumn === 'type' ? (sortOrder === 'asc' ? ' ▲' : ' ▼') : ''}
+                </th>
+                <th 
+                  style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}
+                  onClick={() => handleSort('account')}
+                >
+                  Primary Account {sortColumn === 'account' ? (sortOrder === 'asc' ? ' ▲' : ' ▼') : ''}
+                </th>
+                <th 
+                  style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}
+                  onClick={() => handleSort('counterpart')}
+                >
+                  Post / Counterpart {sortColumn === 'counterpart' ? (sortOrder === 'asc' ? ' ▲' : ' ▼') : ''}
+                </th>
+                <th 
+                  style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}
+                  onClick={() => handleSort('amount')}
+                >
+                  Amount {sortColumn === 'amount' ? (sortOrder === 'asc' ? ' ▲' : ' ▼') : ''}
+                </th>
+                <th 
+                  style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}
+                  onClick={() => handleSort('notes')}
+                >
+                  Notes {sortColumn === 'notes' ? (sortOrder === 'asc' ? ' ▲' : ' ▼') : ''}
+                </th>
                 <th style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {transactions.map(tx => (
+              {paginatedTransactions.map(tx => (
                 <tr key={tx.id} style={{ borderBottom: '1px solid var(--border-glass)' }}>
                   <td style={{ padding: '14px 20px', fontSize: '13px' }}>{tx.transaction_date}</td>
                   <td style={{ padding: '14px 20px', fontSize: '13px' }}>
@@ -318,6 +487,33 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
               ))}
             </tbody>
           </table>
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderTop: '1px solid var(--border-glass)', background: 'rgba(255,255,255,0.01)' }}>
+              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, totalItems)} of {totalItems} entries
+              </span>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button 
+                  className="btn btn-secondary" 
+                  style={{ padding: '4px 10px', fontSize: '12px' }}
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                >
+                  Previous
+                </button>
+                <button 
+                  className="btn btn-secondary" 
+                  style={{ padding: '4px 10px', fontSize: '12px' }}
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
