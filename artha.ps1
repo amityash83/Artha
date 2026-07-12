@@ -36,7 +36,7 @@ function Start-Services {
     $backendProcess = Start-Process -FilePath "venv\Scripts\python.exe" -ArgumentList "-m uvicorn backend.main:app --host 127.0.0.1 --port 8000" -WindowStyle Hidden -PassThru
 
     Write-Host "[+] Starting Frontend & Desktop Client..." -ForegroundColor Green
-    $frontendProcess = Start-Process -FilePath "npm.exe" -ArgumentList "run start" -WindowStyle Normal -PassThru
+    $frontendProcess = Start-Process -FilePath "npm.cmd" -ArgumentList "run start" -WindowStyle Normal -PassThru
 
     # Write PIDs to file
     $pids = @($backendProcess.Id, $frontendProcess.Id)
@@ -96,9 +96,9 @@ function Show-Status {
         foreach ($pidVal in $pids) {
             $p = Get-Process -Id $pidVal -ErrorAction SilentlyContinue
             if ($p) {
-                Write-Host "    - PID $pidVal: $($p.ProcessName) (Status: RUNNING)" -ForegroundColor Green
+                Write-Host "    - PID $($pidVal): $($p.ProcessName) (Status: RUNNING)" -ForegroundColor Green
             } else {
-                Write-Host "    - PID $pidVal: (Status: TERMINATED/DEAD)" -ForegroundColor Red
+                Write-Host "    - PID $($pidVal): (Status: TERMINATED/DEAD)" -ForegroundColor Red
             }
         }
     } else {
