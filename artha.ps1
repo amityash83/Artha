@@ -36,9 +36,9 @@ function Start-Services {
     $portConn = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue
     if ($portConn) {
         $portPids = $portConn.OwningProcess | Select-Object -Unique
-        foreach ($pId in $portPids) {
-            Write-Host "[!] Port 8000 is in use by PID $pId. Terminating process to free the port..." -ForegroundColor Yellow
-            Stop-Process -Id $pId -Force -ErrorAction SilentlyContinue
+        foreach ($activePid in $portPids) {
+            Write-Host "[!] Port 8000 is in use by PID $activePid. Terminating process to free the port..." -ForegroundColor Yellow
+            Stop-Process -Id $activePid -Force -ErrorAction SilentlyContinue
             Start-Sleep -Seconds 1
         }
     }
