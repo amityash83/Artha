@@ -4,6 +4,7 @@ import {
   Sparkles, RefreshCw, Info, AlertTriangle, CheckCircle, Shield
 } from 'lucide-react';
 import { InitData, MonthlyCashFlow } from '../types';
+import { API_BASE_URL } from '../config';
 
 interface CashFlowPlanningProps {
   data: InitData;
@@ -11,7 +12,10 @@ interface CashFlowPlanningProps {
 }
 
 export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefresh }) => {
-  const { cash_flows = [], loans, properties, insurance, goals, accounts } = data;
+  const { cash_flows = [], liabilities, assets, goals, accounts } = data;
+  const loans = liabilities.filter((l: any) => l.category_name !== 'Credit Card');
+  const properties = assets.filter((a: any) => a.category_name === 'Property');
+  const insurance = assets.filter((a: any) => a.category_name === 'Insurance');
   
   // Tab State: 'dashboard' | 'history' | 'simulation'
   const [activeSubTab, setActiveSubTab] = useState<'dashboard' | 'history' | 'simulation'>('dashboard');
@@ -43,8 +47,9 @@ export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefr
   const [simResult, setSimResult] = useState<any>(null);
   const [simLoading, setSimLoading] = useState<boolean>(false);
 
-  // Default targets
-  const targetSavingsRate = 35.0; // 35% target
+  // Dynamic target savings rate from database rules
+  const savingsRateRule = data.rules?.find((r: any) => r.rule_key === 'target_savings_rate');
+  const targetSavingsRate = savingsRateRule && savingsRateRule.is_enabled === 1 ? savingsRateRule.value : 35.0;
 
   // Auto fill date
   useEffect(() => {
@@ -85,16 +90,16 @@ export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefr
   // Run auto-fill routine from database portfolio
   const handleAutoFill = () => {
     // 1. EMI Sum from active outstanding loans
-    const emiSum = loans.reduce((sum, l) => sum + (l.outstanding > 0 ? l.emi : 0), 0);
+    const emiSum = loans.reduce((sum: number, l: any) => sum + (l.outstanding > 0 ? l.emi : 0), 0);
     setEmi(emiSum);
 
     // 2. Rental Income sum from properties
-    const rentSum = properties.reduce((sum, p) => sum + p.rental_income, 0);
+    const rentSum = properties.reduce((sum: number, p: any) => sum + (p.rental_income || 0), 0);
     setOtherIncome(rentSum);
 
     // 3. Pro-rata monthly insurance premium equivalent
-    const insSum = insurance.reduce((sum, ins) => {
-      const prem = ins.premium;
+    const insSum = insurance.reduce((sum: number, ins: any) => {
+      const prem = ins.premium || 0;
       if (ins.frequency === 'Yearly') return sum + Math.round(prem / 12);
       if (ins.frequency === 'Half-Yearly') return sum + Math.round(prem / 6);
       if (ins.frequency === 'Quarterly') return sum + Math.round(prem / 3);
@@ -103,7 +108,7 @@ export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefr
     setInsurancePremium(insSum);
 
     // 4. Goals contribution sum
-    const investSum = goals.reduce((sum, g) => sum + g.monthly_contribution, 0);
+    const investSum = goals.reduce((sum: number, g: any) => sum + (g.monthly_contribution || 0), 0);
     setInvestments(investSum);
   };
 
@@ -124,7 +129,7 @@ export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefr
     };
 
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/cash-flows', {
+      const res = await fetch(`${API_BASE_URL}/api/cash-flows`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -163,7 +168,7 @@ export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefr
   const handleDelete = async (id: number) => {
     if (!confirm("Are you sure you want to delete this monthly cash flow log?")) return;
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/cash-flows/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/cash-flows/${id}`, {
         method: 'DELETE'
       });
       if (res.ok) {
@@ -179,7 +184,7 @@ export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefr
     if (!latestFlow) return;
     setSimLoading(true);
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/calculations/cash-flow/simulate', {
+      const res = await fetch(`${API_BASE_URL}/api/calculations/cash-flow/simulate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

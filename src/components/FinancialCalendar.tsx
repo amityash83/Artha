@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Calendar as CalendarIcon, Filter, RefreshCw } from 'lucide-react';
 
+import { API_BASE_URL } from '../config';
+
 interface CalendarEvent {
   title: string;
   amount: number;
@@ -17,7 +19,7 @@ export const FinancialCalendar: React.FC = () => {
   const fetchEvents = async () => {
     setLoading(true);
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/calendar');
+      const res = await fetch(`${API_BASE_URL}/api/calendar`);
       if (res.ok) {
         const d = await res.json();
         setEvents(d);

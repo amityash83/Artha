@@ -3,7 +3,7 @@ import {
   Calculator, Calendar, Plus, Trash2, Edit2,
   TrendingDown, List, ChevronDown, ChevronUp
 } from 'lucide-react';
-
+import { API_BASE_URL } from '../config';
 interface Prepayment {
   date: string;
   amount: number;
@@ -57,7 +57,7 @@ export const EmiCalculator: React.FC = () => {
 
   const fetchProfiles = async () => {
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/settings/emi-profiles');
+      const res = await fetch(`${API_BASE_URL}/api/settings/emi-profiles`);
       if (res.ok) {
         const d = await res.json();
         setSavedProfiles(d);
@@ -72,7 +72,7 @@ export const EmiCalculator: React.FC = () => {
     if (!profileName.trim()) return;
 
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/settings/emi-profiles', {
+      const res = await fetch(`${API_BASE_URL}/api/settings/emi-profiles`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -89,7 +89,7 @@ export const EmiCalculator: React.FC = () => {
       if (res.ok) {
         alert("Profile saved successfully!");
         fetchProfiles();
-        const refreshedRes = await fetch('http://127.0.0.1:8000/api/settings/emi-profiles');
+        const refreshedRes = await fetch(`${API_BASE_URL}/api/settings/emi-profiles`);
         if (refreshedRes.ok) {
           const updatedProfiles = await refreshedRes.json();
           setSavedProfiles(updatedProfiles);
@@ -132,7 +132,7 @@ export const EmiCalculator: React.FC = () => {
     if (!confirm(`Are you sure you want to delete profile "${profileName}"?`)) return;
 
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/settings/emi-profiles/${activeProfileId}`, {
+      const res = await fetch(`${API_BASE_URL}/api/settings/emi-profiles/${activeProfileId}`, {
         method: 'DELETE'
       });
       if (res.ok) {
@@ -177,7 +177,7 @@ export const EmiCalculator: React.FC = () => {
 
     try {
       // 1. Fetch baseline (no prepayments)
-      const resBaseline = await fetch('http://127.0.0.1:8000/api/calculations/advanced-emi', {
+      const resBaseline = await fetch(`${API_BASE_URL}/api/calculations/advanced-emi`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -190,7 +190,7 @@ export const EmiCalculator: React.FC = () => {
       });
 
       // 2. Fetch optimized (with prepayments)
-      const resOptimized = await fetch('http://127.0.0.1:8000/api/calculations/advanced-emi', {
+      const resOptimized = await fetch(`${API_BASE_URL}/api/calculations/advanced-emi`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -290,7 +290,7 @@ export const EmiCalculator: React.FC = () => {
   const handleExportExcel = async () => {
     const tenureMonths = tenureUnit === 'years' ? tenureValue * 12 : tenureValue;
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/calculations/advanced-emi/export/excel', {
+      const res = await fetch(`${API_BASE_URL}/api/calculations/advanced-emi/export/excel`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

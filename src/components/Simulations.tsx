@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Sparkles } from 'lucide-react';
 import { InitData } from '../types';
+import { API_BASE_URL } from '../config';
 
 interface SimulationsProps {
   data: InitData;
@@ -11,6 +12,13 @@ interface SimulationsProps {
 }
 
 export const Simulations: React.FC<SimulationsProps> = ({ data, initialParams }) => {
+  const loans = data.liabilities
+    .filter((l: any) => l.category_name !== 'Credit Card')
+    .map((l: any) => ({
+      ...l,
+      roi: l.interest_rate
+    }));
+
   const [scenarioType, setScenarioType] = useState('close_loan');
   
   // Dynamic parameters depending on selection
@@ -24,6 +32,11 @@ export const Simulations: React.FC<SimulationsProps> = ({ data, initialParams })
   const [newRoi, setNewRoi] = useState<number>(7.5);
   const [propertyCost, setPropertyCost] = useState<number>(1500000);
   const [propertyFunding, setPropertyFunding] = useState('loan');
+  
+  // Custom large purchase states
+  const [purchaseName, setPurchaseName] = useState('Family Property');
+  const [loanRoi, setLoanRoi] = useState<number>(8.5);
+  const [loanTenureMonths, setLoanTenureMonths] = useState<number>(120);
 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -36,14 +49,14 @@ export const Simulations: React.FC<SimulationsProps> = ({ data, initialParams })
         setLoanId(initialParams.loan_id);
       }
     } else {
-      if (data.loans.length > 0) {
-        setLoanId(data.loans[0].id);
+      if (loans.length > 0) {
+        setLoanId(loans[0].id);
       }
       if (data.goals.length > 0) {
         setGoalId(data.goals[0].id);
       }
     }
-  }, [initialParams, data]);
+  }, [initialParams, data, loans]);
 
   const handleRun = async () => {
     setLoading(true);
@@ -62,11 +75,17 @@ export const Simulations: React.FC<SimulationsProps> = ({ data, initialParams })
     } else if (scenarioType === 'roi_reduction') {
       params = { loan_id: Number(loanId), new_roi: Number(newRoi) };
     } else if (scenarioType === 'brother_property') {
-      params = { property_cost: Number(propertyCost), funding_source: propertyFunding };
+      params = { 
+        purchase_name: purchaseName, 
+        cost: Number(propertyCost), 
+        funding_source: propertyFunding,
+        roi: Number(loanRoi),
+        tenure_months: Number(loanTenureMonths)
+      };
     }
 
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/simulations/run', {
+      const res = await fetch(`${API_BASE_URL}/api/simulations/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scenario_type: scenarioType, params })
@@ -107,7 +126,7 @@ export const Simulations: React.FC<SimulationsProps> = ({ data, initialParams })
               <option value="salary_change">What if my Salary changes?</option>
               <option value="receive_bonus">What if I receive a lump sum Bonus?</option>
               <option value="roi_reduction">What if loan ROI reduces (Refinance)?</option>
-              <option value="brother_property">What if I fund a family Property purchase?</option>
+              <option value="brother_property">What if I make a Large Purchase? (e.g. Car/Home)</option>
             </select>
           </div>
 
@@ -116,7 +135,7 @@ export const Simulations: React.FC<SimulationsProps> = ({ data, initialParams })
             <div className="form-group">
               <label className="form-label">Select Loan to Close</label>
               <select className="form-input" value={loanId} onChange={e => setLoanId(Number(e.target.value))}>
-                {data.loans.map(l => (
+                {loans.map((l: any) => (
                   <option key={l.id} value={l.id}>{l.name} ({formatCurrency(l.outstanding)})</option>
                 ))}
               </select>
@@ -128,7 +147,7 @@ export const Simulations: React.FC<SimulationsProps> = ({ data, initialParams })
               <div className="form-group">
                 <label className="form-label">Select Goal</label>
                 <select className="form-input" value={goalId} onChange={e => setGoalId(Number(e.target.value))}>
-                  {data.goals.map(g => (
+                  {data.goals.map((g: any) => (
                     <option key={g.id} value={g.id}>{g.name} (Target: {formatCurrency(g.target_amount)})</option>
                   ))}
                 </select>
@@ -176,7 +195,7 @@ export const Simulations: React.FC<SimulationsProps> = ({ data, initialParams })
               <div className="form-group">
                 <label className="form-label">Select Loan</label>
                 <select className="form-input" value={loanId} onChange={e => setLoanId(Number(e.target.value))}>
-                  {data.loans.map(l => (
+                  {loans.map((l: any) => (
                     <option key={l.id} value={l.id}>{l.name} (Current ROI: {l.roi}%)</option>
                   ))}
                 </select>
@@ -191,16 +210,32 @@ export const Simulations: React.FC<SimulationsProps> = ({ data, initialParams })
           {scenarioType === 'brother_property' && (
             <>
               <div className="form-group">
-                <label className="form-label">Property Valuation (₹)</label>
+                <label className="form-label">Purchase / Expense Name</label>
+                <input type="text" className="form-input" value={purchaseName} onChange={e => setPurchaseName(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Cost Valuation (₹)</label>
                 <input type="number" className="form-input" value={propertyCost} onChange={e => setPropertyCost(parseFloat(e.target.value) || 0)} />
               </div>
               <div className="form-group">
-                <label className="form-label">Funding Type</label>
+                <label className="form-label">Funding Strategy</label>
                 <select className="form-input" value={propertyFunding} onChange={e => setPropertyFunding(e.target.value)}>
-                  <option value="liquid">Fund from Liquid Cash</option>
-                  <option value="loan">Take a Home Loan at 8.5% ROI</option>
+                  <option value="liquid">Direct Cash (Liquid Reserves)</option>
+                  <option value="loan">New Loan (EMI Projections)</option>
                 </select>
               </div>
+              {propertyFunding === 'loan' && (
+                <>
+                  <div className="form-group">
+                    <label className="form-label">Simulated Loan ROI (%)</label>
+                    <input type="number" step="0.1" className="form-input" value={loanRoi} onChange={e => setLoanRoi(parseFloat(e.target.value) || 8.5)} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Simulated Loan Tenure (Months)</label>
+                    <input type="number" className="form-input" value={loanTenureMonths} onChange={e => setLoanTenureMonths(parseInt(e.target.value) || 120)} />
+                  </div>
+                </>
+              )}
             </>
           )}
 

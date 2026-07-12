@@ -1,24 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { 
   Landmark, LandmarkIcon, PiggyBank, 
-  Target, Shield, LineChart, FileText, Database, Compass, Calendar, Calculator, Zap, CreditCard as CardIcon
+  Target, FileText, Database, Compass, Calendar, Calculator, Zap, LineChart
 } from 'lucide-react';
 import { InitData } from './types';
 import { Dashboard } from './components/Dashboard';
-import { Accounts } from './components/Accounts';
-import { Loans } from './components/Loans';
-import { Investments } from './components/Investments';
-import { Properties } from './components/Properties';
-import { Insurance } from './components/Insurance';
-import { Goals } from './components/Goals';
+import { EntityGrid } from './components/EntityGrid';
 import { Snapshot } from './components/Snapshot';
 import { Simulations } from './components/Simulations';
 import { Reports } from './components/Reports';
 import { EmiCalculator } from './components/EmiCalculator';
 import { FinancialCalendar } from './components/FinancialCalendar';
 import { LoanOptimizer } from './components/LoanOptimizer';
-import { CreditCards } from './components/CreditCards';
 import { CashFlowPlanning } from './components/CashFlowPlanning';
+import { API_BASE_URL } from './config';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
@@ -38,7 +33,7 @@ const App: React.FC = () => {
       attempts++;
       setStatusMessage(`Starting sidecar API engine (Attempt ${attempts}/${maxAttempts})...`);
       try {
-        const res = await fetch('http://127.0.0.1:8000/api/init');
+        const res = await fetch(`${API_BASE_URL}/api/init`);
         if (res.ok) {
           setStatusMessage("API responded! Reading preferences and verifying database...");
           const d = await res.json();
@@ -199,47 +194,20 @@ const App: React.FC = () => {
             </li>
             <li>
               <div 
-                className={`sidebar-item ${activeTab === 'loans' ? 'active' : ''}`}
-                onClick={() => handleNavigate('loans')}
-              >
-                <LandmarkIcon size={16} />
-                Loans
-              </div>
-            </li>
-            <li>
-              <div 
-                className={`sidebar-item ${activeTab === 'credit-cards' ? 'active' : ''}`}
-                onClick={() => handleNavigate('credit-cards')}
-              >
-                <CardIcon size={16} style={{ opacity: 0.8 }} />
-                Credit Cards
-              </div>
-            </li>
-            <li>
-              <div 
-                className={`sidebar-item ${activeTab === 'investments' ? 'active' : ''}`}
-                onClick={() => handleNavigate('investments')}
+                className={`sidebar-item ${activeTab === 'assets' ? 'active' : ''}`}
+                onClick={() => handleNavigate('assets')}
               >
                 <PiggyBank size={16} />
-                Investments
+                Assets
               </div>
             </li>
             <li>
               <div 
-                className={`sidebar-item ${activeTab === 'properties' ? 'active' : ''}`}
-                onClick={() => handleNavigate('properties')}
+                className={`sidebar-item ${activeTab === 'liabilities' ? 'active' : ''}`}
+                onClick={() => handleNavigate('liabilities')}
               >
-                <Landmark size={16} />
-                Properties
-              </div>
-            </li>
-            <li>
-              <div 
-                className={`sidebar-item ${activeTab === 'insurance' ? 'active' : ''}`}
-                onClick={() => handleNavigate('insurance')}
-              >
-                <Shield size={16} />
-                Insurance
+                <LandmarkIcon size={16} />
+                Liabilities
               </div>
             </li>
             <li>
@@ -295,7 +263,7 @@ const App: React.FC = () => {
           <div style={{ padding: '8px', borderTop: '1px solid var(--border-glass)', marginTop: 'auto' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--text-muted)' }}>
                <Database size={10} />
-               <span>v1.0.4 (Local only DB)</span>
+               <span>v2.0.0 (Metadata Driven OS)</span>
             </div>
           </div>
         </nav>
@@ -313,22 +281,40 @@ const App: React.FC = () => {
           <CashFlowPlanning data={data} onRefresh={fetchFinanceData} />
         )}
         {activeTab === 'accounts' && (
-          <Accounts accounts={data.accounts} onRefresh={fetchFinanceData} />
+          <EntityGrid 
+            entityType="accounts" 
+            entities={data.accounts} 
+            categories={data.categories} 
+            institutions={data.institutions} 
+            onRefresh={fetchFinanceData} 
+          />
         )}
-        {activeTab === 'loans' && (
-          <Loans loans={data.loans} onRefresh={fetchFinanceData} />
+        {activeTab === 'assets' && (
+          <EntityGrid 
+            entityType="assets" 
+            entities={data.assets} 
+            categories={data.categories} 
+            institutions={data.institutions} 
+            onRefresh={fetchFinanceData} 
+          />
         )}
-        {activeTab === 'investments' && (
-          <Investments investments={data.investments} goals={data.goals} onRefresh={fetchFinanceData} />
-        )}
-        {activeTab === 'properties' && (
-          <Properties properties={data.properties} loans={data.loans} onRefresh={fetchFinanceData} />
-        )}
-        {activeTab === 'insurance' && (
-          <Insurance insurance={data.insurance} onRefresh={fetchFinanceData} />
+        {activeTab === 'liabilities' && (
+          <EntityGrid 
+            entityType="liabilities" 
+            entities={data.liabilities} 
+            categories={data.categories} 
+            institutions={data.institutions} 
+            onRefresh={fetchFinanceData} 
+          />
         )}
         {activeTab === 'goals' && (
-          <Goals goals={data.goals} onRefresh={fetchFinanceData} />
+          <EntityGrid 
+            entityType="goals" 
+            entities={data.goals} 
+            categories={data.categories} 
+            institutions={data.institutions} 
+            onRefresh={fetchFinanceData} 
+          />
         )}
         {activeTab === 'simulations' && (
           <Simulations data={data} initialParams={simRedirectParams} />
@@ -338,9 +324,6 @@ const App: React.FC = () => {
         )}
         {activeTab === 'loan-optimizer' && (
           <LoanOptimizer data={data} />
-        )}
-        {activeTab === 'credit-cards' && (
-          <CreditCards creditCards={data.credit_cards || []} onRefresh={fetchFinanceData} />
         )}
         {activeTab === 'emi-calculator' && (
           <EmiCalculator />

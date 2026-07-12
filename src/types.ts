@@ -1,65 +1,85 @@
+export interface Category {
+  id: number;
+  name: string;
+  entity_type: 'Asset' | 'Liability' | 'Income' | 'Expense';
+  fields_definition: any; // JSON schema or record
+}
+
+export interface Institution {
+  id: number;
+  name: string;
+  category_id?: number;
+  contact_info?: string;
+}
+
 export interface Account {
   id: number;
   name: string;
-  institution: string;
+  institution_id: number;
+  institution_name?: string;
   current_balance: number;
-  last_updated: string;
-  remarks: string;
+  currency: string;
+  status: string;
+  owner?: string;
+  tags?: string;
+  metadata_json?: string;
 }
 
-export interface Loan {
+export interface Asset {
   id: number;
   name: string;
-  lender: string;
+  category_id: number;
+  category_name?: string;
+  institution_id?: number;
+  institution_name?: string;
+  current_value: number;
+  invested_amount?: number;
+  acquisition_date?: string;
+  status?: string;
+  owner?: string;
+  metadata_json?: string;
+  [key: string]: any; // Allows holding dynamic deserialized parameters
+}
+
+export interface Liability {
+  id: number;
+  name: string;
+  category_id: number;
+  category_name?: string;
+  lender_institution_id?: number;
+  lender_name?: string;
   outstanding: number;
-  roi: number;
+  interest_rate: number;
   emi: number;
-  tenure: number;
-  start_date: string;
-  prepayment_allowed: number;
-  processing_fee: number;
-  loan_type: string;
-  remaining_tenure: number;
-  remaining_interest: number;
-  progress: number;
+  tenure_months?: number;
+  status?: string;
+  owner?: string;
+  metadata_json?: string;
+  // Computed fields
+  remaining_tenure?: number;
+  remaining_interest?: number;
+  progress?: number;
+  [key: string]: any; // Dynamic fields
 }
 
-export interface Investment {
+export interface Income {
   id: number;
   name: string;
-  type: string;
-  current_value: number;
-  invested_amount: number;
-  goal_mapping: string;
-  last_updated: string;
-}
-
-export interface Property {
-  id: number;
-  name: string;
-  purchase_price: number;
-  current_value: number;
-  associated_loan_id: number | null;
-  rental_income: number;
-  expenses: number;
-  remarks: string;
-}
-
-export interface InsurancePolicy {
-  id: number;
-  company: string;
-  policy_number: string;
-  premium: number;
+  category_id: number;
+  category_name?: string;
+  amount: number;
   frequency: string;
-  coverage: number;
-  nominee: string;
-  maturity_date: string;
-  last_premium_date: string;
-  renewal_date: string;
-  waiting_period: string;
-  claim_history: string;
-  insurance_type: string;
-  surrender_value: number;
+  status?: string;
+}
+
+export interface Expense {
+  id: number;
+  name: string;
+  category_id: number;
+  category_name?: string;
+  amount: number;
+  frequency: string;
+  status?: string;
 }
 
 export interface Goal {
@@ -68,11 +88,14 @@ export interface Goal {
   target_amount: number;
   current_amount: number;
   monthly_contribution: number;
-  expected_completion: string;
-  goal_type: string;
-  gap: number;
-  months_remaining: number;
-  status: string;
+  target_date?: string;
+  priority?: string;
+  funding_sources?: any;
+  expected_completion?: string;
+  // Computed fields
+  gap?: number;
+  months_remaining?: number;
+  status?: string;
 }
 
 export interface FinancialRule {
@@ -82,6 +105,7 @@ export interface FinancialRule {
   description: string;
   value: number;
   is_enabled: number;
+  category: string;
 }
 
 export interface Recommendation {
@@ -114,25 +138,6 @@ export interface Summary {
   yearly_change: number;
 }
 
-export interface CreditCard {
-  id: number;
-  name: string;
-  issuer: string;
-  credit_limit: number;
-  outstanding: number;
-  statement_balance: number;
-  statement_date: number;
-  due_date: number;
-  annual_fee: number;
-  renewal_date: string;
-  reward_points: number;
-  point_value: number;
-  lounge_access_domestic: string;
-  lounge_access_international: string;
-  spend_milestone_waiver: number;
-  remarks: string;
-}
-
 export interface MonthlyCashFlow {
   id: number;
   month: string;
@@ -149,13 +154,14 @@ export interface MonthlyCashFlow {
 export interface InitData {
   summary: Summary;
   accounts: Account[];
-  loans: Loan[];
-  investments: Investment[];
-  properties: Property[];
-  insurance: InsurancePolicy[];
+  assets: Asset[];
+  liabilities: Liability[];
+  income: Income[];
+  expenses: Expense[];
   goals: Goal[];
   rules: FinancialRule[];
+  categories: Category[];
+  institutions: Institution[];
   recommendations: Recommendation[];
-  credit_cards: CreditCard[];
-  cash_flows?: MonthlyCashFlow[];
+  cash_flows: MonthlyCashFlow[];
 }

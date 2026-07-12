@@ -14,25 +14,32 @@ def generate_recommendations(conn) -> list:
     ins_reserve_target = rules.get("insurance_reserve_target", {}).get("value", 300000.0) if rules.get("insurance_reserve_target", {}).get("enabled", True) else 300000.0
     debt_free_liquidity_target = rules.get("debt_free_liquidity_target", {}).get("value", 3000000.0) if rules.get("debt_free_liquidity_target", {}).get("enabled", True) else 3000000.0
     
+    high_roi_threshold = rules.get("high_interest_roi_threshold", {}).get("value", 7.5) if rules.get("high_interest_roi_threshold", {}).get("enabled", True) else 7.5
+    prepay_min_buffer = rules.get("prepayment_min_liquid_buffer", {}).get("value", 50000.0) if rules.get("prepayment_min_liquid_buffer", {}).get("enabled", True) else 50000.0
+    ins_renewal_alert_days = rules.get("insurance_renewal_alert_days", {}).get("value", 30.0) if rules.get("insurance_renewal_alert_days", {}).get("enabled", True) else 30.0
+    
     # 2. Fetch Accounts (liquid funds)
-    # Savings Accounts, Salary Account, Joint Account, Liquid Funds
     cursor.execute("SELECT current_balance, name FROM accounts")
     accounts = cursor.fetchall()
     total_liquid = sum(row["current_balance"] for row in accounts)
     
-    # 3. Fetch Loans
-    cursor.execute("SELECT id, name, lender, outstanding, roi, emi FROM loans")
+    # 3. Fetch Liabilities (Loans)
+    cursor.execute("""
+        SELECT l.id, l.name, inst.name as lender, l.outstanding, l.interest_rate as roi, l.emi 
+        FROM liabilities l 
+        LEFT JOIN institutions inst ON l.lender_institution_id = inst.id
+    """)
     loans = cursor.fetchall()
     total_loans_outstanding = sum(row["outstanding"] for row in loans)
     
     # 4. Fetch Goals
-    cursor.execute("SELECT name, target_amount, current_amount, monthly_contribution, expected_completion, goal_type FROM goals")
+    cursor.execute("SELECT name, target_amount, current_amount, monthly_contribution, target_date as expected_completion, priority FROM goals")
     goals = cursor.fetchall()
     
     recs = []
     
     # Check 1: General Liquidity / Emergency Fund Rule
-    emergency_goal = next((g for g in goals if g["goal_type"] == "Emergency Fund"), None)
+    emergency_goal = next((g for g in goals if "emergency" in g["name"].lower()), None)
     if emergency_goal:
         curr_emergency = emergency_goal["current_amount"]
         targ_emergency = emergency_goal["target_amount"]
@@ -71,7 +78,7 @@ def generate_recommendations(conn) -> list:
         })
 
     # Check 2: Insurance Reserve Rule
-    ins_goal = next((g for g in goals if g["goal_type"] == "Insurance Reserve"), None)
+    ins_goal = next((g for g in goals if "insurance" in g["name"].lower()), None)
     if ins_goal:
         curr_ins = ins_goal["current_amount"]
         targ_ins = ins_goal["target_amount"]
@@ -100,17 +107,16 @@ def generate_recommendations(conn) -> list:
         })
 
     # Check 3: Loan Prepayment Recommendations
-    high_interest_loans = [l for l in loans if l["roi"] >= 7.5 and l["outstanding"] > 0]
+    high_interest_loans = [l for l in loans if l["roi"] >= high_roi_threshold and l["outstanding"] > 0]
     if high_interest_loans:
         for loan in high_interest_loans:
-            # Recommend prepayment if liquid funds have a buffer above emergency fund
             free_liquid = total_liquid - min_emergency_target
-            if free_liquid > 50000:
+            if free_liquid > prepay_min_buffer:
                 prepay_val = min(free_liquid * 0.5, loan["outstanding"])
                 recs.append({
                     "category": "Loans",
                     "title": f"Prepayment Recommended: {loan['name']}",
-                    "message": f"Your {loan['name']} loan (Lender: {loan['lender']}) has an ROI of {loan['roi']}%. Since you have surplus liquidity of ₹{free_liquid:,.0f}, prepaying ₹{prepay_val:,.0f} is highly recommended.",
+                    "message": f"Your {loan['name']} loan (Lender: {loan['lender'] or 'N/A'}) has an ROI of {loan['roi']}%. Since you have surplus liquidity of ₹{free_liquid:,.0f}, prepaying ₹{prepay_val:,.0f} is highly recommended.",
                     "status": "warning",
                     "action_type": "prepay",
                     "suggested_amount": prepay_val
@@ -161,25 +167,34 @@ def generate_recommendations(conn) -> list:
                 "suggested_amount": gap
             })
             
-    # Check 6: Insurance premium reminders (within 30 days)
-    cursor.execute("SELECT company, renewal_date, premium FROM insurance")
+    # Check 6: Insurance premium reminders (within 30 days) from assets metadata
+    cursor.execute("""
+        SELECT inst.name as company, a.metadata_json 
+        FROM assets a 
+        LEFT JOIN institutions inst ON a.institution_id = inst.id 
+        WHERE a.category_id = (SELECT id FROM categories WHERE name = 'Insurance')
+    """)
     policies = cursor.fetchall()
     today_dt = date.today()
     for policy in policies:
-        if policy["renewal_date"]:
+        if policy["metadata_json"]:
             try:
-                ren_date = datetime.strptime(policy["renewal_date"], "%Y-%m-%d").date()
-                days_left = (ren_date - today_dt).days
-                if 0 <= days_left <= 30:
-                    recs.append({
-                        "category": "Insurance Renewal",
-                        "title": f"Premium Due: {policy['company']}",
-                        "message": f"Premium of ₹{policy['premium']:,.0f} is due in {days_left} days ({policy['renewal_date']}).",
-                        "status": "danger",
-                        "action_type": "info",
-                        "suggested_amount": policy["premium"]
-                    })
-            except ValueError:
+                meta = json.loads(policy["metadata_json"])
+                ren_date_str = meta.get("renewal_date")
+                premium = float(meta.get("premium", 0.0))
+                if ren_date_str:
+                    ren_date = datetime.strptime(ren_date_str, "%Y-%m-%d").date()
+                    days_left = (ren_date - today_dt).days
+                    if 0 <= days_left <= ins_renewal_alert_days:
+                        recs.append({
+                            "category": "Insurance Renewal",
+                            "title": f"Premium Due: {policy['company'] or 'Insurance'}",
+                            "message": f"Premium of ₹{premium:,.0f} is due in {days_left} days ({ren_date_str}).",
+                            "status": "danger",
+                            "action_type": "info",
+                            "suggested_amount": premium
+                        })
+            except Exception:
                 continue
 
     return recs

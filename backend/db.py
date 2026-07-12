@@ -57,145 +57,165 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Accounts Table Migration to UNIQUE(name, institution)
+    # Disable foreign keys during migration to prevent schema rename errors
+    cursor.execute("PRAGMA foreign_keys = OFF")
+
+    # 1. METADATA TABLES
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_type TEXT NOT NULL, -- Asset, Liability, Income, Expense, Goal, Account
+        name TEXT NOT NULL UNIQUE,
+        fields_definition TEXT -- JSON schema defining custom fields
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS institutions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS financial_rules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        rule_key TEXT NOT NULL UNIQUE,
+        rule_name TEXT NOT NULL,
+        description TEXT,
+        value REAL NOT NULL,
+        category TEXT NOT NULL DEFAULT 'General',
+        is_enabled INTEGER NOT NULL DEFAULT 1
+    )
+    """)
+
     try:
-        cursor.execute("PRAGMA index_list('accounts')")
-        indexes = cursor.fetchall()
-        # If the table exists, let's check its schema structure
-        cursor.execute("PRAGMA table_info('accounts')")
-        columns = [row['name'] for row in cursor.fetchall()]
-        
-        # Check if index constraints need rebuilding (e.g. name unique constraint check)
-        # If it was unique on name, recreate it with UNIQUE(name, institution)
-        if len(columns) > 0:
-            # Let's inspect the DDL
-            cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='accounts'")
-            ddl = cursor.fetchone()[0]
-            if "UNIQUE(name, institution)" not in ddl:
-                cursor.execute("ALTER TABLE accounts RENAME TO accounts_old")
-                cursor.execute("""
-                CREATE TABLE accounts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    institution TEXT NOT NULL,
-                    current_balance REAL NOT NULL DEFAULT 0.0,
-                    last_updated TEXT NOT NULL,
-                    remarks TEXT,
-                    UNIQUE(name, institution)
-                )
-                """)
-                cursor.execute("""
-                INSERT OR IGNORE INTO accounts (id, name, institution, current_balance, last_updated, remarks)
-                SELECT id, name, institution, current_balance, last_updated, remarks FROM accounts_old
-                """)
-                cursor.execute("DROP TABLE accounts_old")
-        else:
-            raise sqlite3.OperationalError("Table does not exist")
-    except (sqlite3.OperationalError, TypeError):
-        # Create fresh table if not exists
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS accounts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            institution TEXT NOT NULL,
-            current_balance REAL NOT NULL DEFAULT 0.0,
-            last_updated TEXT NOT NULL,
-            remarks TEXT,
-            UNIQUE(name, institution)
-        )
-        """)
-
-
-    # Loans Table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS loans (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE,
-        lender TEXT NOT NULL,
-        outstanding REAL NOT NULL,
-        roi REAL NOT NULL,
-        emi REAL NOT NULL,
-        tenure INTEGER NOT NULL,
-        start_date TEXT NOT NULL,
-        expected_closure_date TEXT,
-        prepayment_allowed INTEGER NOT NULL DEFAULT 1,
-        processing_fee REAL NOT NULL DEFAULT 0.0,
-        loan_type TEXT NOT NULL DEFAULT 'Home'
-    )
-    """)
-
-    # Investments Table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS investments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE,
-        type TEXT NOT NULL,
-        current_value REAL NOT NULL DEFAULT 0.0,
-        invested_amount REAL NOT NULL DEFAULT 0.0,
-        goal_mapping TEXT,
-        last_updated TEXT NOT NULL
-    )
-    """)
-
-    # Properties Table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS properties (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE,
-        purchase_price REAL NOT NULL,
-        current_value REAL NOT NULL,
-        associated_loan_id INTEGER REFERENCES loans(id),
-        rental_income REAL DEFAULT 0.0,
-        expenses REAL DEFAULT 0.0,
-        remarks TEXT
-    )
-    """)
-
-    # Insurance Table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS insurance (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        company TEXT NOT NULL,
-        policy_number TEXT NOT NULL UNIQUE,
-        premium REAL NOT NULL,
-        frequency TEXT NOT NULL,
-        coverage REAL NOT NULL,
-        nominee TEXT NOT NULL,
-        maturity_date TEXT,
-        last_premium_date TEXT,
-        renewal_date TEXT,
-        waiting_period TEXT,
-        claim_history TEXT,
-        insurance_type TEXT DEFAULT 'Traditional Life',
-        surrender_value REAL DEFAULT 0.0
-    )
-    """)
-
-    # Columns migration check for existing tables
-    try:
-        cursor.execute("PRAGMA table_info('insurance')")
+        cursor.execute("PRAGMA table_info('financial_rules')")
         existing_cols = [row['name'] for row in cursor.fetchall()]
-        if 'insurance_type' not in existing_cols:
-            cursor.execute("ALTER TABLE insurance ADD COLUMN insurance_type TEXT DEFAULT 'Traditional Life'")
-        if 'surrender_value' not in existing_cols:
-            cursor.execute("ALTER TABLE insurance ADD COLUMN surrender_value REAL DEFAULT 0.0")
+        if 'category' not in existing_cols:
+            cursor.execute("ALTER TABLE financial_rules ADD COLUMN category TEXT NOT NULL DEFAULT 'General'")
     except Exception as e:
-        print("Insurance migration warning:", e)
+        print("financial_rules migration warning:", e)
 
-    # Goals Table
+    # 2. CORE ENTITY TABLES
+
+    # Accounts
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        institution_id INTEGER REFERENCES institutions(id),
+        current_balance REAL DEFAULT 0.0,
+        currency TEXT DEFAULT 'INR',
+        status TEXT DEFAULT 'Active',
+        owner TEXT,
+        tags TEXT,
+        metadata_json TEXT,
+        UNIQUE(name, institution_id)
+    )
+    """)
+
+    # Assets
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS assets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        category_id INTEGER NOT NULL REFERENCES categories(id),
+        institution_id INTEGER REFERENCES institutions(id),
+        purchase_date TEXT,
+        current_value REAL DEFAULT 0.0,
+        quantity REAL DEFAULT 1.0,
+        cost_price REAL DEFAULT 0.0,
+        market_value REAL DEFAULT 0.0,
+        expected_return REAL DEFAULT 0.0,
+        compounding TEXT DEFAULT 'Monthly',
+        liquidity TEXT DEFAULT 'High',
+        tax_category TEXT,
+        risk_level TEXT DEFAULT 'Medium',
+        linked_account_id INTEGER REFERENCES accounts(id),
+        metadata_json TEXT
+    )
+    """)
+
+    # Liabilities
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS liabilities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        category_id INTEGER NOT NULL REFERENCES categories(id),
+        lender_institution_id INTEGER REFERENCES institutions(id),
+        interest_rate REAL DEFAULT 0.0,
+        emi REAL DEFAULT 0.0,
+        outstanding REAL DEFAULT 0.0,
+        tenure_months INTEGER DEFAULT 0,
+        compounding TEXT DEFAULT 'Monthly',
+        linked_asset_id INTEGER REFERENCES assets(id),
+        tax_benefit TEXT DEFAULT 'None',
+        metadata_json TEXT
+    )
+    """)
+
+    # Income
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS income (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        category_id INTEGER NOT NULL REFERENCES categories(id),
+        amount REAL NOT NULL,
+        frequency TEXT DEFAULT 'Monthly',
+        growth_rate REAL DEFAULT 0.0,
+        taxable INTEGER DEFAULT 1,
+        source TEXT,
+        metadata_json TEXT
+    )
+    """)
+
+    # Expenses (supports nested categories via parent_category_id)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS expenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        category_id INTEGER NOT NULL REFERENCES categories(id),
+        amount REAL NOT NULL,
+        frequency TEXT DEFAULT 'Monthly',
+        linked_liability_id INTEGER REFERENCES liabilities(id),
+        parent_category_id INTEGER REFERENCES expenses(id),
+        metadata_json TEXT
+    )
+    """)
+
+    # Goals
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS goals (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,
         target_amount REAL NOT NULL,
-        current_amount REAL NOT NULL DEFAULT 0.0,
-        monthly_contribution REAL NOT NULL DEFAULT 0.0,
-        expected_completion TEXT,
-        goal_type TEXT NOT NULL
+        current_amount REAL DEFAULT 0.0,
+        monthly_contribution REAL DEFAULT 0.0,
+        target_date TEXT,
+        priority TEXT DEFAULT 'Medium',
+        expected_return REAL DEFAULT 0.0,
+        inflation REAL DEFAULT 6.0,
+        funding_sources_json TEXT
     )
     """)
 
-    # Snapshots Table
+    # Transactions
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER REFERENCES accounts(id),
+        type TEXT NOT NULL, -- Credit, Debit, Transfer, Investment, Redemption, EMI, Interest, Dividend
+        amount REAL NOT NULL,
+        transaction_date TEXT NOT NULL,
+        category_id INTEGER REFERENCES categories(id),
+        notes TEXT,
+        related_entity_type TEXT,
+        related_entity_id INTEGER
+    )
+    """)
+
+    # Keep snapshots & monthly_cash_flows for backward compatibility / historical logs
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS snapshots (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -208,7 +228,6 @@ def init_db():
     )
     """)
 
-    # Monthly Cash Flows Table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS monthly_cash_flows (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -224,90 +243,358 @@ def init_db():
     )
     """)
 
-    # Financial Rules Table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS financial_rules (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        rule_key TEXT NOT NULL UNIQUE,
-        rule_name TEXT NOT NULL,
-        description TEXT,
-        value REAL NOT NULL,
-        is_enabled INTEGER NOT NULL DEFAULT 1
-    )
-    """)
+    # 3. SEED DEFAULT DATA
+    default_institutions = ['HDFC', 'ICICI', 'SBI', 'EPFO', 'Groww', 'Zerodha', 'LIC', 'NPS Trust']
+    for inst in default_institutions:
+        cursor.execute("INSERT OR IGNORE INTO institutions (name) VALUES (?)", (inst,))
 
-    # EMI Calculator Profiles Table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS emi_profiles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE,
-        loan_amount REAL NOT NULL,
-        roi REAL NOT NULL,
-        tenure_value INTEGER NOT NULL,
-        tenure_unit TEXT NOT NULL,
-        start_date TEXT NOT NULL,
-        prepayments TEXT NOT NULL
-    )
-    """)
-
-    # Credit Cards Table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS credit_cards (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE,
-        issuer TEXT NOT NULL,
-        credit_limit REAL NOT NULL,
-        outstanding REAL NOT NULL DEFAULT 0.0,
-        statement_balance REAL NOT NULL DEFAULT 0.0,
-        statement_date INTEGER NOT NULL,
-        due_date INTEGER NOT NULL,
-        annual_fee REAL NOT NULL DEFAULT 0.0,
-        renewal_date TEXT,
-        reward_points INTEGER DEFAULT 0,
-        point_value REAL DEFAULT 0.25,
-        lounge_access_domestic TEXT,
-        lounge_access_international TEXT,
-        spend_milestone_waiver REAL DEFAULT 0.0,
-        remarks TEXT
-    )
-    """)
-
-    # Columns migration check for credit_cards table
-    try:
-        cursor.execute("PRAGMA table_info('credit_cards')")
-        existing_cols = [row['name'] for row in cursor.fetchall()]
-        if 'statement_balance' not in existing_cols:
-            cursor.execute("ALTER TABLE credit_cards ADD COLUMN statement_balance REAL DEFAULT 0.0")
-        if 'annual_fee' not in existing_cols:
-            cursor.execute("ALTER TABLE credit_cards ADD COLUMN annual_fee REAL DEFAULT 0.0")
-        if 'renewal_date' not in existing_cols:
-            cursor.execute("ALTER TABLE credit_cards ADD COLUMN renewal_date TEXT")
-        if 'reward_points' not in existing_cols:
-            cursor.execute("ALTER TABLE credit_cards ADD COLUMN reward_points INTEGER DEFAULT 0")
-        if 'point_value' not in existing_cols:
-            cursor.execute("ALTER TABLE credit_cards ADD COLUMN point_value REAL DEFAULT 0.25")
-        if 'lounge_access_domestic' not in existing_cols:
-            cursor.execute("ALTER TABLE credit_cards ADD COLUMN lounge_access_domestic TEXT")
-        if 'lounge_access_international' not in existing_cols:
-            cursor.execute("ALTER TABLE credit_cards ADD COLUMN lounge_access_international TEXT")
-        if 'spend_milestone_waiver' not in existing_cols:
-            cursor.execute("ALTER TABLE credit_cards ADD COLUMN spend_milestone_waiver REAL DEFAULT 0.0")
-    except Exception as e:
-        print("Credit cards migration warning:", e)
-
-    # Seed Default Financial Rules
-    default_rules = [
-        ("min_emergency_fund", "Minimum Emergency Fund", "Never reduce Emergency Fund below this value", 1500000.0, 1),
-        ("insurance_reserve_target", "Insurance Reserve Target", "Insurance Reserve should remain at this value", 300000.0, 1),
-        ("debt_free_liquidity_target", "Debt-Free Liquidity Target", "Maintain this liquidity after becoming debt-free", 3000000.0, 1),
-        ("no_villa_equity", "No Villa Funds in Equity", "Do not invest Villa funds into equity markets (0 = false, 1 = true)", 1.0, 1)
+    default_categories = [
+        # Accounts
+        ('Account', 'Savings Account', json.dumps([{"name": "interest_rate", "type": "number", "label": "Interest Rate (%)"}])),
+        ('Account', 'Demat Account', None),
+        ('Account', 'Retirement Account', None),
+        # Assets
+        ('Asset', 'Mutual Fund', json.dumps([{"name": "units", "type": "number", "label": "Units"}, {"name": "nav", "type": "number", "label": "NAV"}])),
+        ('Asset', 'Stock', json.dumps([{"name": "ticker", "type": "text", "label": "Ticker Symbol"}])),
+        ('Asset', 'Gold', None),
+        ('Asset', 'EPF', None),
+        ('Asset', 'PPF', None),
+        ('Asset', 'NPS', None),
+        ('Asset', 'Fixed Deposit', json.dumps([{"name": "duration_months", "type": "number", "label": "Duration (Months)"}])),
+        ('Asset', 'Bond', json.dumps([{"name": "coupon_rate", "type": "number", "label": "Coupon Rate (%)"}])),
+        ('Asset', 'Property', json.dumps([{"name": "rental_income", "type": "number", "label": "Rental Income"}, {"name": "maintenance_expenses", "type": "number", "label": "Maintenance Expenses"}])),
+        ('Asset', 'Insurance', json.dumps([{"name": "policy_number", "type": "text", "label": "Policy Number"}, {"name": "coverage", "type": "number", "label": "Coverage Amount"}, {"name": "surrender_value", "type": "number", "label": "Surrender Value"}])),
+        # Liabilities
+        ('Liability', 'Home Loan', None),
+        ('Liability', 'Personal Loan', None),
+        ('Liability', 'Credit Card', json.dumps([{"name": "credit_limit", "type": "number", "label": "Credit Limit"}, {"name": "statement_date", "type": "number", "label": "Statement Day of Month"}, {"name": "due_date", "type": "number", "label": "Due Day of Month"}])),
+        ('Liability', 'Car Loan', None),
+        # Income
+        ('Income', 'Salary', None),
+        ('Income', 'Bonus', None),
+        ('Income', 'Rental', None),
+        ('Income', 'Dividend', None),
+        ('Income', 'Interest', None),
+        # Expenses
+        ('Expense', 'Grocery', None),
+        ('Expense', 'Fuel', None),
+        ('Expense', 'Education', None),
+        ('Expense', 'Travel', None),
+        ('Expense', 'Utility', None),
+        ('Expense', 'EMI', None),
     ]
 
-    for rule_key, rule_name, desc, val, enabled in default_rules:
+    for entity_type, name, fields in default_categories:
         cursor.execute("""
-        INSERT OR IGNORE INTO financial_rules (rule_key, rule_name, description, value, is_enabled)
-        VALUES (?, ?, ?, ?, ?)
-        """, (rule_key, rule_name, desc, val, enabled))
+        INSERT OR IGNORE INTO categories (entity_type, name, fields_definition)
+        VALUES (?, ?, ?)
+        """, (entity_type, name, fields))
+
+    default_rules = [
+        ("min_emergency_fund", "Minimum Emergency Fund", "Never reduce Emergency Fund below this value", 1500000.0, "Emergency Fund", 1),
+        ("insurance_reserve_target", "Insurance Reserve Target", "Insurance Reserve should remain at this value", 300000.0, "Insurance", 1),
+        ("debt_free_liquidity_target", "Debt-Free Liquidity Target", "Maintain this liquidity after becoming debt-free", 3000000.0, "Liquidity", 1),
+        ("no_villa_equity", "No Villa Funds in Equity", "Do not invest Villa funds into equity markets (0 = false, 1 = true)", 1.0, "Goals", 1),
+        ("high_interest_roi_threshold", "High Interest ROI Threshold (%)", "Loan ROI above this value will be flagged for prepayments", 7.5, "Loans", 1),
+        ("prepayment_min_liquid_buffer", "Prepayment Min Liquid Buffer", "Minimum liquid buffer above emergency fund required to recommend prepayments", 50000.0, "Loans", 1),
+        ("insurance_renewal_alert_days", "Insurance Renewal Alert Days", "Trigger premium warnings this many days before the policy renewal date", 30.0, "Insurance", 1),
+        ("target_savings_rate", "Target Savings Rate (%)", "Target savings rate percentage threshold checked on the dashboard indicator", 35.0, "Cash Flow", 1)
+    ]
+
+    for rule_key, rule_name, desc, val, cat, enabled in default_rules:
+        cursor.execute("""
+        INSERT OR IGNORE INTO financial_rules (rule_key, rule_name, description, value, category, is_enabled)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """, (rule_key, rule_name, desc, val, cat, enabled))
+
+    conn.commit()
+
+    # 4. RUN AUTOMATED LEGACY DATA MIGRATION
+    # Check if legacy tables exist. If they do, migrate them to new metadata structure.
+    try:
+        # A. Migrate Accounts
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='accounts_old'")
+        if not cursor.fetchone():
+            cursor.execute("PRAGMA table_info('accounts')")
+            columns = [col['name'] for col in cursor.fetchall()]
+            if columns and 'metadata_json' not in columns:
+                cursor.execute("ALTER TABLE accounts RENAME TO accounts_old")
+                cursor.execute("""
+                CREATE TABLE accounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    institution_id INTEGER REFERENCES institutions(id),
+                    current_balance REAL DEFAULT 0.0,
+                    currency TEXT DEFAULT 'INR',
+                    status TEXT DEFAULT 'Active',
+                    owner TEXT,
+                    tags TEXT,
+                    metadata_json TEXT,
+                    UNIQUE(name, institution_id)
+                )
+                """)
+                cursor.execute("SELECT * FROM accounts_old")
+                old_accounts = cursor.fetchall()
+                for old_acc in old_accounts:
+                    cursor.execute("SELECT id FROM institutions WHERE name = ?", (old_acc['institution'],))
+                    inst_row = cursor.fetchone()
+                    if inst_row:
+                        inst_id = inst_row['id']
+                    else:
+                        cursor.execute("INSERT INTO institutions (name) VALUES (?)", (old_acc['institution'],))
+                        inst_id = cursor.lastrowid
+                    
+                    cursor.execute("""
+                    INSERT OR IGNORE INTO accounts (id, name, institution_id, current_balance, status, owner, tags, metadata_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        old_acc['id'], 
+                        old_acc['name'], 
+                        inst_id, 
+                        old_acc['current_balance'] if 'current_balance' in old_acc.keys() else 0.0,
+                        'Active', 
+                        'Self', 
+                        None, 
+                        None
+                    ))
+                print("[Migration] Accounts migrated successfully.")
+                cursor.execute("DROP TABLE accounts_old")
+    except Exception as e:
+        print("[Migration Warning] Accounts migration error:", e)
+
+    # B. Migrate Investments, Properties, and Insurance to Assets
+    try:
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='investments'")
+        if cursor.fetchone():
+            cursor.execute("SELECT * FROM investments")
+            old_investments = cursor.fetchall()
+            for old_inv in old_investments:
+                cat_name = old_inv['type']
+                cursor.execute("SELECT id FROM categories WHERE name = ?", (cat_name,))
+                cat_row = cursor.fetchone()
+                if cat_row:
+                    cat_id = cat_row['id']
+                else:
+                    cursor.execute("INSERT INTO categories (entity_type, name) VALUES ('Asset', ?)", (cat_name,))
+                    cat_id = cursor.lastrowid
+
+                cursor.execute("""
+                INSERT OR IGNORE INTO assets (name, category_id, institution_id, purchase_date, current_value, cost_price, expected_return, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    old_inv['name'],
+                    cat_id,
+                    None,
+                    None,
+                    old_inv['current_value'],
+                    old_inv['invested_amount'],
+                    12.0,
+                    json.dumps({"goal_mapping": old_inv['goal_mapping']})
+                ))
+            cursor.execute("ALTER TABLE investments RENAME TO investments_old")
+            print("[Migration] Investments migrated to Assets.")
+    except Exception as e:
+        print("[Migration Warning] Investments migration error:", e)
+
+    try:
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='properties'")
+        if cursor.fetchone():
+            cursor.execute("SELECT * FROM properties")
+            old_props = cursor.fetchall()
+            cursor.execute("SELECT id FROM categories WHERE name = 'Property'")
+            prop_cat_id = cursor.fetchone()['id']
+            for old_prop in old_props:
+                cursor.execute("""
+                INSERT OR IGNORE INTO assets (name, category_id, purchase_date, current_value, cost_price, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    old_prop['name'],
+                    prop_cat_id,
+                    None,
+                    old_prop['current_value'],
+                    old_prop['purchase_price'],
+                    json.dumps({
+                        "rental_income": old_prop['rental_income'],
+                        "expenses": old_prop['expenses'],
+                        "remarks": old_prop['remarks']
+                    })
+                ))
+            cursor.execute("ALTER TABLE properties RENAME TO properties_old")
+            print("[Migration] Properties migrated to Assets.")
+    except Exception as e:
+        print("[Migration Warning] Properties migration error:", e)
+
+    try:
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='insurance'")
+        if cursor.fetchone():
+            cursor.execute("SELECT * FROM insurance")
+            old_insurances = cursor.fetchall()
+            cursor.execute("SELECT id FROM categories WHERE name = 'Insurance'")
+            ins_cat_id = cursor.fetchone()['id']
+            for old_ins in old_insurances:
+                cursor.execute("SELECT id FROM institutions WHERE name = ?", (old_ins['company'],))
+                inst_row = cursor.fetchone()
+                if inst_row:
+                    inst_id = inst_row['id']
+                else:
+                    cursor.execute("INSERT INTO institutions (name) VALUES (?)", (old_ins['company'],))
+                    inst_id = cursor.lastrowid
+                
+                cursor.execute("""
+                INSERT OR IGNORE INTO assets (name, category_id, institution_id, current_value, cost_price, expected_return, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    f"{old_ins['insurance_type']} ({old_ins['policy_number']})",
+                    ins_cat_id,
+                    inst_id,
+                    old_ins['surrender_value'] if 'surrender_value' in old_ins.keys() else 0.0,
+                    old_ins['premium'],
+                    0.0,
+                    json.dumps({
+                        "policy_number": old_ins['policy_number'],
+                        "premium": old_ins['premium'],
+                        "frequency": old_ins['frequency'],
+                        "coverage": old_ins['coverage'],
+                        "nominee": old_ins['nominee'],
+                        "renewal_date": old_ins['renewal_date'],
+                        "insurance_type": old_ins['insurance_type']
+                    })
+                ))
+            cursor.execute("ALTER TABLE insurance RENAME TO insurance_old")
+            print("[Migration] Insurance policies migrated to Assets.")
+    except Exception as e:
+        print("[Migration Warning] Insurance migration error:", e)
+
+    # C. Migrate Loans and Credit Cards to Liabilities
+    try:
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='loans'")
+        if cursor.fetchone():
+            cursor.execute("SELECT * FROM loans")
+            old_loans = cursor.fetchall()
+            for old_loan in old_loans:
+                cat_name = f"{old_loan['loan_type']} Loan" if "loan_type" in old_loan.keys() else "Personal Loan"
+                cursor.execute("SELECT id FROM categories WHERE name = ?", (cat_name,))
+                cat_row = cursor.fetchone()
+                if cat_row:
+                    cat_id = cat_row['id']
+                else:
+                    cursor.execute("SELECT id FROM categories WHERE name = 'Personal Loan'")
+                    cat_id = cursor.fetchone()['id']
+                
+                cursor.execute("SELECT id FROM institutions WHERE name = ?", (old_loan['lender'],))
+                inst_row = cursor.fetchone()
+                if inst_row:
+                    inst_id = inst_row['id']
+                else:
+                    cursor.execute("INSERT INTO institutions (name) VALUES (?)", (old_loan['lender'],))
+                    inst_id = cursor.lastrowid
+
+                cursor.execute("""
+                INSERT OR IGNORE INTO liabilities (name, category_id, lender_institution_id, interest_rate, emi, outstanding, tenure_months, compounding, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    old_loan['name'],
+                    cat_id,
+                    inst_id,
+                    old_loan['roi'],
+                    old_loan['emi'],
+                    old_loan['outstanding'],
+                    old_loan['tenure'],
+                    'Monthly',
+                    json.dumps({
+                        "start_date": old_loan['start_date'],
+                        "prepayment_allowed": old_loan['prepayment_allowed'] if 'prepayment_allowed' in old_loan.keys() else 1,
+                        "processing_fee": old_loan['processing_fee'] if 'processing_fee' in old_loan.keys() else 0.0
+                    })
+                ))
+            cursor.execute("ALTER TABLE loans RENAME TO loans_old")
+            print("[Migration] Loans migrated to Liabilities.")
+    except Exception as e:
+        print("[Migration Warning] Loans migration error:", e)
+
+    try:
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='credit_cards'")
+        if cursor.fetchone():
+            cursor.execute("SELECT * FROM credit_cards")
+            old_cards = cursor.fetchall()
+            cursor.execute("SELECT id FROM categories WHERE name = 'Credit Card'")
+            cc_cat_id = cursor.fetchone()['id']
+            for old_cc in old_cards:
+                cursor.execute("SELECT id FROM institutions WHERE name = ?", (old_cc['issuer'],))
+                inst_row = cursor.fetchone()
+                if inst_row:
+                    inst_id = inst_row['id']
+                else:
+                    cursor.execute("INSERT INTO institutions (name) VALUES (?)", (old_cc['issuer'],))
+                    inst_id = cursor.lastrowid
+
+                cursor.execute("""
+                INSERT OR IGNORE INTO liabilities (name, category_id, lender_institution_id, interest_rate, emi, outstanding, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    old_cc['name'],
+                    cc_cat_id,
+                    inst_id,
+                    0.0,
+                    0.0,
+                    old_cc['outstanding'],
+                    json.dumps({
+                        "credit_limit": old_cc['credit_limit'],
+                        "statement_balance": old_cc['statement_balance'] if 'statement_balance' in old_cc.keys() else 0.0,
+                        "statement_date": old_cc['statement_date'],
+                        "due_date": old_cc['due_date'],
+                        "annual_fee": old_cc['annual_fee'] if 'annual_fee' in old_cc.keys() else 0.0,
+                        "reward_points": old_cc['reward_points'] if 'reward_points' in old_cc.keys() else 0,
+                        "point_value": old_cc['point_value'] if 'point_value' in old_cc.keys() else 0.25,
+                        "remarks": old_cc['remarks']
+                    })
+                ))
+            cursor.execute("ALTER TABLE credit_cards RENAME TO credit_cards_old")
+            print("[Migration] Credit cards migrated to Liabilities.")
+    except Exception as e:
+        print("[Migration Warning] Credit cards migration error:", e)
+
+    # D. Migrate Goals to include target_date
+    try:
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='goals'")
+        if cursor.fetchone():
+            cursor.execute("PRAGMA table_info('goals')")
+            cols = [col['name'] for col in cursor.fetchall()]
+            if cols and 'target_date' not in cols:
+                cursor.execute("ALTER TABLE goals RENAME TO goals_old")
+                cursor.execute("""
+                CREATE TABLE goals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    target_amount REAL NOT NULL,
+                    current_amount REAL DEFAULT 0.0,
+                    monthly_contribution REAL DEFAULT 0.0,
+                    target_date TEXT,
+                    priority TEXT DEFAULT 'Medium',
+                    expected_return REAL DEFAULT 0.0,
+                    inflation REAL DEFAULT 6.0,
+                    funding_sources_json TEXT
+                )
+                """)
+                cursor.execute("SELECT * FROM goals_old")
+                old_goals = cursor.fetchall()
+                for old_goal in old_goals:
+                    cursor.execute("""
+                    INSERT OR IGNORE INTO goals (id, name, target_amount, current_amount, monthly_contribution, target_date, priority)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        old_goal['id'],
+                        old_goal['name'],
+                        old_goal['target_amount'],
+                        old_goal['current_amount'] if 'current_amount' in old_goal.keys() else 0.0,
+                        old_goal['monthly_contribution'] if 'monthly_contribution' in old_goal.keys() else 0.0,
+                        old_goal['expected_completion'] if 'expected_completion' in old_goal.keys() else None,
+                        'Medium'
+                    ))
+                cursor.execute("DROP TABLE goals_old")
+                print("[Migration] Goals migrated to new schema successfully.")
+    except Exception as e:
+        print("[Migration Warning] Goals migration error:", e)
 
     conn.commit()
     conn.close()

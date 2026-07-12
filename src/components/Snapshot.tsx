@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Calendar, CheckCircle, Info } from 'lucide-react';
+import { Calendar, CheckCircle, Save, Info } from 'lucide-react';
 import { InitData } from '../types';
+import { API_BASE_URL } from '../config';
 
 interface SnapshotProps {
   data: InitData;
@@ -9,39 +10,32 @@ interface SnapshotProps {
 
 export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh }) => {
   const [month, setMonth] = useState('');
-  
-  // Local forms state mapping item ID to its balance / value
-  const [accountBalances, setAccountBalances] = useState<{[key: number]: number}>({});
-  const [loanBalances, setLoanBalances] = useState<{[key: number]: number}>({});
-  const [investmentValues, setInvestmentValues] = useState<{[key: number]: number}>({});
-  const [propertyValues, setPropertyValues] = useState<{[key: number]: number}>({});
-  
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
 
+  // Dynamic balances map state
+  const [accountBalances, setAccountBalances] = useState<Record<number, number>>({});
+  const [assetValues, setAssetValues] = useState<Record<number, number>>({});
+  const [liabilityBalances, setLiabilityBalances] = useState<Record<number, number>>({});
+
   useEffect(() => {
-    // Default to current year and month YYYY-MM
     const now = new Date();
     const YYYY = now.getFullYear();
     const MM = String(now.getMonth() + 1).padStart(2, '0');
     setMonth(`${YYYY}-${MM}`);
 
     // Prepopulate form states
-    const accs: {[key: number]: number} = {};
+    const accs: Record<number, number> = {};
     data.accounts.forEach(a => { accs[a.id] = a.current_balance; });
     setAccountBalances(accs);
 
-    const lns: {[key: number]: number} = {};
-    data.loans.forEach(l => { lns[l.id] = l.outstanding; });
-    setLoanBalances(lns);
+    const asts: Record<number, number> = {};
+    data.assets.forEach(a => { asts[a.id] = a.current_value; });
+    setAssetValues(asts);
 
-    const invs: {[key: number]: number} = {};
-    data.investments.forEach(i => { invs[i.id] = i.current_value; });
-    setInvestmentValues(invs);
-
-    const props: {[key: number]: number} = {};
-    data.properties.forEach(p => { props[p.id] = p.current_value; });
-    setPropertyValues(props);
+    const liabs: Record<number, number> = {};
+    data.liabilities.forEach(l => { liabs[l.id] = l.outstanding; });
+    setLiabilityBalances(liabs);
   }, [data]);
 
   const handleSaveSnapshot = async (e: React.FormEvent) => {
@@ -54,7 +48,7 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh }) => {
       for (const acc of data.accounts) {
         const bal = accountBalances[acc.id];
         if (bal !== acc.current_balance) {
-          await fetch(`http://127.0.0.1:8000/api/accounts/${acc.id}`, {
+          await fetch(`${API_BASE_URL}/api/entities/accounts/${acc.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ...acc, current_balance: bal })
@@ -62,48 +56,35 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh }) => {
         }
       }
 
-      // 2. Update Loans in active database
-      for (const loan of data.loans) {
-        const bal = loanBalances[loan.id];
-        if (bal !== loan.outstanding) {
-          await fetch(`http://127.0.0.1:8000/api/loans/${loan.id}`, {
+      // 2. Update Assets in active database
+      for (const asset of data.assets) {
+        const val = assetValues[asset.id];
+        if (val !== asset.current_value) {
+          await fetch(`${API_BASE_URL}/api/entities/assets/${asset.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...loan, outstanding: bal })
+            body: JSON.stringify({ ...asset, current_value: val })
           });
         }
       }
 
-      // 3. Update Investments in active database
-      for (const inv of data.investments) {
-        const val = investmentValues[inv.id];
-        if (val !== inv.current_value) {
-          await fetch(`http://127.0.0.1:8000/api/investments/${inv.id}`, {
+      // 3. Update Liabilities in active database
+      for (const liab of data.liabilities) {
+        const bal = liabilityBalances[liab.id];
+        if (bal !== liab.outstanding) {
+          await fetch(`${API_BASE_URL}/api/entities/liabilities/${liab.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...inv, current_value: val })
+            body: JSON.stringify({ ...liab, outstanding: bal })
           });
         }
       }
 
-      // 4. Update Properties in active database
-      for (const prop of data.properties) {
-        const val = propertyValues[prop.id];
-        if (val !== prop.current_value) {
-          await fetch(`http://127.0.0.1:8000/api/properties/${prop.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...prop, current_value: val })
-          });
-        }
-      }
-
-      // 5. Compile and Post the frozen snapshot snapshot
+      // 4. Compile and Post the frozen snapshot snapshot
       const snapshotPayload = {
         accounts: data.accounts.map(a => ({ ...a, current_balance: accountBalances[a.id] })),
-        loans: data.loans.map(l => ({ ...l, outstanding: loanBalances[l.id] })),
-        investments: data.investments.map(i => ({ ...i, current_value: investmentValues[i.id] })),
-        properties: data.properties.map(p => ({ ...p, current_value: propertyValues[p.id] })),
+        assets: data.assets.map(a => ({ ...a, current_value: assetValues[a.id] })),
+        liabilities: data.liabilities.map(l => ({ ...l, outstanding: liabilityBalances[l.id] })),
         goals: data.goals
       };
 
@@ -111,7 +92,7 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh }) => {
       formData.append('month', month);
       formData.append('snapshot_data_str', JSON.stringify(snapshotPayload));
 
-      const res = await fetch('http://127.0.0.1:8000/api/snapshots', {
+      const res = await fetch(`${API_BASE_URL}/api/snapshots`, {
         method: 'POST',
         body: formData
       });
@@ -130,12 +111,11 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh }) => {
     }
   };
 
-
   return (
-    <div style={{ maxWidth: '800px', margin: '0 auto' }}>
+    <div style={{ maxWidth: '800px', margin: '0 auto', fontFamily: 'Inter, sans-serif' }}>
       <div className="page-header">
-        <h1 className="page-title">Monthly snapshot</h1>
-        <p className="page-subtitle">Freeze monthly balances to archive historical progress (Under 15 minutes setup)</p>
+        <h1 className="page-title">Monthly Snapshot</h1>
+        <p className="page-subtitle">Freeze monthly balances to archive historical progress</p>
       </div>
 
       <div className="glass-panel" style={{ padding: '32px' }}>
@@ -143,12 +123,12 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh }) => {
           {/* Header Row: Month selection */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '28px', borderBottom: '1px solid var(--border-glass)', paddingBottom: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <Calendar size={18} style={{ color: 'var(--accent)' }} />
-              <span style={{ fontWeight: 600 }}>Snapshot Month:</span>
+              <Calendar size={18} style={{ color: '#a78bfa' }} />
+              <span style={{ fontWeight: 600, color: '#e2e8f0' }}>Snapshot Month:</span>
               <input 
                 type="month" 
-                className="form-input" 
-                style={{ padding: '6px 12px', fontSize: '13px' }}
+                className="form-control" 
+                style={{ padding: '6px 12px', fontSize: '13px', width: '160px' }}
                 value={month} 
                 onChange={e => setMonth(e.target.value)} 
               />
@@ -161,24 +141,24 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh }) => {
 
           {/* Alert Success */}
           {success && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 16px', background: 'var(--success-bg)', border: '1px solid rgba(16,185,129,0.2)', color: 'var(--success)', borderRadius: 'var(--radius-sm)', marginBottom: '24px', fontSize: '13px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 16px', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', color: '#10b981', borderRadius: '8px', marginBottom: '24px', fontSize: '13px' }}>
               <CheckCircle size={16} />
               <span>Snapshot compiled and saved successfully. Active balances updated!</span>
             </div>
           )}
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
             {/* Accounts balances Section */}
             {data.accounts.length > 0 && (
               <div>
-                <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '14px', color: 'var(--accent-light)' }}>Accounts (Liquid Balances)</h3>
+                <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '14px', color: '#a78bfa' }}>Accounts (Liquid Balances)</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   {data.accounts.map(acc => (
-                    <div key={acc.id} className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label">{acc.name} ({acc.institution})</label>
+                    <div key={acc.id} className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{acc.name} ({acc.institution_name || 'Bank'})</label>
                       <input 
                         type="number" 
-                        className="form-input" 
+                        className="form-control" 
                         value={accountBalances[acc.id] ?? 0}
                         onChange={e => setAccountBalances({ ...accountBalances, [acc.id]: parseFloat(e.target.value) || 0 })}
                       />
@@ -188,19 +168,19 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh }) => {
               </div>
             )}
 
-            {/* Investments values Section */}
-            {data.investments.length > 0 && (
+            {/* Assets values Section */}
+            {data.assets.length > 0 && (
               <div>
-                <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '14px', color: 'var(--accent-light)' }}>Investments (Current Value)</h3>
+                <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '14px', color: '#a78bfa' }}>Assets Valuation</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                  {data.investments.map(inv => (
-                    <div key={inv.id} className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label">{inv.name} ({inv.type})</label>
+                  {data.assets.map(asset => (
+                    <div key={asset.id} className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{asset.name} ({asset.category_name || 'General'})</label>
                       <input 
                         type="number" 
-                        className="form-input" 
-                        value={investmentValues[inv.id] ?? 0}
-                        onChange={e => setInvestmentValues({ ...investmentValues, [inv.id]: parseFloat(e.target.value) || 0 })}
+                        className="form-control" 
+                        value={assetValues[asset.id] ?? 0}
+                        onChange={e => setAssetValues({ ...assetValues, [asset.id]: parseFloat(e.target.value) || 0 })}
                       />
                     </div>
                   ))}
@@ -208,39 +188,19 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh }) => {
               </div>
             )}
 
-            {/* Loans outstanding Section */}
-            {data.loans.length > 0 && (
+            {/* Liabilities outstanding Section */}
+            {data.liabilities.length > 0 && (
               <div>
-                <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '14px', color: 'var(--accent-light)' }}>Active Loans (Outstanding Principal)</h3>
+                <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '14px', color: '#a78bfa' }}>Liabilities Outstanding</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                  {data.loans.map(loan => (
-                    <div key={loan.id} className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label">{loan.name} (Lender: {loan.lender})</label>
+                  {data.liabilities.map(liab => (
+                    <div key={liab.id} className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{liab.name} ({liab.category_name || 'General'})</label>
                       <input 
                         type="number" 
-                        className="form-input" 
-                        value={loanBalances[loan.id] ?? 0}
-                        onChange={e => setLoanBalances({ ...loanBalances, [loan.id]: parseFloat(e.target.value) || 0 })}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Properties values Section */}
-            {data.properties.length > 0 && (
-              <div>
-                <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '14px', color: 'var(--accent-light)' }}>Real Estate (Valuation)</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                  {data.properties.map(prop => (
-                    <div key={prop.id} className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label">{prop.name}</label>
-                      <input 
-                        type="number" 
-                        className="form-input" 
-                        value={propertyValues[prop.id] ?? 0}
-                        onChange={e => setPropertyValues({ ...propertyValues, [prop.id]: parseFloat(e.target.value) || 0 })}
+                        className="form-control" 
+                        value={liabilityBalances[liab.id] ?? 0}
+                        onChange={e => setLiabilityBalances({ ...liabilityBalances, [liab.id]: parseFloat(e.target.value) || 0 })}
                       />
                     </div>
                   ))}
@@ -249,10 +209,10 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh }) => {
             )}
           </div>
           
-          <div style={{ marginTop: '32px', padding: '16px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Info size={16} style={{ color: 'var(--accent-light)', flexShrink: 0 }} />
-            <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-              Note: Saving the snapshot will overwrite values for this month if it already exists, and will keep historical trends clean. Make sure to update values monthly to keep net worth growth chart accurate.
+          <div style={{ marginTop: '32px', padding: '16px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Info size={16} style={{ color: '#a78bfa', flexShrink: 0 }} />
+            <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0 }}>
+              Note: Saving the snapshot will overwrite values for this month if it already exists, and will keep historical trends clean.
             </p>
           </div>
         </form>

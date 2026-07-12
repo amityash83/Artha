@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, Database, FileText, Download } from 'lucide-react';
+import { Upload, Database, FileText, Download, Sliders, Plus, Trash2 } from 'lucide-react';
 import { InitData } from '../types';
+import { API_BASE_URL } from '../config';
 
 interface ReportsProps {
   data: InitData;
@@ -30,13 +31,165 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
   const [customBackupDir, setCustomBackupDir] = useState('');
   const [saveSettingsStatus, setSaveSettingsStatus] = useState<string | null>(null);
 
+  // Rules, Categories, Institutions metadata states
+  const [rules, setRules] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [institutions, setInstitutions] = useState<any[]>([]);
+
+  // Form states for creating custom metadata
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatType, setNewCatType] = useState('Asset');
+  const [newCatFields, setNewCatFields] = useState('');
+  const [newInstName, setNewInstName] = useState('');
+
+  const [ruleSaveStatus, setRuleSaveStatus] = useState<Record<string, string>>({});
+  const [metaStatus, setMetaStatus] = useState<string | null>(null);
+
   useEffect(() => {
     fetchBackups();
     fetchDatabaseSettings();
+    fetchRulesList();
+    fetchCategoriesList();
+    fetchInstitutionsList();
   }, []);
 
+  const fetchRulesList = () => {
+    fetch(`${API_BASE_URL}/api/metadata/financial_rules`)
+      .then(res => res.json())
+      .then(data => setRules(data))
+      .catch(err => console.error(err));
+  };
+
+  const fetchCategoriesList = () => {
+    fetch(`${API_BASE_URL}/api/metadata/categories`)
+      .then(res => res.json())
+      .then(data => setCategories(data))
+      .catch(err => console.error(err));
+  };
+
+  const fetchInstitutionsList = () => {
+    fetch(`${API_BASE_URL}/api/metadata/institutions`)
+      .then(res => res.json())
+      .then(data => setInstitutions(data))
+      .catch(err => console.error(err));
+  };
+
+  const handleUpdateRule = async (ruleKey: string, value: number, isEnabled: boolean) => {
+    try {
+      setRuleSaveStatus(prev => ({ ...prev, [ruleKey]: 'Saving...' }));
+      const res = await fetch(`${API_BASE_URL}/api/rules`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rule_key: ruleKey,
+          value,
+          is_enabled: isEnabled
+        })
+      });
+      if (res.ok) {
+        setRuleSaveStatus(prev => ({ ...prev, [ruleKey]: 'Saved!' }));
+        fetchRulesList();
+        onRefresh();
+        setTimeout(() => {
+          setRuleSaveStatus(prev => {
+            const next = { ...prev };
+            delete next[ruleKey];
+            return next;
+          });
+        }, 2000);
+      } else {
+        setRuleSaveStatus(prev => ({ ...prev, [ruleKey]: 'Failed' }));
+      }
+    } catch (err) {
+      console.error(err);
+      setRuleSaveStatus(prev => ({ ...prev, [ruleKey]: 'Error' }));
+    }
+  };
+
+  const handleAddCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCatName) return;
+    try {
+      setMetaStatus("Adding Category...");
+      let parsedFields = null;
+      if (newCatFields.trim()) {
+        parsedFields = JSON.parse(newCatFields);
+      }
+      
+      const res = await fetch(`${API_BASE_URL}/api/metadata/categories`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entity_type: newCatType,
+          name: newCatName,
+          fields_definition: parsedFields
+        })
+      });
+      if (res.ok) {
+        setMetaStatus("Category added successfully!");
+        setNewCatName('');
+        setNewCatFields('');
+        fetchCategoriesList();
+        onRefresh();
+        setTimeout(() => setMetaStatus(null), 3000);
+      } else {
+        setMetaStatus("Failed to add category");
+      }
+    } catch (err) {
+      console.error(err);
+      setMetaStatus("Error parsing custom fields JSON schema: " + (err as Error).message);
+    }
+  };
+
+  const handleAddInstitution = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newInstName) return;
+    try {
+      setMetaStatus("Adding Institution...");
+      const res = await fetch(`${API_BASE_URL}/api/metadata/institutions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newInstName })
+      });
+      if (res.ok) {
+        setMetaStatus("Institution added successfully!");
+        setNewInstName('');
+        fetchInstitutionsList();
+        onRefresh();
+        setTimeout(() => setMetaStatus(null), 3000);
+      } else {
+        setMetaStatus("Failed to add institution");
+      }
+    } catch (err) {
+      console.error(err);
+      setMetaStatus("Error adding institution");
+    }
+  };
+
+  const handleDeleteMetadata = async (type: 'categories' | 'institutions', id: number) => {
+    if (!window.confirm("Are you sure you want to delete this metadata? This cannot be undone.")) return;
+    try {
+      setMetaStatus("Deleting metadata item...");
+      const res = await fetch(`${API_BASE_URL}/api/metadata/${type}/${id}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        setMetaStatus("Metadata item deleted successfully.");
+        if (type === 'categories') fetchCategoriesList();
+        else fetchInstitutionsList();
+        onRefresh();
+        setTimeout(() => setMetaStatus(null), 3000);
+      } else {
+        setMetaStatus("Failed to delete metadata item. Check if linked to active accounts/assets.");
+      }
+    } catch (err) {
+      console.error(err);
+      setMetaStatus("Error deleting metadata item");
+    }
+  };
+
   const fetchDatabaseSettings = () => {
-    fetch('http://127.0.0.1:8000/api/settings/database')
+    fetch(`${API_BASE_URL}/api/settings/database`)
       .then(res => res.json())
       .then(d => {
         setDbSettings(d);
@@ -52,7 +205,7 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
     e.preventDefault();
     try {
       setSaveSettingsStatus("Saving...");
-      const res = await fetch('http://127.0.0.1:8000/api/settings/backup', {
+      const res = await fetch(`${API_BASE_URL}/api/settings/backup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -87,7 +240,7 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
       const selectedPath = await electron.ipcRenderer.invoke('select-db-file', mode);
       if (!selectedPath) return; // Cancelled
       
-      const res = await fetch('http://127.0.0.1:8000/api/settings/database', {
+      const res = await fetch(`${API_BASE_URL}/api/settings/database`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: selectedPath })
@@ -110,7 +263,7 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
 
   const handleQuickSwitch = async (path: string) => {
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/settings/database', {
+      const res = await fetch(`${API_BASE_URL}/api/settings/database`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path })
@@ -130,7 +283,7 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
   };
 
   const fetchBackups = () => {
-    fetch('http://127.0.0.1:8000/api/backup/list')
+    fetch(`${API_BASE_URL}/api/backup/list`)
       .then(res => res.json())
       .then(d => setBackupsList(d))
       .catch(err => console.error(err));
@@ -145,7 +298,7 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
 
     try {
       setImportStatus("Importing...");
-      const res = await fetch('http://127.0.0.1:8000/api/import/mmex', {
+      const res = await fetch(`${API_BASE_URL}/api/import/mmex`, {
         method: 'POST',
         body: formData
       });
@@ -165,7 +318,7 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
   const handleCreateBackup = async () => {
     try {
       setBackupStatus("Creating backup...");
-      const res = await fetch('http://127.0.0.1:8000/api/backup/create', { method: 'POST' });
+      const res = await fetch(`${API_BASE_URL}/api/backup/create`, { method: 'POST' });
       if (res.ok) {
         await res.json();
         setBackupStatus("Backup saved successfully!");
@@ -182,7 +335,7 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
     try {
       const formData = new FormData();
       formData.append('backup_name', filename);
-      const res = await fetch('http://127.0.0.1:8000/api/backup/restore', {
+      const res = await fetch(`${API_BASE_URL}/api/backup/restore`, {
         method: 'POST',
         body: formData
       });
@@ -200,6 +353,11 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
   // Generate and Download local reports
   const exportMarkdownReport = () => {
     const summary = data.summary;
+    const liabilities = data.liabilities || [];
+    const assets = data.assets || [];
+    const accounts = data.accounts || [];
+    const goals = data.goals || [];
+
     let md = `# Financial Status & Plan Report - ${new Date().toISOString().split('T')[0]}\n\n`;
     
     md += `## 1. Summary Overview\n`;
@@ -209,26 +367,26 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
     md += `- **Total Liabilities (Debt):** ₹${summary.total_debt.toLocaleString()}\n\n`;
 
     md += `## 2. Savings Accounts balances\n`;
-    data.accounts.forEach(a => {
-      md += `- **${a.name} (${a.institution}):** ₹${a.current_balance.toLocaleString()} _(Updated: ${a.last_updated})_\n`;
+    accounts.forEach((a: any) => {
+      md += `- **${a.name} (${a.institution_name || 'Bank'}):** ₹${a.current_balance.toLocaleString()}\n`;
     });
     md += `\n`;
 
-    md += `## 3. Active Loans Details\n`;
-    data.loans.forEach(l => {
-      md += `- **${l.name} (${l.lender}):** Outstanding: ₹${l.outstanding.toLocaleString()} | EMI: ₹${l.emi.toLocaleString()} | ROI: ${l.roi}% | Remaining Tenure: ${l.remaining_tenure} mo\n`;
+    md += `## 3. Active Liabilities Details\n`;
+    liabilities.forEach((l: any) => {
+      md += `- **${l.name} (${l.lender_name || 'Lender'}):** Outstanding: ₹${l.outstanding.toLocaleString()} | EMI: ₹${(l.emi || 0).toLocaleString()} | ROI: ${l.interest_rate || 0}% | Remaining Tenure: ${l.remaining_tenure || 0} mo\n`;
     });
     md += `\n`;
 
-    md += `## 4. Investments registry\n`;
-    data.investments.forEach(i => {
-      md += `- **${i.name} (${i.type}):** Current: ₹${i.current_value.toLocaleString()} | Invested: ₹${i.invested_amount.toLocaleString()} | Goal: ${i.goal_mapping || 'Unmapped'}\n`;
+    md += `## 4. Assets Registry\n`;
+    assets.forEach((i: any) => {
+      md += `- **${i.name} (${i.category_name || 'General'}):** Current: ₹${i.current_value.toLocaleString()} | Invested: ₹${(i.invested_amount || 0).toLocaleString()}\n`;
     });
     md += `\n`;
 
     md += `## 5. Goals Milestones\n`;
-    data.goals.forEach(g => {
-      md += `- **${g.name} (${g.goal_type}):** Target: ₹${g.target_amount.toLocaleString()} | Current: ₹${g.current_amount.toLocaleString()} | Shortfall: ₹${g.gap.toLocaleString()} | Contribution: ₹${g.monthly_contribution}/mo\n`;
+    goals.forEach((g: any) => {
+      md += `- **${g.name}:** Target: ₹${g.target_amount.toLocaleString()} | Current: ₹${g.current_amount.toLocaleString()} | Shortfall: ₹${(g.gap || 0).toLocaleString()} | Contribution: ₹${(g.monthly_contribution || 0)}/mo\n`;
     });
 
     const blob = new Blob([md], { type: 'text/markdown' });
@@ -241,9 +399,9 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
   };
 
   const exportAccountsCSV = () => {
-    let csv = `Account Name,Institution,Balance,Last Updated,Remarks\n`;
-    data.accounts.forEach(a => {
-      csv += `"${a.name}","${a.institution}",${a.current_balance},"${a.last_updated}","${a.remarks || ''}"\n`;
+    let csv = `Account Name,Institution,Balance\n`;
+    data.accounts.forEach((a: any) => {
+      csv += `"${a.name}","${a.institution_name || 'Bank'}",${a.current_balance}\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -256,9 +414,9 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
   };
 
   const exportLoansCSV = () => {
-    let csv = `Loan Name,Lender,Outstanding Balance,ROI (%),Monthly EMI,Start Date,Loan Type,Remaining Tenure (Months),Progress (%)\n`;
-    data.loans.forEach(l => {
-      csv += `"${l.name}","${l.lender}",${l.outstanding},${l.roi},${l.emi},"${l.start_date}","${l.loan_type}",${l.remaining_tenure},${l.progress}\n`;
+    let csv = `Liability Name,Lender,Outstanding Balance,ROI (%),Monthly EMI,Remaining Tenure (Months),Progress (%)\n`;
+    data.liabilities.forEach((l: any) => {
+      csv += `"${l.name}","${l.lender_name || 'Lender'}",${l.outstanding},${l.interest_rate},${l.emi},${l.remaining_tenure},${l.progress}\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -271,9 +429,9 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
   };
 
   const exportInvestmentsCSV = () => {
-    let csv = `Investment Name,Type,Current Value,Invested Amount,Goal Mapping,Last Updated\n`;
-    data.investments.forEach(i => {
-      csv += `"${i.name}","${i.type}",${i.current_value},${i.invested_amount},"${i.goal_mapping || ''}","${i.last_updated}"\n`;
+    let csv = `Asset Name,Category,Current Value,Invested Amount\n`;
+    data.assets.forEach((i: any) => {
+      csv += `"${i.name}","${i.category_name || 'General'}",${i.current_value},${i.invested_amount || 0}\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -286,9 +444,10 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
   };
 
   const exportInsuranceCSV = () => {
-    let csv = `Insurance Company,Policy Number,Coverage,Premium,Frequency,Nominee,Renewal Date,Waiting Period\n`;
-    data.insurance.forEach(ins => {
-      csv += `"${ins.company}","${ins.policy_number}",${ins.coverage},${ins.premium},"${ins.frequency}","${ins.nominee}","${ins.renewal_date}","${ins.waiting_period || ''}"\n`;
+    let csv = `Asset Name,Policy Number,Coverage,Premium,Frequency,Nominee,Renewal Date\n`;
+    const insurance = (data.assets || []).filter((a: any) => a.category_name === 'Insurance');
+    insurance.forEach((ins: any) => {
+      csv += `"${ins.name}","${ins.policy_number || ''}",${ins.coverage || 0},${ins.premium || 0},"${ins.frequency || ''}","${ins.nominee || ''}","${ins.renewal_date || ''}"\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -528,6 +687,192 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
                 ) : (
                   <span style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '12px 0' }}>No backups found.</span>
                 )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Dynamic Metadata & Rules Configurations Section */}
+      <div className="glass-panel" style={{ marginTop: '28px', padding: '32px', gridColumn: '1 / -1' }}>
+        <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '8px', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Sliders size={20} style={{ color: '#a78bfa' }} />
+          Metadata Configurator & Financial Rules Engine
+        </h2>
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '24px' }}>
+          Customize your decision parameters, add new schema entities, and manage active category properties.
+        </p>
+
+        {metaStatus && (
+          <div style={{ padding: '12px 16px', background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.2)', color: '#a78bfa', borderRadius: '8px', marginBottom: '24px', fontSize: '12px' }}>
+            {metaStatus}
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '32px' }}>
+          {/* Rules List Manager */}
+          <div>
+            <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '16px', borderBottom: '1px solid var(--border-glass)', paddingBottom: '8px' }}>
+              Policy Rules Parameters
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {rules.map((rule: any) => (
+                <div key={rule.rule_key} className="glass-panel" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', background: 'rgba(255,255,255,0.01)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <strong style={{ fontSize: '13px', color: '#fff' }}>{rule.rule_name}</strong>
+                      <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>{rule.description}</p>
+                    </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={rule.is_enabled === 1}
+                        onChange={e => handleUpdateRule(rule.rule_key, rule.value, e.target.checked)}
+                      />
+                      Active
+                    </label>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    <input 
+                      type="number" 
+                      className="form-control" 
+                      style={{ padding: '6px 12px', fontSize: '12px', flex: 1 }}
+                      value={rule.value} 
+                      onChange={e => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setRules(rules.map(r => r.rule_key === rule.rule_key ? { ...r, value: val } : r));
+                      }} 
+                    />
+                    <button 
+                      className="btn btn-primary" 
+                      style={{ padding: '6px 12px', fontSize: '11px' }}
+                      onClick={() => handleUpdateRule(rule.rule_key, rule.value, rule.is_enabled === 1)}
+                    >
+                      {ruleSaveStatus[rule.rule_key] || 'Update'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Categories & Institutions Creator */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+            {/* Category Creator */}
+            <div className="glass-panel" style={{ padding: '20px' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Plus size={16} /> Add Custom Product Category
+              </h3>
+              <form onSubmit={handleAddCategory} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Category Name</label>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      placeholder="e.g. Fine Art" 
+                      required 
+                      value={newCatName} 
+                      onChange={e => setNewCatName(e.target.value)} 
+                    />
+                  </div>
+                  <div style={{ width: '120px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Entity Type</label>
+                    <select 
+                      className="form-control" 
+                      value={newCatType} 
+                      onChange={e => setNewCatType(e.target.value)}
+                    >
+                      <option value="Asset">Asset</option>
+                      <option value="Liability">Liability</option>
+                      <option value="Account">Account</option>
+                      <option value="Income">Income</option>
+                      <option value="Expense">Expense</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)' }}>
+                    <span>Dynamic Custom Fields JSON (Optional)</span>
+                    <span style={{ color: '#a78bfa', fontFamily: 'monospace', fontSize: '10px' }}>[&#123;"name":"foo","type":"text"&#125;]</span>
+                  </label>
+                  <textarea 
+                    className="form-control" 
+                    placeholder='e.g. [{"name": "artist", "type": "text", "label": "Artist"}]'
+                    style={{ fontSize: '12px', fontFamily: 'monospace', height: '60px', resize: 'none' }}
+                    value={newCatFields}
+                    onChange={e => setNewCatFields(e.target.value)}
+                  />
+                </div>
+
+                <button type="submit" className="btn btn-primary" style={{ marginTop: '4px' }}>
+                  Register Category
+                </button>
+              </form>
+            </div>
+
+            {/* Institution Creator */}
+            <div className="glass-panel" style={{ padding: '20px' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Plus size={16} /> Register Financial Institution
+              </h3>
+              <form onSubmit={handleAddInstitution} style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Institution / Lender Name</label>
+                  <input 
+                    type="text" 
+                    className="form-control" 
+                    placeholder="e.g. Vanguard" 
+                    required 
+                    value={newInstName} 
+                    onChange={e => setNewInstName(e.target.value)} 
+                  />
+                </div>
+                <button type="submit" className="btn btn-primary" style={{ height: '36px' }}>
+                  Register
+                </button>
+              </form>
+            </div>
+
+            {/* List & Clean-up Metadata */}
+            <div className="glass-panel" style={{ padding: '20px' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '12px' }}>
+                Active System Metadata Registry
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '200px', overflowY: 'auto' }}>
+                <div>
+                  <h4 style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>Dynamic Categories</h4>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {categories.map((cat: any) => (
+                      <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 8px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '6px', fontSize: '11px' }}>
+                        <span>{cat.name} <strong style={{ color: 'var(--text-muted)', fontSize: '10px' }}>({cat.entity_type})</strong></span>
+                        <Trash2 
+                          size={11} 
+                          style={{ color: '#ef4444', cursor: 'pointer' }} 
+                          onClick={() => handleDeleteMetadata('categories', cat.id)} 
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <h4 style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>Dynamic Institutions</h4>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {institutions.map((inst: any) => (
+                      <div key={inst.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 8px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '6px', fontSize: '11px' }}>
+                        <span>{inst.name}</span>
+                        <Trash2 
+                          size={11} 
+                          style={{ color: '#ef4444', cursor: 'pointer' }} 
+                          onClick={() => handleDeleteMetadata('institutions', inst.id)} 
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           </div>

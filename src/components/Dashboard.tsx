@@ -9,6 +9,7 @@ import {
   LineElement, Title, Tooltip, Legend, Filler, ChartData, ArcElement
 } from 'chart.js';
 import { InitData, Snapshot } from '../types';
+import { API_BASE_URL } from '../config';
 
 ChartJS.register(
   CategoryScale, LinearScale, PointElement, LineElement, 
@@ -22,16 +23,15 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
-  const { summary, goals, recommendations, rules } = data;
+  const { summary, goals, recommendations, rules, assets, liabilities } = data;
 
   useEffect(() => {
-    fetch('http://127.0.0.1:8000/api/snapshots')
+    fetch(`${API_BASE_URL}/api/snapshots`)
       .then(res => res.json())
       .then(d => setSnapshots(d))
       .catch(err => console.error("Failed to fetch snapshots:", err));
   }, []);
 
-  // Format currency in Indian Rupees style (Lakhs / Crores)
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
@@ -56,11 +56,43 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
     liquidityHealthLabel = 'Warning - Near Limit';
   }
 
-  // Find critical target funds for progress bars
-  const emergencyFund = goals.find(g => g.goal_type === 'Emergency Fund');
-  const backupFund = goals.find(g => g.goal_type === 'Backup Fund');
-  const villaFund = goals.find(g => g.name.toLowerCase().includes('villa'));
-  const retirementFund = goals.find(g => g.goal_type === 'Retirement');
+  // Dynamic Asset Allocation for Doughnut Chart
+  const assetAllocation: Record<string, number> = {
+    'Liquid Cash': liquidFunds
+  };
+
+  assets.forEach((asset) => {
+    const cat = asset.category_name || 'General Assets';
+    assetAllocation[cat] = (assetAllocation[cat] || 0) + asset.current_value;
+  });
+
+  const doughnutLabels = Object.keys(assetAllocation);
+  const doughnutValues = Object.values(assetAllocation);
+
+  const colors = [
+    '#10b981', // green
+    '#8b5cf6', // purple
+    '#3b82f6', // blue
+    '#f59e0b', // orange
+    '#ec4899', // pink
+    '#06b6d4', // cyan
+    '#e11d48'  // rose
+  ];
+
+  const doughnutColors = doughnutLabels.map((_, i) => colors[i % colors.length]);
+
+  const doughnutData = {
+    labels: doughnutLabels,
+    datasets: [
+      {
+        data: doughnutValues,
+        backgroundColor: doughnutColors,
+        borderColor: 'rgba(255,255,255,0.08)',
+        borderWidth: 1,
+        hoverOffset: 6
+      }
+    ]
+  };
 
   // Chart Configuration
   const chartData: ChartData<'line'> = {
@@ -76,23 +108,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
         pointBackgroundColor: '#8b5cf6',
         pointHoverRadius: 6,
         borderWidth: 2,
-      }
-    ]
-  };
-
-  const doughnutData = {
-    labels: ['Liquid Cash', 'Investments', 'Property Values'],
-    datasets: [
-      {
-        data: [summary.total_liquid, summary.total_investments, summary.total_properties],
-        backgroundColor: [
-          '#10b981', // green
-          '#8b5cf6', // purple
-          '#3b82f6'  // blue
-        ],
-        borderColor: 'rgba(255,255,255,0.08)',
-        borderWidth: 1,
-        hoverOffset: 6
       }
     ]
   };
@@ -160,10 +175,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
 
   const handleRecommendationAction = (rec: any) => {
     if (rec.action_type === 'prepay') {
-      const activeLoan = data.loans.find(l => rec.message.includes(l.name));
+      const activeLiability = liabilities.find(l => rec.message.includes(l.name));
       onNavigate('simulations', {
         scenario_type: 'close_loan',
-        loan_id: activeLoan?.id || null
+        loan_id: activeLiability?.id || null
       });
     } else {
       onNavigate('simulations');
@@ -198,244 +213,157 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
               {formatCurrency(summary.net_worth)}
             </h2>
           </div>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)', borderTop: '1px solid var(--border-glass)', paddingTop: '10px', marginTop: '12px', display: 'flex', justifyContent: 'space-between' }}>
-            <span>Yearly Growth:</span>
-            <span style={{ fontWeight: 600, color: summary.yearly_change >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-              {summary.yearly_change >= 0 ? '+' : ''}{formatCurrency(summary.yearly_change)}
-            </span>
+          <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: 'var(--text-muted)', borderTop: '1px solid var(--border-glass)', paddingTop: '10px', marginTop: '10px' }}>
+            <span>Assets: <strong style={{ color: '#f8fafc' }}>{formatCurrency(summary.total_assets)}</strong></span>
+            <span>Liabilities: <strong style={{ color: '#f8fafc' }}>{formatCurrency(summary.total_debt)}</strong></span>
           </div>
         </div>
 
-        {/* Liquidity Card */}
+        {/* Liquid Reserve Health Indicator */}
         <div className="glass-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500 }}>Liquidity (Cash)</span>
-            <span className={`status-badge ${liquidityHealth}`}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500 }}>Liquid Capital Status</span>
+            <span className={`badge badge-${liquidityHealth}`} style={{ fontSize: '10px' }}>
               {liquidityHealthLabel}
             </span>
           </div>
-          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 700, margin: '12px 0 6px 0' }}>
-            {formatCurrency(summary.total_liquid)}
+          <h2 style={{ fontSize: '22px', fontWeight: 600, color: '#f8fafc', margin: '4px 0 8px 0' }}>
+            {formatCurrency(liquidFunds)}
           </h2>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)', borderTop: '1px solid var(--border-glass)', paddingTop: '10px', marginTop: '12px', display: 'flex', justifyContent: 'space-between' }}>
-            <span>Target Liquidity limit:</span>
-            <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>{formatCurrency(targetLiquidity)}</span>
+          <div style={{ height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', overflow: 'hidden', marginBottom: '8px' }}>
+            <div style={{ 
+              width: `${Math.min(liquidityRatio * 100, 100)}%`, 
+              height: '100%', 
+              background: liquidityHealth === 'green' ? 'var(--success)' : liquidityHealth === 'yellow' ? 'var(--warning)' : 'var(--danger)'
+            }}></div>
           </div>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+            Target Emergency Liquidity: {formatCurrency(targetLiquidity)}
+          </span>
         </div>
 
-        {/* Active Loans Card */}
-        <div className="glass-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500 }}>Outstanding Loans</span>
-            <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 500 }}>
-              EMI Commitments
-            </span>
-          </div>
-          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 700, margin: '12px 0 6px 0', color: data.loans.reduce((sum, l) => sum + l.outstanding, 0) > 0 ? 'var(--danger)' : 'var(--success)' }}>
-            {formatCurrency(data.loans.reduce((sum, l) => sum + l.outstanding, 0))}
-          </h2>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)', borderTop: '1px solid var(--border-glass)', paddingTop: '10px', marginTop: '12px', display: 'flex', justifyContent: 'space-between' }}>
-            <span>Monthly EMI:</span>
-            <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>
-              {formatCurrency(data.loans.reduce((sum, l) => sum + l.emi, 0))}
-            </span>
-          </div>
-        </div>
-
-        {/* Credit Cards Card */}
-        <div className="glass-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500 }}>Credit Cards</span>
-            <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 500 }}>
-              Limit Utilization
-            </span>
-          </div>
-          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 700, margin: '12px 0 6px 0', color: (data.credit_cards || []).reduce((sum, c) => sum + c.outstanding, 0) > 0 ? 'var(--warning)' : 'var(--success)' }}>
-            {formatCurrency((data.credit_cards || []).reduce((sum, c) => sum + c.outstanding, 0))}
-          </h2>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)', borderTop: '1px solid var(--border-glass)', paddingTop: '10px', marginTop: '12px', display: 'flex', justifyContent: 'space-between' }}>
-            <span>Available Limit:</span>
-            <span style={{ fontWeight: 600, color: 'var(--success)' }}>
-              {formatCurrency((data.credit_cards || []).reduce((sum, c) => sum + (c.credit_limit - c.outstanding), 0))}
-            </span>
+        {/* Target Progress Card */}
+        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500 }}>Goal Allocations</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {goals.slice(0, 3).map((goal) => {
+              const progress = goal.target_amount > 0 ? (goal.current_amount / goal.target_amount) * 100 : 0;
+              return (
+                <div key={goal.id}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '3px' }}>
+                    <span style={{ color: '#e2e8f0' }}>{goal.name}</span>
+                    <span style={{ color: 'var(--text-muted)' }}>{progress.toFixed(0)}%</span>
+                  </div>
+                  <div style={{ height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.min(progress, 100)}%`, height: '100%', background: '#8b5cf6' }}></div>
+                  </div>
+                </div>
+              );
+            })}
+            {goals.length === 0 && (
+              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>No goals set yet.</span>
+            )}
           </div>
         </div>
       </div>
 
-      {/* System Action Items / Recommendations Row */}
-      {recommendations.length > 0 && (
-        <div style={{ marginBottom: '24px' }}>
-          <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '12px', color: 'var(--text-secondary)' }}>System Action Items</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
-            {recommendations.map((rec, idx) => (
-              <div 
-                key={idx} 
-                className="glass-card"
-                style={{ 
-                  padding: '16px', 
-                  borderRadius: 'var(--radius-sm)', 
-                  border: '1px solid rgba(255,255,255,0.04)',
-                  background: rec.status === 'danger' ? 'var(--danger-bg)' : rec.status === 'warning' ? 'var(--warning-bg)' : rec.status === 'success' ? 'var(--success-bg)' : 'var(--info-bg)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between'
-                }}
-              >
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                    {rec.status === 'danger' && <AlertTriangle size={16} style={{ color: 'var(--danger)' }} />}
-                    {rec.status === 'warning' && <AlertTriangle size={16} style={{ color: 'var(--warning)' }} />}
-                    {rec.status === 'success' && <CheckCircle size={16} style={{ color: 'var(--success)' }} />}
-                    {rec.status === 'info' && <ShieldCheck size={16} style={{ color: 'var(--info)' }} />}
-                    <span style={{ fontSize: '14px', fontWeight: 600, color: '#ffffff' }}>{rec.title}</span>
-                  </div>
-                  <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.4', marginBottom: rec.action_type !== 'info' ? '12px' : '0' }}>
-                    {rec.message}
-                  </p>
-                </div>
-                {rec.action_type !== 'info' && (
-                  <button 
-                    onClick={() => handleRecommendationAction(rec)}
-                    className="btn" 
-                    style={{ padding: '6px 12px', fontSize: '11px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-glass)', display: 'inline-flex', alignItems: 'center', gap: '4px', alignSelf: 'flex-start' }}
-                  >
-                    Simulate Action <ArrowRight size={11} />
-                  </button>
+      {/* Charts & Recommendations Split */}
+      <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: '24px', flexWrap: 'wrap' }} className="grid-split">
+        {/* Left Side Charts Panel */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div className="glass-panel" style={{ height: '320px', display: 'flex', flexDirection: 'column' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#f8fafc', marginBottom: '16px' }}>Historic Asset Progression</h3>
+            <div style={{ flex: 1, position: 'relative' }}>
+              <Line data={chartData} options={chartOptions} />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }} className="sub-charts">
+            <div className="glass-panel" style={{ height: '240px', display: 'flex', flexDirection: 'column' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '12px' }}>Asset Distribution</h3>
+              <div style={{ flex: 1, position: 'relative' }}>
+                <Doughnut data={doughnutData} options={doughnutOptions} />
+              </div>
+            </div>
+
+            <div className="glass-panel" style={{ height: '240px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '12px' }}>Liabilities Distribution</h3>
+              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {liabilities.length === 0 ? (
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center', marginTop: '20px' }}>
+                    No liabilities recorded.
+                  </span>
+                ) : (
+                  liabilities.map((l) => (
+                    <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', background: 'rgba(255,255,255,0.02)', padding: '8px 12px', borderRadius: '8px' }}>
+                      <span style={{ color: '#e2e8f0', fontWeight: 500 }}>{l.name}</span>
+                      <span style={{ color: '#f1f5f9' }}>{formatCurrency(l.outstanding)}</span>
+                    </div>
+                  ))
                 )}
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Main Grid: Charts Panel */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: '24px', marginBottom: '32px' }}>
-        {/* Net Worth Line Chart */}
-        <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column' }}>
-          <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '20px' }}>Net Worth Growth Trend</h3>
-          <div className="chart-container" style={{ flexGrow: 1, minHeight: '260px' }}>
-            <Line data={chartData} options={chartOptions} />
+            </div>
           </div>
         </div>
 
-        {/* Asset Allocation Doughnut Chart */}
-        <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column' }}>
-          <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '20px' }}>Asset Allocation</h3>
-          <div className="chart-container" style={{ flexGrow: 1, minHeight: '260px' }}>
-            <Doughnut data={doughnutData} options={doughnutOptions} />
+        {/* Right Side Actionable Recommendations Rules Panel */}
+        <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column' }}>
+          <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#f8fafc', marginBottom: '16px' }}>Decision Engine Recommendations</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flex: 1, overflowY: 'auto' }}>
+            {recommendations.length === 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', padding: '32px' }}>
+                <ShieldCheck size={36} style={{ color: 'var(--success)', marginBottom: '12px' }} />
+                <span style={{ fontSize: '13px', fontWeight: 500, color: '#f8fafc' }}>All Systems Healthy</span>
+                <span style={{ fontSize: '11px', textAlign: 'center', marginTop: '4px' }}>
+                  No warnings or emergency fund breaches detected.
+                </span>
+              </div>
+            ) : (
+              recommendations.map((rec, i) => (
+                <div key={i} className={`rec-card border-${rec.status}`} style={{
+                  padding: '16px',
+                  borderRadius: '10px',
+                  background: 'rgba(255, 255, 255, 0.02)',
+                  borderLeft: `3px solid var(--${rec.status})`,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: `var(--${rec.status}-light)` }}>
+                      {rec.category.toUpperCase()}
+                    </span>
+                    {rec.status === 'danger' && <AlertTriangle size={14} style={{ color: 'var(--danger)' }} />}
+                    {rec.status === 'success' && <CheckCircle size={14} style={{ color: 'var(--success)' }} />}
+                  </div>
+                  <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc' }}>{rec.title}</h4>
+                  <p style={{ fontSize: '11.5px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>{rec.message}</p>
+                  
+                  {rec.action_type !== 'info' && (
+                    <button 
+                      className={`btn btn-secondary`} 
+                      style={{ 
+                        alignSelf: 'flex-start', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '6px', 
+                        fontSize: '11px', 
+                        padding: '4px 12px',
+                        marginTop: '4px',
+                        borderRadius: '6px',
+                        background: 'rgba(139, 92, 246, 0.1)',
+                        border: '1px solid rgba(139, 92, 246, 0.2)',
+                        color: '#a78bfa'
+                      }}
+                      onClick={() => handleRecommendationAction(rec)}
+                    >
+                      Optimize Now <ArrowRight size={12} />
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
           </div>
-        </div>
-      </div>
-
-      {/* Target Goals Summary Widgets */}
-      <h3 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '18px', fontFamily: 'var(--font-display)' }}>Critical Reserve &amp; Goal Trackers</h3>
-      <div className="dashboard-grid">
-        {/* Emergency Fund Progress */}
-        <div className="glass-card">
-          <h4 style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)' }}>Emergency Fund</h4>
-          {emergencyFund ? (
-            <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '12px 0 8px 0' }}>
-                <span style={{ fontSize: '20px', fontWeight: 700 }}>{formatCurrency(emergencyFund.current_amount)}</span>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>of {formatCurrency(emergencyFund.target_amount)}</span>
-              </div>
-              <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '50px', overflow: 'hidden' }}>
-                <div style={{ 
-                  width: `${Math.min((emergencyFund.current_amount / emergencyFund.target_amount) * 100, 100)}%`, 
-                  height: '100%', 
-                  background: 'var(--success)',
-                  borderRadius: '50px'
-                }}></div>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)', marginTop: '6px' }}>
-                <span>Progress: {((emergencyFund.current_amount / emergencyFund.target_amount) * 100).toFixed(0)}%</span>
-                <span>Est: {emergencyFund.expected_completion}</span>
-              </div>
-            </>
-          ) : (
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '12px' }}>Emergency Fund goal not defined.</p>
-          )}
-        </div>
-
-        {/* Backup Fund Progress */}
-        <div className="glass-card">
-          <h4 style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)' }}>Backup Fund</h4>
-          {backupFund ? (
-            <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '12px 0 8px 0' }}>
-                <span style={{ fontSize: '20px', fontWeight: 700 }}>{formatCurrency(backupFund.current_amount)}</span>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>of {formatCurrency(backupFund.target_amount)}</span>
-              </div>
-              <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '50px', overflow: 'hidden' }}>
-                <div style={{ 
-                  width: `${Math.min((backupFund.current_amount / backupFund.target_amount) * 100, 100)}%`, 
-                  height: '100%', 
-                  background: 'var(--accent)',
-                  borderRadius: '50px'
-                }}></div>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)', marginTop: '6px' }}>
-                <span>Progress: {((backupFund.current_amount / backupFund.target_amount) * 100).toFixed(0)}%</span>
-                <span>Est: {backupFund.expected_completion}</span>
-              </div>
-            </>
-          ) : (
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '12px' }}>Backup Fund goal not defined.</p>
-          )}
-        </div>
-
-        {/* Villa Fund Progress */}
-        <div className="glass-card">
-          <h4 style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)' }}>Villa Fund</h4>
-          {villaFund ? (
-            <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '12px 0 8px 0' }}>
-                <span style={{ fontSize: '20px', fontWeight: 700 }}>{formatCurrency(villaFund.current_amount)}</span>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>of {formatCurrency(villaFund.target_amount)}</span>
-              </div>
-              <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '50px', overflow: 'hidden' }}>
-                <div style={{ 
-                  width: `${Math.min((villaFund.current_amount / villaFund.target_amount) * 100, 100)}%`, 
-                  height: '100%', 
-                  background: 'var(--warning)',
-                  borderRadius: '50px'
-                }}></div>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)', marginTop: '6px' }}>
-                <span>Gap: {formatCurrency(villaFund.gap)}</span>
-                <span>Est: {villaFund.expected_completion}</span>
-              </div>
-            </>
-          ) : (
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '12px' }}>Villa Fund goal not defined.</p>
-          )}
-        </div>
-
-        {/* Retirement Corpus Progress */}
-        <div className="glass-card">
-          <h4 style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)' }}>Retirement Fund</h4>
-          {retirementFund ? (
-            <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '12px 0 8px 0' }}>
-                <span style={{ fontSize: '20px', fontWeight: 700 }}>{formatCurrency(retirementFund.current_amount)}</span>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>of {formatCurrency(retirementFund.target_amount)}</span>
-              </div>
-              <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '50px', overflow: 'hidden' }}>
-                <div style={{ 
-                  width: `${Math.min((retirementFund.current_amount / retirementFund.target_amount) * 100, 100)}%`, 
-                  height: '100%', 
-                  background: 'var(--info)',
-                  borderRadius: '50px'
-                }}></div>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)', marginTop: '6px' }}>
-                <span>Progress: {((retirementFund.current_amount / retirementFund.target_amount) * 100).toFixed(0)}%</span>
-                <span>Months: {retirementFund.months_remaining === -1 ? 'Never' : retirementFund.months_remaining}</span>
-              </div>
-            </>
-          ) : (
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '12px' }}>Retirement goal not defined.</p>
-          )}
         </div>
       </div>
     </div>

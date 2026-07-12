@@ -29,6 +29,30 @@ app.add_middleware(
 def startup_event():
     init_db()
 
+def get_table_columns(cursor, table_name: str) -> list:
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    return [row["name"] for row in cursor.fetchall()]
+
+def serialize_entity_payload(cursor, table_name: str, payload: dict) -> dict:
+    cols = get_table_columns(cursor, table_name)
+    standard_params = {}
+    extra_params = {}
+    
+    for k, v in payload.items():
+        if k in cols:
+            standard_params[k] = v
+        else:
+            extra_params[k] = v
+            
+    if "metadata_json" in cols:
+        standard_params["metadata_json"] = json.dumps(extra_params)
+    elif "funding_sources_json" in cols:
+        standard_params["funding_sources_json"] = json.dumps(extra_params)
+    elif "snapshot_data" in cols:
+        standard_params["snapshot_data"] = json.dumps(extra_params)
+        
+    return standard_params
+
 # --- Pydantic Models for Requests ---
 class AccountSchema(BaseModel):
     name: str
@@ -126,77 +150,128 @@ class SimulationRequestSchema(BaseModel):
     scenario_type: str # close_loan, delay_goal, increase_sip, salary_change, receive_bonus, roi_reduction, brother_property
     params: dict # parameters specific to the scenario
 
-# --- Core Aggregate / Dashboard Data ---
+# --- Core Dynamic Aggregate / Dashboard Data ---
 @app.get("/api/init")
 def get_init_data():
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
         # Accounts
-        cursor.execute("SELECT * FROM accounts")
+        cursor.execute("""
+            SELECT a.*, i.name as institution_name 
+            FROM accounts a
+            LEFT JOIN institutions i ON a.institution_id = i.id
+        """)
         accounts = [dict(row) for row in cursor.fetchall()]
         
-        # Loans
-        cursor.execute("SELECT * FROM loans")
-        loans_raw = cursor.fetchall()
-        loans = []
-        for r in loans_raw:
+        # Assets (Mutual funds, stocks, gold, EPFO, property, insurance etc.)
+        cursor.execute("""
+            SELECT a.*, c.name as category_name, i.name as institution_name
+            FROM assets a
+            LEFT JOIN categories c ON a.category_id = c.id
+            LEFT JOIN institutions i ON a.institution_id = i.id
+        """)
+        assets = []
+        for r in cursor.fetchall():
             d = dict(r)
-            rem_n = calc.calculate_remaining_tenure(d["outstanding"], d["roi"], d["emi"])
-            d["remaining_tenure"] = round(rem_n, 1) if rem_n != float('inf') else -1
-            d["remaining_interest"] = round(calc.calculate_remaining_interest(d["outstanding"], d["roi"], d["emi"]), 2)
-            d["progress"] = round(calc.calculate_loan_progress(d["tenure"], rem_n), 1)
-            loans.append(d)
-            
-        # Investments
-        cursor.execute("SELECT * FROM investments")
-        investments = [dict(row) for row in cursor.fetchall()]
-        
-        # Properties
-        cursor.execute("SELECT * FROM properties")
-        properties = [dict(row) for row in cursor.fetchall()]
-        
-        # Insurance
-        cursor.execute("SELECT * FROM insurance")
-        insurance = [dict(row) for row in cursor.fetchall()]
-        
+            if d.get("metadata_json"):
+                try:
+                    d.update(json.loads(d["metadata_json"]))
+                except:
+                    pass
+            assets.append(d)
+
+        # Liabilities (Home loans, car loans, credit cards)
+        cursor.execute("""
+            SELECT l.*, c.name as category_name, i.name as lender_name
+            FROM liabilities l
+            LEFT JOIN categories c ON l.category_id = c.id
+            LEFT JOIN institutions i ON l.lender_institution_id = i.id
+        """)
+        liabilities_raw = cursor.fetchall()
+        liabilities = []
+        for r in liabilities_raw:
+            d = dict(r)
+            if d.get("metadata_json"):
+                try:
+                    d.update(json.loads(d["metadata_json"]))
+                except:
+                    pass
+            # Add dynamic tenure and progress math if it is a reducing balance loan
+            if d.get("outstanding", 0.0) > 0 and d.get("interest_rate", 0.0) > 0 and d.get("emi", 0.0) > 0:
+                rem_n = calc.calculate_remaining_tenure(d["outstanding"], d["interest_rate"], d["emi"])
+                d["remaining_tenure"] = round(rem_n, 1) if rem_n != float('inf') else -1
+                d["remaining_interest"] = round(calc.calculate_remaining_interest(d["outstanding"], d["interest_rate"], d["emi"]), 2)
+                d["progress"] = round(calc.calculate_loan_progress(d.get("tenure_months", 120), rem_n), 1)
+            else:
+                d["remaining_tenure"] = -1
+                d["remaining_interest"] = 0.0
+                d["progress"] = 100.0
+            liabilities.append(d)
+
+        # Income
+        cursor.execute("""
+            SELECT inc.*, c.name as category_name
+            FROM income inc
+            LEFT JOIN categories c ON inc.category_id = c.id
+        """)
+        income = [dict(row) for row in cursor.fetchall()]
+
+        # Expenses
+        cursor.execute("""
+            SELECT e.*, c.name as category_name
+            FROM expenses e
+            LEFT JOIN categories c ON e.category_id = c.id
+        """)
+        expenses = [dict(row) for row in cursor.fetchall()]
+
         # Goals
         cursor.execute("SELECT * FROM goals")
         goals_raw = cursor.fetchall()
         goals = []
         for r in goals_raw:
             d = dict(r)
-            comp_details = calc.calculate_goal_expected_completion(d["target_amount"], d["current_amount"], d["monthly_contribution"])
+            if d.get("funding_sources_json"):
+                try:
+                    d["funding_sources"] = json.loads(d["funding_sources_json"])
+                except:
+                    d["funding_sources"] = []
+            comp_details = calc.calculate_goal_expected_completion(d["target_amount"], d["current_amount"], d.get("monthly_contribution", 0.0))
             d.update(comp_details)
             goals.append(d)
 
-        # Credit Cards
-        cursor.execute("SELECT * FROM credit_cards")
-        credit_cards = [dict(row) for row in cursor.fetchall()]
-            
         # Rules
         cursor.execute("SELECT * FROM financial_rules")
         rules = [dict(row) for row in cursor.fetchall()]
-        
-        # Monthly Cash Flows
+
+        # Categories & Institutions metadata
+        cursor.execute("SELECT * FROM categories")
+        categories = [dict(row) for row in cursor.fetchall()]
+        for c in categories:
+            if c.get("fields_definition"):
+                try:
+                    c["fields_definition"] = json.loads(c["fields_definition"])
+                except:
+                    pass
+
+        cursor.execute("SELECT * FROM institutions")
+        institutions = [dict(row) for row in cursor.fetchall()]
+
+        # Monthly Cash Flows logs
         cursor.execute("SELECT * FROM monthly_cash_flows ORDER BY month DESC")
         cash_flows = [dict(row) for row in cursor.fetchall()]
-        
-        # Recommendations
+
+        # Dynamic Recommendations mapping
         recommendations = generate_recommendations(conn)
+
+        # Summary aggregates
+        total_liquid = sum(float(a.get("current_balance") if a.get("current_balance") is not None else 0.0) for a in accounts)
+        total_assets_val = sum(float(a.get("current_value") if a.get("current_value") is not None else 0.0) for a in assets)
+        total_debt = sum(float(l.get("outstanding") if l.get("outstanding") is not None else 0.0) for l in liabilities)
         
-        # Net Worth Summary
-        total_liquid = sum(a["current_balance"] for a in accounts)
-        total_investments = sum(i["current_value"] for i in investments)
-        total_properties = sum(p["current_value"] for p in properties)
-        total_insurance_assets = sum(ins.get("surrender_value", 0.0) for ins in insurance)
-        total_loans_debt = sum(l["outstanding"] for l in loans)
-        total_cc_debt = sum(c["outstanding"] for c in credit_cards)
-        total_debt = total_loans_debt + total_cc_debt
-        
-        total_assets = total_liquid + total_investments + total_properties + total_insurance_assets
+        total_assets = total_liquid + total_assets_val
         net_worth = total_assets - total_debt
-        
+
         # Check historic change (compare with last month snapshot)
         cursor.execute("SELECT net_worth FROM snapshots ORDER BY month DESC LIMIT 2")
         historic_snapshots = cursor.fetchall()
@@ -208,142 +283,124 @@ def get_init_data():
             monthly_change = net_worth - historic_snapshots[0]["net_worth"]
         
         cursor.execute("SELECT net_worth FROM snapshots WHERE month <= ? ORDER BY month DESC LIMIT 1", 
-                       ((datetime.now().year - 1),))
+                       (str(datetime.now().year - 1),))
         last_year_snap = cursor.fetchone()
         if last_year_snap:
             yearly_change = net_worth - last_year_snap["net_worth"]
-            
+
         summary = {
             "net_worth": net_worth,
             "total_assets": total_assets,
             "total_debt": total_debt,
             "total_liquid": total_liquid,
-            "total_investments": total_investments,
-            "total_properties": total_properties,
+            "total_investments": sum(a["current_value"] for a in assets if a["category_name"] not in ["Property", "Insurance"]),
+            "total_properties": sum(a["current_value"] for a in assets if a["category_name"] == "Property"),
             "monthly_change": monthly_change,
             "yearly_change": yearly_change
         }
-        
+
         return {
             "summary": summary,
             "accounts": accounts,
-            "loans": loans,
-            "investments": investments,
-            "properties": properties,
-            "insurance": insurance,
+            "assets": assets,
+            "liabilities": liabilities,
+            "income": income,
+            "expenses": expenses,
             "goals": goals,
             "rules": rules,
+            "categories": categories,
+            "institutions": institutions,
             "recommendations": recommendations,
-            "credit_cards": credit_cards,
             "cash_flows": cash_flows
         }
     finally:
         conn.close()
 
-# --- Accounts Router ---
-@app.post("/api/accounts")
-def add_account(account: AccountSchema):
+# --- Generic CRUD REST API ---
+@app.get("/api/entities/{entity_type}")
+def get_entities(entity_type: str):
+    allowed_tables = ["accounts", "assets", "liabilities", "income", "expenses", "goals", "transactions"]
+    if entity_type not in allowed_tables:
+        raise HTTPException(status_code=400, detail=f"Invalid entity type: {entity_type}")
+        
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute(
-            "INSERT INTO accounts (name, institution, current_balance, last_updated, remarks) VALUES (?, ?, ?, ?, ?)",
-            (account.name, account.institution, account.current_balance, date.today().strftime("%Y-%m-%d"), account.remarks)
-        )
+        cursor.execute(f"SELECT * FROM {entity_type}")
+        rows = cursor.fetchall()
+        
+        result = []
+        for row in rows:
+            d = dict(row)
+            for k in ["metadata_json", "funding_sources_json", "snapshot_data"]:
+                if k in d and d[k]:
+                    try:
+                        d[k] = json.loads(d[k])
+                    except:
+                        pass
+            result.append(d)
+        return result
+    finally:
+        conn.close()
+
+@app.post("/api/entities/{entity_type}")
+def create_entity(entity_type: str, payload: dict):
+    allowed_tables = ["accounts", "assets", "liabilities", "income", "expenses", "goals", "transactions"]
+    if entity_type not in allowed_tables:
+        raise HTTPException(status_code=400, detail=f"Invalid entity type: {entity_type}")
+        
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Preprocess custom fields and map expected dates for Goals
+        if entity_type == "goals" and "target_amount" in payload and "current_amount" in payload and "monthly_contribution" in payload:
+            comp = calc.calculate_goal_expected_completion(
+                float(payload.get("target_amount", 0.0)),
+                float(payload.get("current_amount", 0.0)),
+                float(payload.get("monthly_contribution", 0.0))
+            )
+            payload["expected_completion"] = comp["expected_date"]
+            
+        standard_params = serialize_entity_payload(cursor, entity_type, payload)
+        
+        columns = list(standard_params.keys())
+        placeholders = [f":{c}" for c in columns]
+        query = f"INSERT INTO {entity_type} ({', '.join(columns)}) VALUES ({', '.join(placeholders)})"
+        
+        cursor.execute(query, standard_params)
         conn.commit()
-        return {"status": "success", "message": "Account added successfully"}
+        return {"status": "success", "id": cursor.lastrowid}
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=400, detail=str(e))
     finally:
         conn.close()
 
-@app.put("/api/accounts/{id}")
-def update_account(id: int, account: AccountSchema):
+@app.put("/api/entities/{entity_type}/{id}")
+def update_entity(entity_type: str, id: int, payload: dict):
+    allowed_tables = ["accounts", "assets", "liabilities", "income", "expenses", "goals", "transactions"]
+    if entity_type not in allowed_tables:
+        raise HTTPException(status_code=400, detail=f"Invalid entity type: {entity_type}")
+        
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute(
-            "UPDATE accounts SET name=?, institution=?, current_balance=?, last_updated=?, remarks=? WHERE id=?",
-            (account.name, account.institution, account.current_balance, date.today().strftime("%Y-%m-%d"), account.remarks, id)
-        )
-        conn.commit()
-        return {"status": "success", "message": "Account updated successfully"}
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        conn.close()
-
-@app.delete("/api/accounts/{id}")
-def delete_account(id: int):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("DELETE FROM accounts WHERE id=?", (id,))
-        conn.commit()
-        return {"status": "success"}
-    finally:
-        conn.close()
-
-# --- Loans Router ---
-@app.post("/api/loans")
-def add_loan(loan: LoanSchema):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            """INSERT INTO loans (name, lender, outstanding, roi, emi, tenure, start_date, prepayment_allowed, processing_fee, loan_type)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (loan.name, loan.lender, loan.outstanding, loan.roi, loan.emi, loan.tenure, loan.start_date, int(loan.prepayment_allowed), loan.processing_fee, loan.loan_type)
-        )
-        conn.commit()
-        return {"status": "success"}
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        conn.close()
-
-@app.put("/api/loans/{id}")
-def update_loan(id: int, loan: LoanSchema):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            """UPDATE loans SET name=?, lender=?, outstanding=?, roi=?, emi=?, tenure=?, start_date=?, prepayment_allowed=?, processing_fee=?, loan_type=?
-               WHERE id=?""",
-            (loan.name, loan.lender, loan.outstanding, loan.roi, loan.emi, loan.tenure, loan.start_date, int(loan.prepayment_allowed), loan.processing_fee, loan.loan_type, id)
-        )
-        conn.commit()
-        return {"status": "success"}
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        conn.close()
-
-@app.delete("/api/loans/{id}")
-def delete_loan(id: int):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("DELETE FROM loans WHERE id=?", (id,))
-        conn.commit()
-        return {"status": "success"}
-    finally:
-        conn.close()
-
-# --- Investments Router ---
-@app.post("/api/investments")
-def add_investment(inv: InvestmentSchema):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            "INSERT INTO investments (name, type, current_value, invested_amount, goal_mapping, last_updated) VALUES (?, ?, ?, ?, ?, ?)",
-            (inv.name, inv.type, inv.current_value, inv.invested_amount, inv.goal_mapping, date.today().strftime("%Y-%m-%d"))
-        )
+        # Preprocess custom fields and map expected dates for Goals
+        if entity_type == "goals" and "target_amount" in payload and "current_amount" in payload and "monthly_contribution" in payload:
+            comp = calc.calculate_goal_expected_completion(
+                float(payload.get("target_amount", 0.0)),
+                float(payload.get("current_amount", 0.0)),
+                float(payload.get("monthly_contribution", 0.0))
+            )
+            payload["expected_completion"] = comp["expected_date"]
+            
+        standard_params = serialize_entity_payload(cursor, entity_type, payload)
+        
+        set_clauses = [f"{c} = :{c}" for c in standard_params.keys()]
+        standard_params["id"] = id
+        query = f"UPDATE {entity_type} SET {', '.join(set_clauses)} WHERE id = :id"
+        
+        cursor.execute(query, standard_params)
         conn.commit()
         return {"status": "success"}
     except Exception as e:
@@ -352,15 +409,16 @@ def add_investment(inv: InvestmentSchema):
     finally:
         conn.close()
 
-@app.put("/api/investments/{id}")
-def update_investment(id: int, inv: InvestmentSchema):
+@app.delete("/api/entities/{entity_type}/{id}")
+def delete_entity(entity_type: str, id: int):
+    allowed_tables = ["accounts", "assets", "liabilities", "income", "expenses", "goals", "transactions"]
+    if entity_type not in allowed_tables:
+        raise HTTPException(status_code=400, detail=f"Invalid entity type: {entity_type}")
+        
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute(
-            "UPDATE investments SET name=?, type=?, current_value=?, invested_amount=?, goal_mapping=?, last_updated=? WHERE id=?",
-            (inv.name, inv.type, inv.current_value, inv.invested_amount, inv.goal_mapping, date.today().strftime("%Y-%m-%d"), id)
-        )
+        cursor.execute(f"DELETE FROM {entity_type} WHERE id = ?", (id,))
         conn.commit()
         return {"status": "success"}
     except Exception as e:
@@ -369,27 +427,14 @@ def update_investment(id: int, inv: InvestmentSchema):
     finally:
         conn.close()
 
-@app.delete("/api/investments/{id}")
-def delete_investment(id: int):
+@app.delete("/api/metadata/{meta_type}/{id}")
+def delete_metadata(meta_type: str, id: int):
+    if meta_type not in ["categories", "institutions", "financial_rules"]:
+        raise HTTPException(status_code=400, detail="Invalid metadata type")
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("DELETE FROM investments WHERE id=?", (id,))
-        conn.commit()
-        return {"status": "success"}
-    finally:
-        conn.close()
-
-# --- Properties Router ---
-@app.post("/api/properties")
-def add_property(prop: PropertySchema):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            "INSERT INTO properties (name, purchase_price, current_value, associated_loan_id, rental_income, expenses, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (prop.name, prop.purchase_price, prop.current_value, prop.associated_loan_id, prop.rental_income, prop.expenses, prop.remarks)
-        )
+        cursor.execute(f"DELETE FROM {meta_type} WHERE id = ?", (id,))
         conn.commit()
         return {"status": "success"}
     except Exception as e:
@@ -398,128 +443,47 @@ def add_property(prop: PropertySchema):
     finally:
         conn.close()
 
-@app.put("/api/properties/{id}")
-def update_property(id: int, prop: PropertySchema):
+# --- Metadata Configuration REST API ---
+@app.get("/api/metadata/{meta_type}")
+def get_metadata(meta_type: str):
+    if meta_type not in ["categories", "institutions", "financial_rules"]:
+        raise HTTPException(status_code=400, detail="Invalid metadata type")
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute(
-            "UPDATE properties SET name=?, purchase_price=?, current_value=?, associated_loan_id=?, rental_income=?, expenses=?, remarks=? WHERE id=?",
-            (prop.name, prop.purchase_price, prop.current_value, prop.associated_loan_id, prop.rental_income, prop.expenses, prop.remarks, id)
-        )
+        cursor.execute(f"SELECT * FROM {meta_type}")
+        rows = cursor.fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            if d.get("fields_definition"):
+                try:
+                    d["fields_definition"] = json.loads(d["fields_definition"])
+                except:
+                    pass
+            result.append(d)
+        return result
+    finally:
+        conn.close()
+
+@app.post("/api/metadata/{meta_type}")
+def create_metadata(meta_type: str, payload: dict):
+    if meta_type not in ["categories", "institutions", "financial_rules"]:
+        raise HTTPException(status_code=400, detail="Invalid metadata type")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        if payload.get("fields_definition") and not isinstance(payload["fields_definition"], str):
+            payload["fields_definition"] = json.dumps(payload["fields_definition"])
+        
+        columns = list(payload.keys())
+        placeholders = [f":{c}" for c in columns]
+        cursor.execute(f"INSERT OR IGNORE INTO {meta_type} ({', '.join(columns)}) VALUES ({', '.join(placeholders)})", payload)
         conn.commit()
-        return {"status": "success"}
+        return {"status": "success", "id": cursor.lastrowid}
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        conn.close()
-
-@app.delete("/api/properties/{id}")
-def delete_property(id: int):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("DELETE FROM properties WHERE id=?", (id,))
-        conn.commit()
-        return {"status": "success"}
-    finally:
-        conn.close()
-
-# --- Insurance Router ---
-@app.post("/api/insurance")
-def add_insurance(ins: InsuranceSchema):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            """INSERT INTO insurance (company, policy_number, premium, frequency, coverage, nominee, maturity_date, last_premium_date, renewal_date, waiting_period, claim_history, insurance_type, surrender_value)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (ins.company, ins.policy_number, ins.premium, ins.frequency, ins.coverage, ins.nominee, ins.maturity_date, ins.last_premium_date, ins.renewal_date, ins.waiting_period, ins.claim_history, ins.insurance_type, ins.surrender_value)
-        )
-        conn.commit()
-        return {"status": "success"}
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        conn.close()
-
-@app.put("/api/insurance/{id}")
-def update_insurance(id: int, ins: InsuranceSchema):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            """UPDATE insurance SET company=?, policy_number=?, premium=?, frequency=?, coverage=?, nominee=?, maturity_date=?, last_premium_date=?, renewal_date=?, waiting_period=?, claim_history=?, insurance_type=?, surrender_value=?
-               WHERE id=?""",
-            (ins.company, ins.policy_number, ins.premium, ins.frequency, ins.coverage, ins.nominee, ins.maturity_date, ins.last_premium_date, ins.renewal_date, ins.waiting_period, ins.claim_history, ins.insurance_type, ins.surrender_value, id)
-        )
-        conn.commit()
-        return {"status": "success"}
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        conn.close()
-
-@app.delete("/api/insurance/{id}")
-def delete_insurance(id: int):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("DELETE FROM insurance WHERE id=?", (id,))
-        conn.commit()
-        return {"status": "success"}
-    finally:
-        conn.close()
-
-# --- Goals Router ---
-@app.post("/api/goals")
-def add_goal(goal: GoalSchema):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        # Calculate expected completion
-        comp = calc.calculate_goal_expected_completion(goal.target_amount, goal.current_amount, goal.monthly_contribution)
-        cursor.execute(
-            "INSERT INTO goals (name, target_amount, current_amount, monthly_contribution, expected_completion, goal_type) VALUES (?, ?, ?, ?, ?, ?)",
-            (goal.name, goal.target_amount, goal.current_amount, goal.monthly_contribution, comp["expected_date"], goal.goal_type)
-        )
-        conn.commit()
-        return {"status": "success"}
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        conn.close()
-
-@app.put("/api/goals/{id}")
-def update_goal(id: int, goal: GoalSchema):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        comp = calc.calculate_goal_expected_completion(goal.target_amount, goal.current_amount, goal.monthly_contribution)
-        cursor.execute(
-            "UPDATE goals SET name=?, target_amount=?, current_amount=?, monthly_contribution=?, expected_completion=?, goal_type=? WHERE id=?",
-            (goal.name, goal.target_amount, goal.current_amount, goal.monthly_contribution, comp["expected_date"], goal.goal_type, id)
-        )
-        conn.commit()
-        return {"status": "success"}
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        conn.close()
-
-@app.delete("/api/goals/{id}")
-def delete_goal(id: int):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("DELETE FROM goals WHERE id=?", (id,))
-        conn.commit()
-        return {"status": "success"}
     finally:
         conn.close()
 
@@ -564,12 +528,11 @@ def create_snapshot(month: str = Form(...), snapshot_data_str: str = Form(...)):
         data = json.loads(snapshot_data_str)
         
         # Calculate summary metrics for snapshot
-        total_liquid = sum(a["current_balance"] for a in data.get("accounts", []))
-        total_investments = sum(i["current_value"] for i in data.get("investments", []))
-        total_properties = sum(p["current_value"] for p in data.get("properties", []))
-        total_debt = sum(l["outstanding"] for l in data.get("loans", []))
+        total_liquid = sum(float(a.get("current_balance") if a.get("current_balance") is not None else 0.0) for a in data.get("accounts", []))
+        total_assets_val = sum(float(a.get("current_value") if a.get("current_value") is not None else 0.0) for a in data.get("assets", []))
+        total_debt = sum(float(l.get("outstanding") if l.get("outstanding") is not None else 0.0) for l in data.get("liabilities", []))
         
-        total_assets = total_liquid + total_investments + total_properties
+        total_assets = total_liquid + total_assets_val
         net_worth = total_assets - total_debt
         
         cursor.execute(
@@ -601,13 +564,19 @@ def run_simulation(req: SimulationRequestSchema):
         cursor.execute("SELECT current_balance FROM accounts")
         total_liquid = sum(row["current_balance"] for row in cursor.fetchall())
         
-        cursor.execute("SELECT * FROM loans")
+        cursor.execute("SELECT id, name, interest_rate as roi, emi, outstanding FROM liabilities")
         loans = [dict(row) for row in cursor.fetchall()]
         
-        cursor.execute("SELECT current_value FROM investments")
+        cursor.execute("""
+            SELECT current_value FROM assets 
+            WHERE category_id != (SELECT id FROM categories WHERE name = 'Property')
+        """)
         total_investments = sum(row["current_value"] for row in cursor.fetchall())
         
-        cursor.execute("SELECT current_value FROM properties")
+        cursor.execute("""
+            SELECT current_value FROM assets 
+            WHERE category_id = (SELECT id FROM categories WHERE name = 'Property')
+        """)
         total_properties = sum(row["current_value"] for row in cursor.fetchall())
         
         cursor.execute("SELECT * FROM goals")
@@ -709,24 +678,30 @@ def run_simulation(req: SimulationRequestSchema):
                 loan["roi"] = new_roi
                 recommendation = f"Refinancing {loan['name']} to {new_roi}% ROI saves ₹{saved:,.0f} in interest."
 
-        elif s_type == "brother_property":
-            cost = params.get("property_cost", 1000000.0)
+        elif s_type in ["brother_property", "large_purchase"]:
+            purchase_name = params.get("purchase_name", "Family Property")
+            cost = float(params.get("property_cost") or params.get("cost") or 1500000.0)
             funding_source = params.get("funding_source", "liquid") # liquid, loan
+            
             if funding_source == "liquid":
                 sim_liquid -= cost
-                recommendation = f"Funding your brother's property of ₹{cost:,.0f} directly reduces liquidity, lowering net worth by the same amount."
+                recommendation = f"Funding your '{purchase_name}' of ₹{cost:,.0f} directly reduces liquidity, lowering net worth by the same amount."
             else:
+                roi = float(params.get("roi") or 8.5)
+                tenure_months = int(params.get("tenure_months") or 120)
+                calculated_emi = calc.calculate_monthly_emi(cost, roi, tenure_months)
+                
                 # Add a simulated loan
                 sim_loans.append({
                     "id": -99,
-                    "name": "Simulated Brother Loan",
+                    "name": f"Simulated {purchase_name} Loan",
                     "lender": "Bank",
                     "outstanding": cost,
-                    "roi": 8.5,
-                    "emi": cost * 0.01, # approximate emi
-                    "tenure": 120
+                    "roi": roi,
+                    "emi": calculated_emi,
+                    "tenure": tenure_months
                 })
-                recommendation = f"Taking a loan of ₹{cost:,.0f} at 8.5% ROI to fund property increases debt by ₹{cost:,.0f} and adds a monthly commitment."
+                recommendation = f"Taking a loan of ₹{cost:,.0f} at {roi}% ROI to fund '{purchase_name}' increases debt by ₹{cost:,.0f} and adds a monthly EMI commitment of ₹{calculated_emi:,.0f} for {tenure_months} months."
 
         # Recalculate simulated outcomes
         sim_assets = sim_liquid + sim_investments + sim_properties
@@ -804,13 +779,21 @@ async def import_mmex_csv(file: UploadFile = File(...)):
             val = float(row[bal_col])
             institution = str(row[inst_col]).strip() if isinstance(inst_col, str) and inst_col in df.columns else "MMex"
             
+            # Resolve institution_id
+            cursor.execute("SELECT id FROM institutions WHERE name = ?", (institution,))
+            inst_row = cursor.fetchone()
+            if inst_row:
+                inst_id = inst_row["id"]
+            else:
+                cursor.execute("INSERT INTO institutions (name) VALUES (?)", (institution,))
+                inst_id = cursor.lastrowid
+                
             cursor.execute(
-                """INSERT INTO accounts (name, institution, current_balance, last_updated, remarks)
-                   VALUES (?, ?, ?, ?, ?)
-                   ON CONFLICT(name, institution) DO UPDATE SET
-                   current_balance=excluded.current_balance,
-                   last_updated=excluded.last_updated""",
-                (name, institution, val, date.today().strftime("%Y-%m-%d"), "Imported from MMex")
+                """INSERT INTO accounts (name, institution_id, current_balance, status)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(name, institution_id) DO UPDATE SET
+                   current_balance=excluded.current_balance""",
+                (name, inst_id, val, "Active")
             )
             imported_count += 1
             
@@ -1176,10 +1159,7 @@ def delete_emi_profile(profile_id: int):
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        conn.close()
-
-# --- Financial Calendar Endpoint ---
+ # --- Financial Calendar Endpoint ---
 @app.get("/api/calendar")
 def get_financial_calendar():
     from datetime import datetime, date
@@ -1189,22 +1169,63 @@ def get_financial_calendar():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Fetch loans
-    cursor.execute("SELECT name, emi, start_date FROM loans WHERE outstanding > 0")
-    loans = cursor.fetchall()
-    
-    # Fetch insurance policies
-    cursor.execute("SELECT company, policy_number, premium, frequency, renewal_date FROM insurance")
-    insurance = cursor.fetchall()
-    
+    # Fetch loans (liabilities where interest_rate > 0 and emi > 0 and outstanding > 0)
+    cursor.execute("""
+        SELECT name, emi, outstanding, metadata_json 
+        FROM liabilities 
+        WHERE outstanding > 0 AND emi > 0 AND interest_rate > 0
+    """)
+    loans_raw = cursor.fetchall()
+    loans = []
+    for r in loans_raw:
+        d = dict(r)
+        meta = json.loads(d["metadata_json"]) if d.get("metadata_json") else {}
+        d["start_date"] = meta.get("start_date", date.today().strftime("%Y-%m-%d"))
+        loans.append(d)
+        
+    # Fetch insurance policies (assets where category is 'Insurance')
+    cursor.execute("""
+        SELECT inst.name as company, a.metadata_json 
+        FROM assets a
+        LEFT JOIN institutions inst ON a.institution_id = inst.id
+        WHERE a.category_id = (SELECT id FROM categories WHERE name = 'Insurance')
+    """)
+    insurance_raw = cursor.fetchall()
+    insurance = []
+    for r in insurance_raw:
+        d = dict(r)
+        meta = json.loads(d["metadata_json"]) if d.get("metadata_json") else {}
+        insurance.append({
+            "company": d["company"] or "Insurance",
+            "policy_number": meta.get("policy_number", "N/A"),
+            "premium": float(meta.get("premium", 0.0)),
+            "frequency": meta.get("frequency", "Yearly"),
+            "renewal_date": meta.get("renewal_date")
+        })
+        
     # Fetch goals
-    cursor.execute("SELECT name, monthly_contribution FROM goals WHERE (target_amount - current_amount) > 0 AND monthly_contribution > 0")
+    cursor.execute("SELECT name, monthly_contribution, target_amount, current_amount FROM goals WHERE (target_amount - current_amount) > 0 AND monthly_contribution > 0")
     goals = cursor.fetchall()
 
-    # Fetch credit cards from dedicated table
-    cursor.execute("SELECT name, issuer, outstanding, statement_balance, due_date FROM credit_cards WHERE outstanding > 0")
-    credit_cards = cursor.fetchall()
-    
+    # Fetch credit cards (liabilities where category is 'Credit Card')
+    cursor.execute("""
+        SELECT name, outstanding, metadata_json 
+        FROM liabilities
+        WHERE category_id = (SELECT id FROM categories WHERE name = 'Credit Card') AND outstanding > 0
+    """)
+    cc_raw = cursor.fetchall()
+    credit_cards = []
+    for r in cc_raw:
+        d = dict(r)
+        meta = json.loads(d["metadata_json"]) if d.get("metadata_json") else {}
+        credit_cards.append({
+            "name": d["name"],
+            "outstanding": d["outstanding"],
+            "statement_balance": float(meta.get("statement_balance", 0.0)),
+            "due_date": int(meta.get("due_date", 15)),
+            "issuer": meta.get("issuer", "Issuer")
+        })
+        
     conn.close()
     
     events = []
@@ -1222,7 +1243,7 @@ def get_financial_calendar():
                 start_d = datetime.strptime(l["start_date"], "%Y-%m-%d").date()
                 due_day = min(start_d.day, calendar.monthrange(target_year, target_month)[1])
             except:
-                due_day = 5 # Default to 5th
+                due_day = 5
                 
             due_date = date(target_year, target_month, due_day)
             if due_date >= today:
@@ -1248,6 +1269,8 @@ def get_financial_calendar():
                 
         # C. Insurance Premiums
         for ins in insurance:
+            if not ins.get("renewal_date"):
+                continue
             try:
                 ren_d = datetime.strptime(ins["renewal_date"], "%Y-%m-%d").date()
                 freq = ins["frequency"].lower()
@@ -1278,13 +1301,9 @@ def get_financial_calendar():
             except Exception as e:
                 print("Error computing insurance calendar date:", e)
 
-    # D. Credit Card Bill Payments (due on the card's specific due_dates over the next 12 months)
-    for cc in credit_cards:
-        cc_due_dates = []
-        for m_offset in range(12):
-            target_month_val = today.month + m_offset
-            target_year = today.year + (target_month_val - 1) // 12
-            target_month = (target_month_val - 1) % 12 + 1
+        # D. Credit Cards
+        for cc in credit_cards:
+            cc_due_dates = []
             try:
                 due_day = min(cc["due_date"], calendar.monthrange(target_year, target_month)[1])
                 due_date = date(target_year, target_month, due_day)
@@ -1292,29 +1311,28 @@ def get_financial_calendar():
                     cc_due_dates.append(due_date)
             except Exception as e:
                 print("Error calculating CC date:", e)
-        
-        cc_due_dates.sort()
-        
-        stmt_bal = cc["statement_balance"]
-        unbilled = max(cc["outstanding"] - stmt_bal, 0.0)
-        
-        if len(cc_due_dates) >= 1 and stmt_bal > 0:
-            events.append({
-                "title": f"{cc['name']} Payment Due (Billed)",
-                "amount": stmt_bal,
-                "type": "Credit Card",
-                "date": cc_due_dates[0].isoformat(),
-                "details": f"Issuer: {cc['issuer']} | Billed Statement Balance"
-            })
             
-        if len(cc_due_dates) >= 2 and unbilled > 0:
-            events.append({
-                "title": f"{cc['name']} Payment Due (Unbilled)",
-                "amount": unbilled,
-                "type": "Credit Card",
-                "date": cc_due_dates[1].isoformat(),
-                "details": f"Issuer: {cc['issuer']} | Unbilled Current Balance"
-            })
+            cc_due_dates.sort()
+            stmt_bal = cc["statement_balance"]
+            unbilled = max(cc["outstanding"] - stmt_bal, 0.0)
+            
+            if len(cc_due_dates) >= 1 and stmt_bal > 0:
+                events.append({
+                    "title": f"{cc['name']} Payment Due (Billed)",
+                    "amount": stmt_bal,
+                    "type": "Credit Card",
+                    "date": cc_due_dates[0].isoformat(),
+                    "details": f"Issuer: {cc['issuer']} | Billed Statement Balance"
+                })
+                
+            if len(cc_due_dates) >= 1 and unbilled > 0:
+                events.append({
+                    "title": f"{cc['name']} Payment Due (Unbilled)",
+                    "amount": unbilled,
+                    "type": "Credit Card",
+                    "date": cc_due_dates[0].isoformat(),
+                    "details": f"Issuer: {cc['issuer']} | Unbilled Current Balance"
+                })
                 
     events.sort(key=lambda x: x["date"])
     return events
@@ -1366,71 +1384,6 @@ def optimize_loans(req: LoanOptimizerRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-# --- Credit Cards Router ---
-class CreditCardSchema(BaseModel):
-    id: Optional[int] = None
-    name: str
-    issuer: str
-    credit_limit: float
-    outstanding: float
-    statement_balance: Optional[float] = 0.0
-    statement_date: int
-    due_date: int
-    annual_fee: Optional[float] = 0.0
-    renewal_date: Optional[str] = ""
-    reward_points: Optional[int] = 0
-    point_value: Optional[float] = 0.25
-    lounge_access_domestic: Optional[str] = ""
-    lounge_access_international: Optional[str] = ""
-    spend_milestone_waiver: Optional[float] = 0.0
-    remarks: Optional[str] = ""
-
-@app.post("/api/credit-cards")
-def save_credit_card(cc: CreditCardSchema):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        if cc.id:
-            cursor.execute("""
-                UPDATE credit_cards 
-                SET name = ?, issuer = ?, credit_limit = ?, outstanding = ?, statement_balance = ?, statement_date = ?, due_date = ?, 
-                    annual_fee = ?, renewal_date = ?, reward_points = ?, point_value = ?, lounge_access_domestic = ?, lounge_access_international = ?, 
-                    spend_milestone_waiver = ?, remarks = ?
-                WHERE id = ?
-            """, (cc.name, cc.issuer, cc.credit_limit, cc.outstanding, cc.statement_balance, cc.statement_date, cc.due_date, 
-                  cc.annual_fee, cc.renewal_date, cc.reward_points, cc.point_value, cc.lounge_access_domestic, cc.lounge_access_international, 
-                  cc.spend_milestone_waiver, cc.remarks, cc.id))
-        else:
-            cursor.execute("""
-                INSERT INTO credit_cards (name, issuer, credit_limit, outstanding, statement_balance, statement_date, due_date, 
-                                          annual_fee, renewal_date, reward_points, point_value, lounge_access_domestic, lounge_access_international, 
-                                          spend_milestone_waiver, remarks)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (cc.name, cc.issuer, cc.credit_limit, cc.outstanding, cc.statement_balance, cc.statement_date, cc.due_date, 
-                  cc.annual_fee, cc.renewal_date, cc.reward_points, cc.point_value, cc.lounge_access_domestic, cc.lounge_access_international, 
-                  cc.spend_milestone_waiver, cc.remarks))
-        conn.commit()
-        return {"status": "success"}
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        conn.close()
-
-@app.delete("/api/credit-cards/{card_id}")
-def delete_credit_card(card_id: int):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("DELETE FROM credit_cards WHERE id = ?", (card_id,))
-        conn.commit()
-        return {"status": "success"}
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        conn.close()
 
 # --- Monthly Cash Flows Router ---
 @app.get("/api/cash-flows")

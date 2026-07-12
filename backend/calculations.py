@@ -410,4 +410,20 @@ def simulate_multi_loan_payoff(
         "schedule": schedule
     }
 
+def calculate_monthly_emi(principal: float, annual_roi: float, tenure_months: int) -> float:
+    """
+    Standard EMI calculation formula:
+    EMI = P * r * (1 + r)^n / ((1 + r)^n - 1)
+    """
+    if principal <= 0 or tenure_months <= 0:
+        return 0.0
+    r = (annual_roi / 100.0) / 12.0
+    if r == 0:
+        return principal / tenure_months
+    try:
+        emi = principal * r * ((1.0 + r) ** tenure_months) / (((1.0 + r) ** tenure_months) - 1.0)
+        return emi
+    except (ZeroDivisionError, OverflowError):
+        return principal / tenure_months
+
 

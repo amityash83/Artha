@@ -4,13 +4,20 @@ import {
   TrendingDown, ShieldCheck, Zap
 } from 'lucide-react';
 import { InitData } from '../types';
+import { API_BASE_URL } from '../config';
 
 interface LoanOptimizerProps {
   data: InitData;
 }
 
 export const LoanOptimizer: React.FC<LoanOptimizerProps> = ({ data }) => {
-  const { loans } = data;
+  const loans = data.liabilities
+    .filter((l: any) => l.category_name !== 'Credit Card')
+    .map((l: any) => ({
+      ...l,
+      roi: l.interest_rate,
+      lender: l.lender_name || 'Lender',
+    }));
   const [budget, setBudget] = useState<number>(50000); // 50k default extra monthly
   const [frequency, setFrequency] = useState<'monthly' | 'annually'>('monthly');
   const [annualAmount, setAnnualAmount] = useState<number>(200000); // 200k default annual
@@ -23,7 +30,7 @@ export const LoanOptimizer: React.FC<LoanOptimizerProps> = ({ data }) => {
     if (loans.length === 0) return;
     setLoading(true);
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/calculations/loan-optimizer', {
+      const res = await fetch(`${API_BASE_URL}/api/calculations/loan-optimizer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -67,8 +74,8 @@ export const LoanOptimizer: React.FC<LoanOptimizerProps> = ({ data }) => {
     return str || '0 Months';
   };
 
-  const activeLoans = loans.filter(l => l.outstanding > 0);
-  const totalOutstanding = activeLoans.reduce((sum, l) => sum + l.outstanding, 0);
+  const activeLoans = loans.filter((l: any) => l.outstanding > 0);
+  const totalOutstanding = activeLoans.reduce((sum: number, l: any) => sum + l.outstanding, 0);
   const maxAnnualLimit = Math.max(1000000, Math.ceil(totalOutstanding / 50000) * 50000);
 
   const buildChartData = () => {
@@ -336,13 +343,13 @@ export const LoanOptimizer: React.FC<LoanOptimizerProps> = ({ data }) => {
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
                   <span style={{ color: 'var(--text-secondary)' }}>Outstanding Balance</span>
                   <strong style={{ color: 'var(--danger)' }}>
-                    {formatCurrency(activeLoans.reduce((sum, l) => sum + l.outstanding, 0))}
+                    {formatCurrency(activeLoans.reduce((sum: number, l: any) => sum + l.outstanding, 0))}
                   </strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
                   <span style={{ color: 'var(--text-secondary)' }}>Base EMI commitments</span>
                   <strong style={{ color: '#fff' }}>
-                    {formatCurrency(activeLoans.reduce((sum, l) => sum + l.emi, 0))}
+                    {formatCurrency(activeLoans.reduce((sum: number, l: any) => sum + l.emi, 0))}
                   </strong>
                 </div>
               </div>
@@ -455,7 +462,7 @@ export const LoanOptimizer: React.FC<LoanOptimizerProps> = ({ data }) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {activeLoans.map(l => (
+                  {activeLoans.map((l: any) => (
                     <tr key={l.id}>
                       <td><strong>{l.name}</strong></td>
                       <td>{l.lender}</td>
