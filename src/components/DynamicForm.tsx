@@ -202,7 +202,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
                   required
                 >
                   <option value="">Select Institution</option>
-                  {institutions.map((inst) => (
+                  {[...institutions].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })).map((inst) => (
                     <option key={inst.id} value={inst.id}>
                       {inst.name}
                     </option>

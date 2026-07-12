@@ -78,7 +78,10 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh, showToast }) 
   const fetchInstitutionsList = () => {
     fetch(`${API_BASE_URL}/api/metadata/institutions`)
       .then(res => res.json())
-      .then(data => setInstitutions(data))
+      .then(data => {
+        const sorted = Array.isArray(data) ? [...data].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })) : data;
+        setInstitutions(sorted);
+      })
       .catch(err => console.error(err));
   };
 
@@ -1031,7 +1034,7 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh, showToast }) 
               </form>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', overflowY: 'auto', paddingRight: '4px' }}>
-                {institutions.map((inst: any) => {
+                {[...institutions].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })).map((inst: any) => {
                   const isEditing = editingInstId === inst.id;
                   const isDeleting = deletingInstId === inst.id;
                   return (

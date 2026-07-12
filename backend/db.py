@@ -54,6 +54,8 @@ def get_db_connection():
     return conn
 
 def init_db():
+    db_path = get_db_path()
+    is_new_db = not os.path.exists(db_path)
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -252,9 +254,10 @@ def init_db():
     """)
 
     # 3. SEED DEFAULT DATA
-    default_institutions = ['HDFC', 'ICICI', 'SBI', 'EPFO', 'Groww', 'Zerodha', 'LIC', 'NPS Trust']
-    for inst in default_institutions:
-        cursor.execute("INSERT OR IGNORE INTO institutions (name) VALUES (?)", (inst,))
+    if is_new_db:
+        default_institutions = ['HDFC Bank', 'ICICI Bank', 'SBI', 'EPFO', 'Groww', 'Zerodha', 'LIC', 'NPS Trust']
+        for inst in default_institutions:
+            cursor.execute("INSERT OR IGNORE INTO institutions (name) VALUES (?)", (inst,))
 
     default_categories = [
         # Accounts

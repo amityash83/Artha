@@ -57,6 +57,9 @@ const App: React.FC = () => {
         if (res.ok) {
           setStatusMessage("API responded! Reading preferences and verifying database...");
           const d = await res.json();
+          if (d && Array.isArray(d.institutions)) {
+            d.institutions = [...d.institutions].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+          }
           setData(d);
           setLoading(false);
           return;

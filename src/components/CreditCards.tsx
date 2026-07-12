@@ -1137,7 +1137,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                       <label className="form-label">Issuer Bank *</label>
                       <select className="form-input" value={lenderId} onChange={e => setLenderId(e.target.value)} required>
                         <option value="">-- Pick Issuer --</option>
-                        {institutions.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+                        {[...institutions].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })).map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
                       </select>
                     </div>
                   </div>
