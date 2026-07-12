@@ -528,6 +528,16 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
     }).sort((a, b) => b.rewardValueInr - a.rewardValueInr);
   }, [creditCards, calcCategory, calcAmount, redemptionStrategy]);
 
+  const getNetworkIconText = (networkStr: string) => {
+    const net = networkStr.toLowerCase();
+    if (net.includes('visa')) return 'VISA';
+    if (net.includes('master') || net.includes('mc')) return 'mastercard';
+    if (net.includes('rupay')) return 'RuPay';
+    if (net.includes('amex') || net.includes('american')) return 'AMEX';
+    if (net.includes('diner')) return 'Diners Club';
+    return networkStr;
+  };
+
   const getInstitutionName = (id: number) => {
     const inst = institutions.find(i => i.id === id);
     return inst ? inst.name : 'Unknown Bank';
@@ -650,7 +660,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
               <button className="btn btn-primary" onClick={handleOpenAdd}>Add Credit Card</button>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '24px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px' }}>
               {creditCards.map((card: any, idx) => {
                 const meta = card.metadata_json ? (typeof card.metadata_json === 'string' ? JSON.parse(card.metadata_json) : card.metadata_json) : {};
                 const limit = Number(meta.credit_limit || 0);
@@ -664,93 +674,163 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                 const isLowYield = fee > 0 && rewardVal < fee;
                 const isDeleting = deletingCardId === card.id;
 
+                const domLimit = Number(meta.lounge_visits_limit || 0);
+                const domUsed = Number(meta.lounge_visits_used || 0);
+                const intLimit = Number(meta.lounge_int_limit || 0);
+                const intUsed = Number(meta.lounge_int_used || 0);
+
                 return (
-                  <div 
-                    key={card.id} 
-                    className="glass-panel" 
-                    style={{ 
-                      padding: '24px', 
-                      display: 'flex', 
-                      flexDirection: 'column', 
-                      gap: '16px',
-                      background: theme.bg,
-                      border: `1px solid ${theme.border}`,
-                      boxShadow: `0 15px 35px -10px ${theme.glow}`,
-                      position: 'relative',
-                      overflow: 'hidden'
-                    }}
-                  >
-                    {/* Header */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div>
-                        <span style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', color: 'rgba(255,255,255,0.6)' }}>
+                  <div key={card.id} style={{ display: 'flex', flexDirection: 'column', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border-glass)', background: 'rgba(255,255,255,0.015)' }}>
+                    
+                    {/* SECTION 1: PHYSICAL CREDIT CARD FACE */}
+                    <div 
+                      style={{ 
+                        height: '190px', 
+                        background: theme.bg, 
+                        borderBottom: `1px solid ${theme.border}`,
+                        boxShadow: `inset 0 0 20px rgba(255,255,255,0.05)`,
+                        padding: '20px', 
+                        display: 'flex', 
+                        flexDirection: 'column', 
+                        justifyContent: 'space-between',
+                        position: 'relative',
+                        overflow: 'hidden',
+                        transition: 'transform 0.3s ease, box-shadow 0.3s ease',
+                        cursor: 'pointer'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-4px)';
+                        e.currentTarget.style.boxShadow = `0 12px 24px -8px ${theme.border}`;
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'none';
+                        e.currentTarget.style.boxShadow = `inset 0 0 20px rgba(255,255,255,0.05)`;
+                      }}
+                    >
+                      {/* Holographic light reflection diagonal overlay */}
+                      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.05) 45%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.05) 55%, transparent 70%)', pointerEvents: 'none', transform: 'scale(1.5)' }}></div>
+
+                      {/* Card Top: Bank Name & Network Badge */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 1 }}>
+                        <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.7)', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
                           {getInstitutionName(card.lender_institution_id)}
                         </span>
-                        <h4 style={{ fontSize: '16px', fontWeight: 700, margin: '2px 0 0 0', color: '#fff' }}>{card.name}</h4>
+                        {isLowYield && (
+                          <div style={{ background: 'rgba(239, 68, 68, 0.85)', padding: '2px 8px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '9px', color: '#fff', fontWeight: 700 }}>
+                            <ShieldAlert size={10} />
+                            Low Yield
+                          </div>
+                        )}
                       </div>
-                      <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: '13px', fontWeight: 800, fontStyle: 'italic', fontFamily: 'monospace' }}>
-                        {meta.network || 'Visa'}
-                      </span>
-                    </div>
 
-                    {/* Chip representation */}
-                    <div style={{ width: '38px', height: '28px', background: 'linear-gradient(135deg, #d4af37 0%, #fde047 100%)', borderRadius: '6px', border: '1px solid rgba(0,0,0,0.15)' }}></div>
-
-                    {/* Balances */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                      <div>
-                        <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase' }}>Outstanding Balance</span>
-                        <div style={{ fontSize: '18px', fontWeight: 700, color: card.outstanding > 0 ? '#f87171' : '#e2e8f0' }}>
-                          {formatCurrency(card.outstanding)}
+                      {/* Card Middle: Chip & Contactless logo */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 1, marginTop: '10px' }}>
+                        <div style={{ width: '40px', height: '30px', background: 'linear-gradient(135deg, #e5c060 0%, #f9e8a2 50%, #d4af37 100%)', borderRadius: '6px', border: '1px solid rgba(0,0,0,0.2)', position: 'relative', boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.3)' }}>
+                          <div style={{ position: 'absolute', top: 0, left: '13px', right: '13px', bottom: 0, borderLeft: '1px solid rgba(0,0,0,0.15)', borderRight: '1px solid rgba(0,0,0,0.15)' }}></div>
+                          <div style={{ position: 'absolute', top: '10px', left: 0, right: 0, bottom: '10px', borderTop: '1px solid rgba(0,0,0,0.15)', borderBottom: '1px solid rgba(0,0,0,0.15)' }}></div>
+                        </div>
+                        {/* Spaced card number suffix */}
+                        <div style={{ fontSize: '16px', fontWeight: 600, letterSpacing: '2px', color: 'rgba(255,255,255,0.85)', fontFamily: 'monospace', textShadow: '1px 1px 2px rgba(0,0,0,0.6)' }}>
+                          •••• &nbsp; •••• &nbsp; •••• &nbsp; {card.name.match(/\d{4}$/) ? card.name.match(/\d{4}$/)[0] : card.id.toString().padStart(4, '0')}
                         </div>
                       </div>
-                      <div>
-                        <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase' }}>Statement Spend</span>
-                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#60a5fa' }}>
-                          {formatCurrency(meta.current_statement_spend || 0)}
+
+                      {/* Card Bottom: Holder Name & Network Logo */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', zIndex: 1 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontSize: '7px', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Cardholder Name</span>
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: '#fff', textTransform: 'uppercase', letterSpacing: '1px', textShadow: '0 1px 1px rgba(0,0,0,0.5)' }}>
+                            {card.remarks && card.remarks.length < 20 ? card.remarks : "VALUED CUSTOMER"}
+                          </span>
                         </div>
-                      </div>
-                    </div>
-
-                    {/* Limit Progress */}
-                    <div>
-                      <div style={{ height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
-                        <div style={{ height: '100%', width: `${Math.min((card.outstanding / (limit || 1)) * 100, 100)}%`, background: card.outstanding / limit > 0.4 ? '#ef4444' : '#10b981' }}></div>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: 'rgba(255,255,255,0.4)', marginTop: '4px' }}>
-                        <span>Limit: {formatCurrency(limit)}</span>
-                        <span>Statement Date: {meta.statement_date || 15}th</span>
-                      </div>
-                    </div>
-
-                    {/* Actions and Yields */}
-                    <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', display: 'block' }}>Reward Yield (Net)</span>
-                        <span style={{ fontSize: '12px', fontWeight: 600, color: '#fcd34d' }}>
-                          {pts.toLocaleString()} pts ({formatCurrency(rewardVal)}) / Net: <strong style={{ color: netYield >= 0 ? '#34d399' : '#f87171' }}>{formatCurrency(netYield)}</strong>
+                        <span style={{ color: '#fff', fontSize: '13px', fontWeight: 900, letterSpacing: '0.5px', textTransform: 'uppercase', fontFamily: 'monospace', opacity: 0.8, textShadow: '0 1px 2px rgba(0,0,0,0.4)' }}>
+                          {getNetworkIconText(meta.network || 'Visa')}
                         </span>
                       </div>
-
-                      {isDeleting ? (
-                        <div style={{ display: 'flex', gap: '4px' }}>
-                          <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '10px', background: 'rgba(239,68,68,0.2)', color: '#ef4444' }} onClick={() => handleDeleteCard(card.id)}>Confirm</button>
-                          <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '10px' }} onClick={() => setDeletingCardId(null)}>Cancel</button>
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <button className="btn btn-secondary" style={{ padding: '5px 8px', background: 'rgba(255,255,255,0.05)', color: '#fff' }} onClick={() => handleOpenEdit(card)}><Edit2 size={11} /></button>
-                          <button className="btn btn-secondary" style={{ padding: '5px 8px', background: 'rgba(255,255,255,0.05)', color: 'var(--danger-light)' }} onClick={() => setDeletingCardId(card.id)}><Trash2 size={11} /></button>
-                        </div>
-                      )}
                     </div>
 
-                    {isLowYield && (
-                      <div style={{ position: 'absolute', top: '12px', right: '12px', background: 'rgba(239,68,68,0.85)', padding: '2px 8px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '9px', color: '#fff', fontWeight: 600 }}>
-                        <ShieldAlert size={10} />
-                        Low Yield Card
+                    {/* SECTION 2: DETAILED STATS PANEL */}
+                    <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px', background: 'rgba(255,255,255,0.015)' }}>
+                      {/* Outstanding vs Available Limit */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                        <div>
+                          <span style={{ fontSize: '9px', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '2px' }}>Outstanding</span>
+                          <span style={{ fontSize: '15px', fontWeight: 700, color: card.outstanding > 0 ? '#f87171' : 'var(--text-primary)' }}>
+                            {formatCurrency(card.outstanding)}
+                          </span>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '9px', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '2px' }}>Available Limit</span>
+                          <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--success-light)' }}>
+                            {formatCurrency(Math.max(limit - card.outstanding, 0))}
+                          </span>
+                        </div>
                       </div>
-                    )}
+
+                      {/* Limit Progress Bar */}
+                      <div>
+                        <div style={{ height: '5px', background: 'rgba(255,255,255,0.04)', borderRadius: '2.5px', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${Math.min((card.outstanding / (limit || 1)) * 100, 100)}%`, background: card.outstanding / limit > 0.4 ? 'var(--danger)' : 'var(--accent)' }}></div>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                          <span>Total Limit: {formatCurrency(limit)}</span>
+                          <span>Bill Cycle Day: {meta.statement_date || 15}th</span>
+                        </div>
+                      </div>
+
+                      {/* Statement Spend & Statement Day Info */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', borderTop: '1px solid var(--border-glass)', paddingTop: '10px' }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>Current Statement Spend</span>
+                        <strong style={{ color: '#60a5fa' }}>{formatCurrency(meta.current_statement_spend || 0)}</strong>
+                      </div>
+
+                      {/* Reward Points and Yield Calculation */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', borderTop: '1px solid var(--border-glass)', paddingTop: '10px' }}>
+                        <div>
+                          <span style={{ color: 'var(--text-secondary)', display: 'block' }}>Reward Points Balance</span>
+                          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>({pts.toLocaleString()} points @ ₹{ptVal})</span>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={{ fontWeight: 600, color: '#fcd34d' }}>{formatCurrency(rewardVal)} Value</span>
+                          <span style={{ display: 'block', fontSize: '9px', color: netYield >= 0 ? 'var(--success-light)' : '#f87171' }}>
+                            Net Yield: {formatCurrency(netYield)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Lounge Quick Status */}
+                      {(domLimit > 0 || intLimit > 0) && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10px', borderTop: '1px solid var(--border-glass)', paddingTop: '10px', color: 'var(--text-muted)' }}>
+                          <span>Lounges Left:</span>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            {domLimit > 0 && <span>Dom: <strong>{Math.max(domLimit - domUsed, 0)}</strong></span>}
+                            {intLimit > 0 && <span>Intl: <strong>{Math.max(intLimit - intUsed, 0)}</strong></span>}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Actions Footer */}
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border-glass)', paddingTop: '12px', marginTop: '4px' }}>
+                        {isDeleting ? (
+                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', width: '100%', justifyContent: 'space-between' }}>
+                            <span style={{ color: 'var(--danger-light)', fontSize: '11px', fontWeight: 500 }}>Confirm Deletion?</span>
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              <button type="button" className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '11px', background: 'rgba(239,68,68,0.2)', color: '#ef4444' }} onClick={() => handleDeleteCard(card.id)}>Delete</button>
+                              <button type="button" className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '11px' }} onClick={() => setDeletingCardId(null)}>Cancel</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.03)' }} onClick={() => handleOpenEdit(card)}>
+                              <Edit2 size={12} /> Edit
+                            </button>
+                            <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--danger-light)', background: 'rgba(255,255,255,0.03)' }} onClick={() => setDeletingCardId(card.id)}>
+                              <Trash2 size={12} /> Remove
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 );
               })}
