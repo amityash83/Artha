@@ -281,7 +281,7 @@ def get_init_data():
                 except:
                     pass
 
-        cursor.execute("SELECT * FROM institutions")
+        cursor.execute("SELECT * FROM institutions ORDER BY name ASC")
         institutions = [dict(row) for row in cursor.fetchall()]
 
         # Monthly Cash Flows logs
@@ -578,7 +578,10 @@ def get_metadata(meta_type: str):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute(f"SELECT * FROM {meta_type}")
+        if meta_type == "institutions":
+            cursor.execute("SELECT * FROM institutions ORDER BY name ASC")
+        else:
+            cursor.execute(f"SELECT * FROM {meta_type}")
         rows = cursor.fetchall()
         result = []
         for r in rows:
