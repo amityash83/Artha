@@ -176,6 +176,114 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
         </div>
       </div>
 
+      {/* Visual Goal Timeline Planner */}
+      {entityType === 'goals' && entities.length > 0 && (
+        <div className="glass-panel" style={{ padding: '24px', overflowX: 'auto' }}>
+          <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '20px' }}>
+            Goal Milestones Chronological Timeline
+          </h3>
+          <div style={{ display: 'flex', gap: '32px', paddingBottom: '16px', position: 'relative', minWidth: 'max-content' }}>
+            {/* The Timeline connection line */}
+            <div style={{
+              position: 'absolute',
+              top: '40px',
+              left: '20px',
+              right: '20px',
+              height: '3px',
+              background: 'linear-gradient(90deg, #8b5cf6 0%, #10b981 100%)',
+              opacity: 0.3,
+              zIndex: 1
+            }}></div>
+
+            {[...entities]
+              .sort((a, b) => {
+                if (a.expected_date === 'Never') return 1;
+                if (b.expected_date === 'Never') return -1;
+                return new Date(a.expected_date).getTime() - new Date(b.expected_date).getTime();
+              })
+              .map((goal) => {
+                const progress = goal.target_amount > 0 ? (goal.current_amount / goal.target_amount) * 100 : 0;
+                const formattedTarget = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(goal.target_amount);
+                const formattedCurrent = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(goal.current_amount);
+                
+                let dateStr = 'Never';
+                if (goal.expected_date && goal.expected_date !== 'Never') {
+                  const d = new Date(goal.expected_date);
+                  dateStr = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+                }
+
+                return (
+                  <div key={goal.id} style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '220px' }}>
+                    {/* Timeline Node dot */}
+                    <div style={{
+                      width: '18px',
+                      height: '18px',
+                      borderRadius: '50%',
+                      background: goal.expected_date === 'Never' ? 'var(--danger)' : '#10b981',
+                      border: '4px solid #0f172a',
+                      boxShadow: '0 0 10px rgba(16, 185, 129, 0.5)',
+                      marginBottom: '20px'
+                    }}></div>
+
+                    {/* Card box */}
+                    <div className="glass-card" style={{
+                      width: '100%',
+                      padding: '16px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '10px',
+                      background: 'rgba(255,255,255,0.02)',
+                      border: '1px solid rgba(255,255,255,0.05)',
+                      borderRadius: '10px',
+                      transition: 'transform 0.2s',
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)' }}>
+                          {dateStr}
+                        </span>
+                        <span style={{
+                          fontSize: '9px',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          fontWeight: 600,
+                          background: goal.priority === 'High' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                          color: goal.priority === 'High' ? 'var(--danger-light)' : 'var(--warning-light)'
+                        }}>
+                          {goal.priority}
+                        </span>
+                      </div>
+
+                      <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={goal.name}>
+                        {goal.name}
+                      </h4>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: 'var(--text-secondary)' }}>
+                        <span>Current: {formattedCurrent}</span>
+                        <span>Target: {formattedTarget}</span>
+                      </div>
+
+                      {/* Progress Bar */}
+                      <div style={{ height: '5px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', overflow: 'hidden' }}>
+                        <div style={{
+                          width: `${Math.min(progress, 100)}%`,
+                          height: '100%',
+                          background: 'linear-gradient(90deg, #3b82f6 0%, #10b981 100%)',
+                          boxShadow: '0 0 8px rgba(16, 185, 129, 0.3)'
+                        }}></div>
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)' }}>
+                        <span>Progress</span>
+                        <span>{progress.toFixed(0)}%</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+      )}
+
       {/* Category Tabs (Dynamic Filters) */}
       {typeCategories.length > 0 && (
         <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border-glass)', paddingBottom: '12px', overflowX: 'auto' }}>
