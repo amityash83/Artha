@@ -8,7 +8,7 @@
     "build:frontend": "tsc && vite build",
     "dev:backend": "venv\\Scripts\\python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload",
     "dev:electron": "electron .",
-    "start": "concurrently --kill-others \"npm run dev:frontend\" \"electron .\"",
+    "start": "concurrently --kill-others \"npm run dev:backend\" \"npm run dev:frontend\" \"electron .\"",
     "build:backend": "venv\\Scripts\\pyinstaller --noconfirm --onedir --console --name \"main\" --clean --distpath backend/dist --workpath backend/build run.py",
     "package:portable": "npm run build:frontend && npm run build:backend && electron-builder --win portable",
     "build:exe": "powershell -ExecutionPolicy Bypass -File ./build_release.ps1"
