@@ -21,6 +21,7 @@ The documentation is organized strictly under the **Enterprise Design Methodolog
 *   **[Step 4.4 - Recommendation Engine](file:///d:/AI/Antigravity/Artha/docs/07-Recommendation-Engine.md):** AI advisor advisory rules, rebalancing triggers, and card spend yields.
 *   **[Step 5 - Workflows](file:///d:/AI/Antigravity/Artha/docs/08-Workflows.md):** Operational execution sequences and dynamic event charts.
 *   **[Step 6 - Database Design](file:///d:/AI/Antigravity/Artha/docs/09-Database.md):** Normalized SQLite tables schemas, constraints, and indices.
+*   **[Step 7 - API Design](file:///d:/AI/Antigravity/Artha/docs/10-API.md):** REST API endpoints, request/response models, and validations.
 *   **[Memory Log](file:///d:/AI/Antigravity/Artha/docs/memory.md):** Session learning tracker and design constraints.
 
 ### Legacy Specification Archive
