@@ -109,19 +109,46 @@ def init_db():
 
     # 2. CORE ENTITY TABLES
 
-    # Accounts
+    # 1.5. NEW ENTERPRISE METADATA TABLES
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS people (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('Primary Owner', 'Spouse', 'Dependent'))
+    )
+    """)
+
+    # Check and add type column to institutions
+    try:
+        cursor.execute("PRAGMA table_info('institutions')")
+        existing_cols = [row['name'] for row in cursor.fetchall()]
+        if 'type' not in existing_cols:
+            cursor.execute("ALTER TABLE institutions ADD COLUMN type TEXT NOT NULL DEFAULT 'Bank'")
+    except Exception as e:
+        print("institutions migration warning:", e)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS relationships (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        person_id INTEGER NOT NULL REFERENCES people(id),
+        institution_id INTEGER NOT NULL REFERENCES institutions(id),
+        customer_identifier TEXT NOT NULL,
+        UNIQUE(person_id, institution_id, customer_identifier)
+    )
+    """)
+
+    # 2. CORE ENTITY TABLES
+
+    # Accounts (Normalized schema)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS accounts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
-        institution_id INTEGER REFERENCES institutions(id),
-        current_balance REAL DEFAULT 0.0,
-        currency TEXT DEFAULT 'INR',
-        status TEXT DEFAULT 'Active',
-        owner TEXT,
-        tags TEXT,
-        metadata_json TEXT,
-        UNIQUE(name, institution_id)
+        institution_id INTEGER NOT NULL REFERENCES institutions(id),
+        owner_id INTEGER NOT NULL REFERENCES people(id),
+        status TEXT NOT NULL DEFAULT 'Active' CHECK(status IN ('Active', 'Closed')),
+        currency TEXT NOT NULL DEFAULT 'INR',
+        UNIQUE(name, institution_id, owner_id)
     )
     """)
 
@@ -210,20 +237,212 @@ def init_db():
     )
     """)
 
-    # Transactions
+    # Portfolios
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS portfolios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        owner_id INTEGER NOT NULL REFERENCES people(id),
+        UNIQUE(name, owner_id)
+    )
+    """)
+
+    # portfolio_holdings
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS portfolio_holdings (
+        portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),
+        asset_id INTEGER NOT NULL REFERENCES assets(id),
+        PRIMARY KEY(portfolio_id, asset_id)
+    )
+    """)
+
+    # goal_holdings
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS goal_holdings (
+        goal_id INTEGER NOT NULL REFERENCES goals(id),
+        asset_id INTEGER NOT NULL REFERENCES assets(id),
+        allocation_weight REAL NOT NULL DEFAULT 1.0,
+        PRIMARY KEY(goal_id, asset_id)
+    )
+    """)
+
+    # Transactions (Normalized schema)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        account_id INTEGER REFERENCES accounts(id),
-        type TEXT NOT NULL, -- Credit, Debit, Transfer, Investment, Redemption, EMI, Interest, Dividend
-        amount REAL NOT NULL,
+        source_ref_type TEXT CHECK(source_ref_type IN ('Account', 'Asset', 'None')),
+        source_ref_id INTEGER,
+        dest_ref_type TEXT CHECK(dest_ref_type IN ('Account', 'Asset', 'None')),
+        dest_ref_id INTEGER,
+        type TEXT NOT NULL CHECK(type IN ('Credit', 'Debit', 'Transfer', 'Buy', 'Sell', 'Investment', 'Redemption')),
+        amount REAL NOT NULL CHECK(amount > 0.0),
         transaction_date TEXT NOT NULL,
-        category_id INTEGER REFERENCES categories(id),
         notes TEXT,
-        related_entity_type TEXT,
-        related_entity_id INTEGER
+        linked_goal_id INTEGER REFERENCES goals(id)
     )
     """)
+
+    # Rewards Tables
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS reward_programs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER NOT NULL REFERENCES financial_products(id),
+        name TEXT NOT NULL,
+        point_value_inr REAL NOT NULL DEFAULT 0.25
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS reward_rules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        program_id INTEGER NOT NULL REFERENCES reward_programs(id),
+        merchant_category TEXT NOT NULL,
+        multiplier REAL NOT NULL DEFAULT 1.0,
+        monthly_cap INTEGER,
+        is_exclusion INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(program_id, merchant_category)
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS reward_partners (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        program_id INTEGER NOT NULL REFERENCES reward_programs(id),
+        partner_name TEXT NOT NULL,
+        conversion_ratio REAL NOT NULL DEFAULT 1.0
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS reward_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        program_id INTEGER NOT NULL REFERENCES reward_programs(id),
+        transaction_id INTEGER NOT NULL REFERENCES transactions(id),
+        points_accrued INTEGER NOT NULL,
+        is_reconciled INTEGER NOT NULL DEFAULT 0
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS reward_redemptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        program_id INTEGER NOT NULL REFERENCES reward_programs(id),
+        points_redeemed INTEGER NOT NULL,
+        redemption_type TEXT NOT NULL CHECK(redemption_type IN ('Cashback', 'MilesTransfer')),
+        partner_id INTEGER REFERENCES reward_partners(id),
+        cash_value REAL NOT NULL
+    )
+    """)
+
+    # Run Database Migrations for Accounts and Transactions
+    try:
+        cursor.execute("PRAGMA table_info('accounts')")
+        acc_cols = [row['name'] for row in cursor.fetchall()]
+        if 'current_balance' in acc_cols or 'owner_id' not in acc_cols:
+            print("[Migration] Migrating accounts table...")
+            cursor.execute("INSERT OR IGNORE INTO people (id, name, role) VALUES (1, 'Amit', 'Primary Owner')")
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS accounts_temp (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                institution_id INTEGER NOT NULL REFERENCES institutions(id),
+                owner_id INTEGER NOT NULL REFERENCES people(id),
+                status TEXT NOT NULL DEFAULT 'Active' CHECK(status IN ('Active', 'Closed')),
+                currency TEXT NOT NULL DEFAULT 'INR',
+                UNIQUE(name, institution_id, owner_id)
+            )
+            """)
+            cursor.execute("SELECT * FROM accounts")
+            for acc in cursor.fetchall():
+                cursor.execute("""
+                INSERT OR IGNORE INTO accounts_temp (id, name, institution_id, owner_id, status, currency)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, (acc['id'], acc['name'], acc['institution_id'], 1, acc['status'] or 'Active', acc['currency'] or 'INR'))
+            cursor.execute("DROP TABLE accounts")
+            cursor.execute("ALTER TABLE accounts_temp RENAME TO accounts")
+            print("[Migration] accounts table restructured successfully.")
+    except Exception as e:
+        print("[Migration Error] accounts restructuring failed:", e)
+
+    try:
+        cursor.execute("PRAGMA table_info('transactions')")
+        tx_cols = [row['name'] for row in cursor.fetchall()]
+        if 'account_id' in tx_cols or 'source_ref_type' not in tx_cols:
+            print("[Migration] Migrating transactions table...")
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS transactions_temp (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_ref_type TEXT CHECK(source_ref_type IN ('Account', 'Asset', 'None')),
+                source_ref_id INTEGER,
+                dest_ref_type TEXT CHECK(dest_ref_type IN ('Account', 'Asset', 'None')),
+                dest_ref_id INTEGER,
+                type TEXT NOT NULL CHECK(type IN ('Credit', 'Debit', 'Transfer', 'Buy', 'Sell', 'Investment', 'Redemption')),
+                amount REAL NOT NULL CHECK(amount > 0.0),
+                transaction_date TEXT NOT NULL,
+                notes TEXT,
+                linked_goal_id INTEGER REFERENCES goals(id)
+            )
+            """)
+            cursor.execute("SELECT * FROM transactions")
+            for t in cursor.fetchall():
+                acc_id = t['account_id']
+                ttype = t['type']
+                amount = t['amount']
+                tdate = t['transaction_date']
+                notes = t['notes']
+                
+                source_type = 'None'
+                source_id = None
+                dest_type = 'None'
+                dest_id = None
+                new_type = 'Credit'
+                
+                if ttype == 'Credit':
+                    source_type = 'None'
+                    dest_type = 'Account'
+                    dest_id = acc_id
+                    new_type = 'Credit'
+                elif ttype == 'Debit':
+                    source_type = 'Account'
+                    source_id = acc_id
+                    dest_type = 'None'
+                    new_type = 'Debit'
+                elif ttype == 'Transfer':
+                    source_type = 'Account'
+                    source_id = acc_id
+                    dest_type = 'Account'
+                    dest_id = t['related_entity_id'] if t['related_entity_type'] == 'Account' else None
+                    new_type = 'Transfer'
+                elif ttype in ('Investment', 'Buy'):
+                    source_type = 'Account'
+                    source_id = acc_id
+                    dest_type = 'Asset'
+                    dest_id = t['related_entity_id'] if t['related_entity_type'] == 'Asset' else None
+                    new_type = 'Buy'
+                elif ttype in ('Redemption', 'Sell'):
+                    source_type = 'Asset'
+                    source_id = t['related_entity_id'] if t['related_entity_type'] == 'Asset' else None
+                    dest_type = 'Account'
+                    dest_id = acc_id
+                    new_type = 'Sell'
+                else:
+                    source_type = 'None'
+                    dest_type = 'Account'
+                    dest_id = acc_id
+                    new_type = 'Credit'
+                    
+                cursor.execute("""
+                INSERT INTO transactions_temp (id, source_ref_type, source_ref_id, dest_ref_type, dest_ref_id, type, amount, transaction_date, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (t['id'], source_type, source_id, dest_type, dest_id, new_type, amount, tdate, notes))
+            cursor.execute("DROP TABLE transactions")
+            cursor.execute("ALTER TABLE transactions_temp RENAME TO transactions")
+            print("[Migration] transactions table restructured successfully.")
+    except Exception as e:
+        print("[Migration Error] transactions restructuring failed:", e)
+
+    cursor.execute("PRAGMA foreign_keys = ON")
+
 
     # Keep snapshots & monthly_cash_flows for backward compatibility / historical logs
     cursor.execute("""
