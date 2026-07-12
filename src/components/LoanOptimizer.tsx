@@ -11,13 +11,16 @@ interface LoanOptimizerProps {
 }
 
 export const LoanOptimizer: React.FC<LoanOptimizerProps> = ({ data }) => {
-  const loans = data.liabilities
-    .filter((l: any) => l.category_name !== 'Credit Card')
-    .map((l: any) => ({
-      ...l,
-      roi: l.interest_rate,
-      lender: l.lender_name || 'Lender',
-    }));
+  const loans = React.useMemo(() => {
+    return data.liabilities
+      .filter((l: any) => l.category_name !== 'Credit Card')
+      .map((l: any) => ({
+        ...l,
+        roi: l.interest_rate,
+        lender: l.lender_name || 'Lender',
+      }));
+  }, [data.liabilities]);
+
   const [budget, setBudget] = useState<number>(50000); // 50k default extra monthly
   const [frequency, setFrequency] = useState<'monthly' | 'annually'>('monthly');
   const [annualAmount, setAnnualAmount] = useState<number>(200000); // 200k default annual

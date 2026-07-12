@@ -22,12 +22,14 @@ interface SimulationsProps {
 }
 
 export const Simulations: React.FC<SimulationsProps> = ({ data, initialParams }) => {
-  const loans = data.liabilities
-    .filter((l: any) => l.category_name !== 'Credit Card')
-    .map((l: any) => ({
-      ...l,
-      roi: l.interest_rate
-    }));
+  const loans = React.useMemo(() => {
+    return data.liabilities
+      .filter((l: any) => l.category_name !== 'Credit Card')
+      .map((l: any) => ({
+        ...l,
+        roi: l.interest_rate
+      }));
+  }, [data.liabilities]);
 
   const [scenarioType, setScenarioType] = useState('close_loan');
   
