@@ -873,21 +873,27 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
               <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent-light)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px', borderBottom: '1px dashed rgba(255,255,255,0.05)', paddingBottom: '4px' }}>
                 Financial Institutions
               </h4>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', overflowY: 'auto', paddingRight: '4px' }}>
                 {institutions.map((inst: any) => (
-                  <div key={inst.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '6px', fontSize: '11px' }}>
-                    <span>{inst.name}</span>
-                    <div style={{ display: 'inline-flex', gap: '6px', marginLeft: '4px' }}>
-                      <Edit2 
-                        size={12} 
-                        style={{ color: 'var(--info)', cursor: 'pointer' }} 
+                  <div key={inst.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: '8px', fontSize: '12px' }}>
+                    <span style={{ fontWeight: 500 }}>{inst.name}</span>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button 
+                        type="button"
+                        className="btn btn-secondary" 
+                        style={{ padding: '4px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px' }}
                         onClick={() => handleEditMetadata('institutions', inst.id, inst.name)} 
-                      />
-                      <Trash2 
-                        size={12} 
-                        style={{ color: '#ef4444', cursor: 'pointer' }} 
+                      >
+                        <Edit2 size={11} style={{ color: 'var(--info)' }} />
+                      </button>
+                      <button 
+                        type="button"
+                        className="btn btn-secondary" 
+                        style={{ padding: '4px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px' }}
                         onClick={() => handleDeleteMetadata('institutions', inst.id)} 
-                      />
+                      >
+                        <Trash2 size={11} style={{ color: '#ef4444' }} />
+                      </button>
                     </div>
                   </div>
                 ))}
