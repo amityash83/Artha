@@ -587,6 +587,27 @@ def create_metadata(meta_type: str, payload: dict):
     finally:
         conn.close()
 
+@app.put("/api/metadata/{meta_type}/{id}")
+def update_metadata(meta_type: str, id: int, payload: dict):
+    if meta_type not in ["categories", "institutions"]:
+        raise HTTPException(status_code=400, detail="Invalid metadata type for update")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        if payload.get("fields_definition") and not isinstance(payload["fields_definition"], str):
+            payload["fields_definition"] = json.dumps(payload["fields_definition"])
+            
+        set_clauses = [f"{c} = :{c}" for c in payload.keys()]
+        payload["id"] = id
+        cursor.execute(f"UPDATE {meta_type} SET {', '.join(set_clauses)} WHERE id = :id", payload)
+        conn.commit()
+        return {"status": "success"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
 # --- Rules Router ---
 @app.put("/api/rules")
 def update_rule(rule: RuleSchema):

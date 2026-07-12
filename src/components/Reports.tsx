@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, Database, FileText, Download, Sliders, Plus, Trash2 } from 'lucide-react';
+import { Upload, Database, FileText, Download, Sliders, Plus, Trash2, Edit2 } from 'lucide-react';
 import { InitData } from '../types';
 import { API_BASE_URL } from '../config';
 
@@ -185,6 +185,39 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
     } catch (err) {
       console.error(err);
       setMetaStatus("Error deleting metadata item");
+    }
+  };
+
+  const handleEditMetadata = async (type: 'categories' | 'institutions', id: number, currentName: string, currentFieldsDefinition?: any) => {
+    const newName = window.prompt(`Rename this ${type === 'categories' ? 'category' : 'institution'}:`, currentName);
+    if (!newName || newName.trim() === '' || newName === currentName) return;
+
+    let payload: any = { name: newName.trim() };
+    if (type === 'categories') {
+      payload.entity_type = categories.find(c => c.id === id)?.entity_type || 'Asset';
+      payload.fields_definition = currentFieldsDefinition;
+    }
+
+    try {
+      setMetaStatus(`Updating ${type === 'categories' ? 'category' : 'institution'}...`);
+      const res = await fetch(`${API_BASE_URL}/api/metadata/${type}/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        setMetaStatus("Metadata item updated successfully.");
+        if (type === 'categories') fetchCategoriesList();
+        else fetchInstitutionsList();
+        onRefresh();
+        setTimeout(() => setMetaStatus(null), 3000);
+      } else {
+        const err = await res.json();
+        setMetaStatus(`Failed to update metadata item: ${err.detail || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error(err);
+      setMetaStatus("Error updating metadata item");
     }
   };
 
@@ -846,13 +879,20 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
                   <h4 style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>Dynamic Categories</h4>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                     {categories.map((cat: any) => (
-                      <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 8px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '6px', fontSize: '11px' }}>
+                      <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '6px', fontSize: '11px' }}>
                         <span>{cat.name} <strong style={{ color: 'var(--text-muted)', fontSize: '10px' }}>({cat.entity_type})</strong></span>
-                        <Trash2 
-                          size={11} 
-                          style={{ color: '#ef4444', cursor: 'pointer' }} 
-                          onClick={() => handleDeleteMetadata('categories', cat.id)} 
-                        />
+                        <div style={{ display: 'inline-flex', gap: '6px', marginLeft: '4px' }}>
+                          <Edit2 
+                            size={12} 
+                            style={{ color: 'var(--info)', cursor: 'pointer' }} 
+                            onClick={() => handleEditMetadata('categories', cat.id, cat.name, cat.fields_definition)} 
+                          />
+                          <Trash2 
+                            size={12} 
+                            style={{ color: '#ef4444', cursor: 'pointer' }} 
+                            onClick={() => handleDeleteMetadata('categories', cat.id)} 
+                          />
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -862,13 +902,20 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
                   <h4 style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>Dynamic Institutions</h4>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                     {institutions.map((inst: any) => (
-                      <div key={inst.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 8px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '6px', fontSize: '11px' }}>
+                      <div key={inst.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '6px', fontSize: '11px' }}>
                         <span>{inst.name}</span>
-                        <Trash2 
-                          size={11} 
-                          style={{ color: '#ef4444', cursor: 'pointer' }} 
-                          onClick={() => handleDeleteMetadata('institutions', inst.id)} 
-                        />
+                        <div style={{ display: 'inline-flex', gap: '6px', marginLeft: '4px' }}>
+                          <Edit2 
+                            size={12} 
+                            style={{ color: 'var(--info)', cursor: 'pointer' }} 
+                            onClick={() => handleEditMetadata('institutions', inst.id, inst.name)} 
+                          />
+                          <Trash2 
+                            size={12} 
+                            style={{ color: '#ef4444', cursor: 'pointer' }} 
+                            onClick={() => handleDeleteMetadata('institutions', inst.id)} 
+                          />
+                        </div>
                       </div>
                     ))}
                   </div>
