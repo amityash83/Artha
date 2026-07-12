@@ -271,7 +271,30 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
   };
 
   const updateFieldRow = (idx: number, key: 'name' | 'label' | 'type', value: string) => {
-    setCustomFields(prev => prev.map((f, i) => i === idx ? { ...f, [key]: value } : f));
+    setCustomFields(prev => prev.map((f, i) => {
+      if (i === idx) {
+        const updated = { ...f, [key]: value };
+        if (key === 'label') {
+          // Automatic key slugifier sanitizer
+          const autoKey = value
+            .toLowerCase()
+            .trim()
+            .replace(/[^a-z0-9\s]/g, '')
+            .replace(/\s+/g, '_');
+          // Only auto-generate key if key is empty or matches the previous label's slug
+          const oldAutoKey = f.label
+            .toLowerCase()
+            .trim()
+            .replace(/[^a-z0-9\s]/g, '')
+            .replace(/\s+/g, '_');
+          if (!f.name || f.name === oldAutoKey) {
+            updated.name = autoKey;
+          }
+        }
+        return updated;
+      }
+      return f;
+    }));
   };
 
   const resetCategoryForm = () => {
@@ -809,11 +832,52 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
               const typeCats = categories.filter(c => c.entity_type === type);
               if (typeCats.length === 0) return null;
               
+              const getBadgeStyle = (entityType: string) => {
+                let color = '#3b82f6';
+                let bg = 'rgba(59, 130, 246, 0.1)';
+                let border = 'rgba(59, 130, 246, 0.2)';
+                
+                if (entityType === 'Asset') {
+                  color = '#10b981';
+                  bg = 'rgba(16, 185, 129, 0.1)';
+                  border = 'rgba(16, 185, 129, 0.2)';
+                } else if (entityType === 'Liability') {
+                  color = '#f97316';
+                  bg = 'rgba(249, 115, 22, 0.1)';
+                  border = 'rgba(249, 115, 22, 0.2)';
+                } else if (entityType === 'Income') {
+                  color = '#8b5cf6';
+                  bg = 'rgba(139, 92, 246, 0.1)';
+                  border = 'rgba(139, 92, 246, 0.2)';
+                } else if (entityType === 'Expense') {
+                  color = '#ec4899';
+                  bg = 'rgba(236, 72, 153, 0.1)';
+                  border = 'rgba(236, 72, 153, 0.2)';
+                }
+                
+                return {
+                  color,
+                  background: bg,
+                  border: `1px solid ${border}`,
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  fontSize: '9px',
+                  fontWeight: 600,
+                  textTransform: 'uppercase' as const,
+                  letterSpacing: '0.5px'
+                };
+              };
+              
+              const badgeStyle = getBadgeStyle(type);
+              
               return (
-                <div key={type} style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: '12px', padding: '16px' }}>
-                  <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent-light)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px', borderBottom: '1px dashed rgba(255,255,255,0.05)', paddingBottom: '4px' }}>
-                    {type} Categories
-                  </h4>
+                <div key={type} style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: '12px', padding: '16px', marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', borderBottom: '1px dashed rgba(255,255,255,0.05)', paddingBottom: '6px' }}>
+                    <h4 style={{ fontSize: '12px', fontWeight: 700, color: badgeStyle.color, textTransform: 'uppercase', letterSpacing: '0.5px', margin: 0 }}>
+                      {type} Categories
+                    </h4>
+                    <span style={badgeStyle}>{type} Registry</span>
+                  </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                     {typeCats.map(cat => {
@@ -943,11 +1007,52 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
 
                 {/* Field Spec Builder */}
                 <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '14px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', gap: '8px' }}>
                     <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Custom Properties Schema</span>
-                    <button type="button" className="btn btn-secondary" style={{ padding: '3px 8px', fontSize: '10px' }} onClick={addFieldRow}>
-                      + Add Field Row
-                    </button>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <select
+                        className="form-control"
+                        style={{ padding: '3px 6px', fontSize: '10px', width: '130px', height: '24px' }}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === 'mutual_fund') {
+                            setCustomFields([
+                              { name: 'units', label: 'Units', type: 'number' },
+                              { name: 'nav', label: 'NAV', type: 'number' }
+                            ]);
+                          } else if (val === 'demat') {
+                            setCustomFields([
+                              { name: 'broker_name', label: 'Broker Name', type: 'text' },
+                              { name: 'dp_id', label: 'DP ID', type: 'text' }
+                            ]);
+                          } else if (val === 'insurance') {
+                            setCustomFields([
+                              { name: 'policy_number', label: 'Policy Number', type: 'text' },
+                              { name: 'coverage', label: 'Coverage Amount', type: 'number' },
+                              { name: 'premium', label: 'Premium Amount', type: 'number' },
+                              { name: 'renewal_date', label: 'Renewal Date', type: 'date' }
+                            ]);
+                          } else if (val === 'credit_card') {
+                            setCustomFields([
+                              { name: 'credit_limit', label: 'Credit Limit', type: 'number' },
+                              { name: 'statement_date', label: 'Statement Day of Month', type: 'number' },
+                              { name: 'due_date', label: 'Due Day of Month', type: 'number' }
+                            ]);
+                          }
+                          e.target.value = ''; // Reset select
+                        }}
+                      >
+                        <option value="">Load Template...</option>
+                        <option value="mutual_fund">Mutual Fund</option>
+                        <option value="demat">Demat Account</option>
+                        <option value="insurance">Insurance Policy</option>
+                        <option value="credit_card">Credit Card</option>
+                      </select>
+                      
+                      <button type="button" className="btn btn-secondary" style={{ padding: '3px 8px', fontSize: '10px' }} onClick={addFieldRow}>
+                        + Add Row
+                      </button>
+                    </div>
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>

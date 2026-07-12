@@ -160,6 +160,33 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         {initialData ? 'Modify' : 'Add New'} {category ? category.name : getLabel(entityType)}
       </h3>
       
+      {category && category.fields_definition && (
+        <div style={{ 
+          background: 'rgba(167, 139, 250, 0.05)', 
+          border: '1px solid rgba(167, 139, 250, 0.15)', 
+          borderRadius: '8px', 
+          padding: '12px', 
+          marginBottom: '20px',
+          fontSize: '11px', 
+          color: 'var(--text-muted)' 
+        }}>
+          <strong>Category Specifications:</strong> Opens additional custom fields: {' '}
+          <span style={{ color: 'var(--accent-light)' }}>
+            {(() => {
+              try {
+                const parsed = typeof category.fields_definition === 'string'
+                  ? JSON.parse(category.fields_definition)
+                  : category.fields_definition;
+                if (Array.isArray(parsed)) {
+                  return parsed.map((f: any) => `${f.label || f.name} (${f.type})`).join(', ');
+                }
+              } catch(e) {}
+              return 'None';
+            })()}
+          </span>
+        </div>
+      )}
+      
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
         {Object.keys(fields).map((k) => {
           const type = fields[k];
