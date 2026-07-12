@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, Database, FileText, Download, Sliders, Plus, Trash2, Edit2 } from 'lucide-react';
+import { Upload, Database, FileText, Download, Plus, Trash2, Edit2 } from 'lucide-react';
 import { InitData } from '../types';
 import { API_BASE_URL } from '../config';
 
@@ -44,6 +44,7 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
 
   const [ruleSaveStatus, setRuleSaveStatus] = useState<Record<string, string>>({});
   const [metaStatus, setMetaStatus] = useState<string | null>(null);
+  const [activeSubTab, setActiveSubTab] = useState<'database' | 'metadata' | 'data'>('database');
 
   useEffect(() => {
     fetchBackups();
@@ -493,102 +494,59 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
   };
 
   return (
-    <div>
+    <div style={{ paddingBottom: '40px' }}>
       <div className="page-header">
-        <h1 className="page-title">Integration &amp; Backup Center</h1>
-        <p className="page-subtitle">Import balances, manage SQLite snapshots, and download custom plans reports</p>
+        <h1 className="page-title">Settings &amp; Systems Control</h1>
+        <p className="page-subtitle">Configure workspace files, manage replication backups, set decision parameters, and export/import planning data.</p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px' }}>
-        {/* Left Side: MMex CSV Importer & Reports */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-          {/* MMex Import Panel */}
-          <div className="glass-panel" style={{ padding: '24px' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Upload size={18} style={{ color: 'var(--accent-light)' }} />
-              Money Manager Ex (MMex) Balances Import
-            </h3>
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '20px', lineHeight: '1.4' }}>
-              Upload your exported MMex Accounts list CSV. The application will match balances based on Account names and update them immediately.
-            </p>
+      {/* Sub tabs navigation */}
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '28px', borderBottom: '1px solid var(--border-glass)', paddingBottom: '8px' }}>
+        <button 
+          onClick={() => setActiveSubTab('database')} 
+          className={`sidebar-item ${activeSubTab === 'database' ? 'active' : ''}`}
+          style={{ padding: '8px 16px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '13px' }}
+        >
+          Database &amp; Backups
+        </button>
+        <button 
+          onClick={() => setActiveSubTab('metadata')} 
+          className={`sidebar-item ${activeSubTab === 'metadata' ? 'active' : ''}`}
+          style={{ padding: '8px 16px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '13px' }}
+        >
+          Metadata &amp; Rules Engine
+        </button>
+        <button 
+          onClick={() => setActiveSubTab('data')} 
+          className={`sidebar-item ${activeSubTab === 'data' ? 'active' : ''}`}
+          style={{ padding: '8px 16px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '13px' }}
+        >
+          Import &amp; Export Hub
+        </button>
+      </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <input 
-                type="file" 
-                accept=".csv" 
-                onChange={handleMMexImport} 
-                id="csv_import_file" 
-                style={{ display: 'none' }} 
-              />
-              <label 
-                htmlFor="csv_import_file" 
-                className="btn btn-secondary" 
-                style={{ width: '100%', cursor: 'pointer', display: 'flex', justifyContent: 'center' }}
-              >
-                Choose MMex Accounts CSV File
-              </label>
-              
-              {importStatus && (
-                <div style={{ 
-                  padding: '10px 14px', 
-                  borderRadius: 'var(--radius-sm)', 
-                  fontSize: '12px', 
-                  background: importStatus.includes('Success') ? 'var(--success-bg)' : 'rgba(255,255,255,0.02)',
-                  color: importStatus.includes('Success') ? 'var(--success)' : 'var(--text-secondary)'
-                }}>
-                  {importStatus}
-                </div>
-              )}
-            </div>
-          </div>
+      {metaStatus && (
+        <div style={{ padding: '12px 16px', background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.2)', color: '#a78bfa', borderRadius: '8px', marginBottom: '24px', fontSize: '12px' }}>
+          {metaStatus}
+        </div>
+      )}
 
-          {/* Export Center */}
-          <div className="glass-panel" style={{ padding: '24px' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <FileText size={18} style={{ color: 'var(--accent-light)' }} />
-              Report Export Center
-            </h3>
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '20px', lineHeight: '1.4' }}>
-              Export your plans and assets portfolios into raw standard formats for backup, offline storage, or processing.
-            </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <button className="btn btn-secondary" style={{ display: 'flex', justifyContent: 'space-between' }} onClick={exportMarkdownReport}>
-                <span>Download Markdown Planning Report</span>
-                <Download size={14} />
-              </button>
-              <button className="btn btn-secondary" style={{ display: 'flex', justifyContent: 'space-between' }} onClick={exportAccountsCSV}>
-                <span>Download Accounts CSV Export</span>
-                <Download size={14} />
-              </button>
-              <button className="btn btn-secondary" style={{ display: 'flex', justifyContent: 'space-between' }} onClick={exportLoansCSV}>
-                <span>Download Loans CSV Export</span>
-                <Download size={14} />
-              </button>
-              <button className="btn btn-secondary" style={{ display: 'flex', justifyContent: 'space-between' }} onClick={exportInvestmentsCSV}>
-                <span>Download Investments CSV Export</span>
-                <Download size={14} />
-              </button>
-              <button className="btn btn-secondary" style={{ display: 'flex', justifyContent: 'space-between' }} onClick={exportInsuranceCSV}>
-                <span>Download Insurance CSV Export</span>
-                <Download size={14} />
-              </button>
-            </div>
-          </div>
-
+      {/* TAB 1: DATABASE & BACKUPS */}
+      {activeSubTab === 'database' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '32px' }}>
           {/* Active Database Settings */}
           <div className="glass-panel" style={{ padding: '24px' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Database size={18} style={{ color: 'var(--accent-light)' }} />
+            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Database size={16} style={{ color: 'var(--accent-light)' }} />
               Active Database Settings
             </h3>
             <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '16px', lineHeight: '1.4' }}>
-              Define where your portfolio plan database is saved. You can switch between plans or load custom databases.
+              Define where your portfolio plan database is saved. Switch between plans or load custom databases.
             </p>
 
             <div style={{ wordBreak: 'break-all', fontSize: '13px', background: 'rgba(255,255,255,0.02)', padding: '10px 12px', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-sm)', marginBottom: '16px' }}>
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Currently Active Database Path</span>
-              <strong style={{ color: 'var(--accent-light)', fontSize: '12px', fontFamily: 'monospace' }}>{dbSettings ? dbSettings.active_path : "Loading..."}</strong>
+              <span style={{ fontSize: '10px', color: 'var(--text-muted)', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Currently Active Database Path</span>
+              <strong style={{ color: 'var(--accent-light)', fontSize: '11px', fontFamily: 'monospace' }}>{dbSettings ? dbSettings.active_path : "Loading..."}</strong>
             </div>
 
             <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
@@ -608,7 +566,7 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
                     if (path === dbSettings.active_path) return null;
                     return (
                       <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', padding: '6px 8px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-sm)' }}>
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '280px', color: 'var(--text-muted)', fontFamily: 'monospace', fontSize: '11px' }} title={path}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '160px', color: 'var(--text-muted)', fontFamily: 'monospace', fontSize: '11px' }} title={path}>
                           {path.split(/[\\/]/).pop()}
                         </span>
                         <button className="btn btn-secondary" style={{ padding: '2px 8px', fontSize: '10px' }} onClick={() => handleQuickSwitch(path)}>
@@ -621,129 +579,110 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
               </div>
             )}
           </div>
-        </div>
 
-        {/* Right Side: Database Backups */}
-        <div className="glass-panel" style={{ padding: '24px' }}>
-          <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Database size={18} style={{ color: 'var(--accent-light)' }} />
-            SQLite Database Backups
-          </h3>
-          <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '16px', lineHeight: '1.4' }}>
-            Configure automatic replication profiles like Money Manager Ex (MMEx) to safeguard your portfolios.
-          </p>
+          {/* Database Backups replication */}
+          <div className="glass-panel" style={{ padding: '24px' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Database size={16} style={{ color: 'var(--accent-light)' }} />
+              SQLite Database Backups
+            </h3>
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '16px', lineHeight: '1.4' }}>
+              Configure automatic replication profiles like Money Manager Ex (MMEx) to safeguard your portfolios.
+            </p>
 
-          {/* Backup settings configuration form */}
-          <form onSubmit={handleSaveBackupSettings} style={{ borderBottom: '1px solid var(--border-glass)', paddingBottom: '16px', marginBottom: '20px' }}>
-            <h4 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '12px' }}>Automatic Replication Rules</h4>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '14px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer', color: 'var(--text-primary)' }}>
-                <input 
-                  type="checkbox" 
-                  checked={backupOnOpen} 
-                  onChange={e => setBackupOnOpen(e.target.checked)} 
-                />
-                Backup on app startup (Open DB)
-              </label>
+            <form onSubmit={handleSaveBackupSettings} style={{ borderBottom: '1px solid var(--border-glass)', paddingBottom: '16px', marginBottom: '20px' }}>
+              <h4 style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '12px' }}>Automatic Replication Rules</h4>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '14px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer', color: 'var(--text-primary)' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={backupOnOpen} 
+                    onChange={e => setBackupOnOpen(e.target.checked)} 
+                  />
+                  Backup on app startup (Open DB)
+                </label>
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer', color: 'var(--text-primary)' }}>
-                <input 
-                  type="checkbox" 
-                  checked={backupOnClose} 
-                  onChange={e => setBackupOnClose(e.target.checked)} 
-                />
-                Backup on app shutdown (Close DB)
-              </label>
-            </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer', color: 'var(--text-primary)' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={backupOnClose} 
+                    onChange={e => setBackupOnClose(e.target.checked)} 
+                  />
+                  Backup on app exit (Close DB)
+                </label>
 
-            <div className="form-group" style={{ marginBottom: '12px' }}>
-              <label className="form-label" style={{ fontSize: '11px', marginBottom: '4px' }}>Max backup retention count</label>
-              <input 
-                type="number" 
-                className="form-input" 
-                style={{ padding: '6px 10px', fontSize: '12px' }}
-                required 
-                min={1} 
-                max={100}
-                value={backupCountLimit} 
-                onChange={e => setBackupCountLimit(parseInt(e.target.value) || 10)} 
-              />
-            </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Retained Backups Count Limit:</span>
+                  <input 
+                    type="number" 
+                    className="form-control" 
+                    style={{ width: '60px', padding: '4px 8px', fontSize: '12px' }}
+                    value={backupCountLimit} 
+                    onChange={e => setBackupCountLimit(parseInt(e.target.value) || 5)} 
+                  />
+                </div>
 
-            <div className="form-group" style={{ marginBottom: '16px' }}>
-              <label className="form-label" style={{ fontSize: '11px', marginBottom: '4px' }}>Custom backup folder path (Optional)</label>
-              <input 
-                type="text" 
-                className="form-input" 
-                placeholder="Leave blank to use default data/backups" 
-                style={{ padding: '6px 10px', fontSize: '12px' }}
-                value={customBackupDir} 
-                onChange={e => setCustomBackupDir(e.target.value)} 
-              />
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <button type="submit" className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '12px' }}>
-                Save Settings
-              </button>
-              {saveSettingsStatus && (
-                <span style={{ fontSize: '11px', color: 'var(--success)', fontWeight: 600 }}>{saveSettingsStatus}</span>
-              )}
-            </div>
-          </form>
-
-          {/* Manual Snaps Controls */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <button className="btn btn-secondary" onClick={handleCreateBackup}>
-              Create Backup Point Now
-            </button>
-
-            {backupStatus && (
-              <div style={{ padding: '10px 14px', borderRadius: 'var(--radius-sm)', fontSize: '12px', background: 'var(--success-bg)', color: 'var(--success)' }}>
-                {backupStatus}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Custom Backup Directory Path:</span>
+                  <input 
+                    type="text" 
+                    className="form-control" 
+                    style={{ padding: '6px 10px', fontSize: '12px' }}
+                    placeholder="e.g. D:\backups" 
+                    value={customBackupDir} 
+                    onChange={e => setCustomBackupDir(e.target.value)} 
+                  />
+                </div>
               </div>
-            )}
 
-            <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '16px' }}>
-              <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '12px' }}>Available Backup Snapshots</h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '220px', overflowY: 'auto' }}>
-                {backupsList.length > 0 ? (
-                  backupsList.map((filename, idx) => (
-                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-sm)', fontSize: '12px' }}>
-                      <span style={{ fontFamily: 'monospace', fontSize: '11px', wordBreak: 'break-all', maxWidth: '200px' }} title={filename}>{filename}</span>
-                      <button className="btn btn-secondary" style={{ padding: '3px 8px', fontSize: '10px' }} onClick={() => handleRestoreBackup(filename)}>
-                        Restore
-                      </button>
-                    </div>
-                  ))
-                ) : (
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '12px 0' }}>No backups found.</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <button type="submit" className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '12px' }}>
+                  Save Rules
+                </button>
+                {saveSettingsStatus && (
+                  <span style={{ fontSize: '11px', color: 'var(--success)', fontWeight: 600 }}>{saveSettingsStatus}</span>
                 )}
               </div>
+            </form>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <button className="btn btn-secondary" onClick={handleCreateBackup}>
+                Create Backup Point Now
+              </button>
+
+              {backupStatus && (
+                <div style={{ padding: '10px 14px', borderRadius: 'var(--radius-sm)', fontSize: '12px', background: 'var(--success-bg)', color: 'var(--success)' }}>
+                  {backupStatus}
+                </div>
+              )}
+
+              <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '16px' }}>
+                <h4 style={{ fontSize: '12px', fontWeight: 600, marginBottom: '12px' }}>Available Backup Snapshots</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '180px', overflowY: 'auto' }}>
+                  {backupsList.length > 0 ? (
+                    backupsList.map((filename, idx) => (
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-sm)', fontSize: '12px' }}>
+                        <span style={{ fontFamily: 'monospace', fontSize: '11px', wordBreak: 'break-all', maxWidth: '200px' }} title={filename}>{filename}</span>
+                        <button className="btn btn-secondary" style={{ padding: '3px 8px', fontSize: '10px' }} onClick={() => handleRestoreBackup(filename)}>
+                          Restore
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '12px 0' }}>No backups found.</span>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Dynamic Metadata & Rules Configurations Section */}
-      <div className="glass-panel" style={{ marginTop: '28px', padding: '32px', gridColumn: '1 / -1' }}>
-        <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '8px', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Sliders size={20} style={{ color: '#a78bfa' }} />
-          Metadata Configurator & Financial Rules Engine
-        </h2>
-        <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '24px' }}>
-          Customize your decision parameters, add new schema entities, and manage active category properties.
-        </p>
-
-        {metaStatus && (
-          <div style={{ padding: '12px 16px', background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.2)', color: '#a78bfa', borderRadius: '8px', marginBottom: '24px', fontSize: '12px' }}>
-            {metaStatus}
-          </div>
-        )}
-
+      {/* TAB 2: METADATA & RULES ENGINE */}
+      {activeSubTab === 'metadata' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '32px' }}>
-          {/* Rules List Manager */}
+          {/* Policy Rules Parameters */}
           <div>
             <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '16px', borderBottom: '1px solid var(--border-glass)', paddingBottom: '8px' }}>
               Policy Rules Parameters
@@ -790,7 +729,7 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
             </div>
           </div>
 
-          {/* Categories & Institutions Creator */}
+          {/* Categories, Institutions & Metadata Registry */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
             {/* Category Creator */}
             <div className="glass-panel" style={{ padding: '20px' }}>
@@ -924,7 +863,86 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
             </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* TAB 3: IMPORT & EXPORT HUB */}
+      {activeSubTab === 'data' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '32px' }}>
+          {/* MMex Import Panel */}
+          <div className="glass-panel" style={{ padding: '24px' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Upload size={16} style={{ color: 'var(--accent-light)' }} />
+              Money Manager Ex (MMex) Import
+            </h3>
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '20px', lineHeight: '1.4' }}>
+              Upload your exported MMex Accounts list CSV. The application will match balances based on Account names and update them immediately.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <input 
+                type="file" 
+                accept=".csv" 
+                onChange={handleMMexImport} 
+                id="csv_import_file" 
+                style={{ display: 'none' }} 
+              />
+              <label 
+                htmlFor="csv_import_file" 
+                className="btn btn-secondary" 
+                style={{ width: '100%', cursor: 'pointer', display: 'flex', justifyContent: 'center' }}
+              >
+                Choose MMex Accounts CSV File
+              </label>
+              
+              {importStatus && (
+                <div style={{ 
+                  padding: '10px 14px', 
+                  borderRadius: 'var(--radius-sm)', 
+                  fontSize: '12px', 
+                  background: importStatus.includes('Success') ? 'var(--success-bg)' : 'rgba(255,255,255,0.02)',
+                  color: importStatus.includes('Success') ? 'var(--success)' : 'var(--text-secondary)'
+                }}>
+                  {importStatus}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Export Center */}
+          <div className="glass-panel" style={{ padding: '24px' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <FileText size={16} style={{ color: 'var(--accent-light)' }} />
+              Report Export Center
+            </h3>
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '20px', lineHeight: '1.4' }}>
+              Export your plans and assets portfolios into raw standard formats for backup, offline storage, or processing.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <button className="btn btn-secondary" style={{ display: 'flex', justifyContent: 'space-between' }} onClick={exportMarkdownReport}>
+                <span>Download Markdown Planning Report</span>
+                <Download size={14} />
+              </button>
+              <button className="btn btn-secondary" style={{ display: 'flex', justifyContent: 'space-between' }} onClick={exportAccountsCSV}>
+                <span>Download Accounts CSV Export</span>
+                <Download size={14} />
+              </button>
+              <button className="btn btn-secondary" style={{ display: 'flex', justifyContent: 'space-between' }} onClick={exportLoansCSV}>
+                <span>Download Loans CSV Export</span>
+                <Download size={14} />
+              </button>
+              <button className="btn btn-secondary" style={{ display: 'flex', justifyContent: 'space-between' }} onClick={exportInvestmentsCSV}>
+                <span>Download Investments CSV Export</span>
+                <Download size={14} />
+              </button>
+              <button className="btn btn-secondary" style={{ display: 'flex', justifyContent: 'space-between' }} onClick={exportInsuranceCSV}>
+                <span>Download Insurance CSV Export</span>
+                <Download size={14} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
