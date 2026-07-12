@@ -14,6 +14,11 @@ The documentation is organized strictly under the **Enterprise Design Methodolog
 *   **[Step 0 - Financial Concepts](file:///d:/AI/Antigravity/Artha/docs/00-Financial-Concepts.md):** Conceptual definitions, terms, and core business vocabulary.
 *   **[Step 1 - Business Object Model](file:///d:/AI/Antigravity/Artha/docs/01-Business-Object-Model.md):** Object boundaries, encapsulation limits, and ownership profiles.
 *   **[Step 2 - Relationship Model](file:///d:/AI/Antigravity/Artha/docs/02-Relationship-Model.md):** Connections, reference scopes, and logical diagrams.
+*   **[Step 3 - Domain Model](file:///d:/AI/Antigravity/Artha/docs/03-Domain-Model.md):** Software entities, validations, lifecycles, and relational constraints.
+*   **[Step 4.1 - System Business Rules](file:///d:/AI/Antigravity/Artha/docs/04-System-Business-Rules.md):** Core, un-opinionated application behaviors and transaction immutability.
+*   **[Step 4.2 - Financial Policies](file:///d:/AI/Antigravity/Artha/docs/05-Financial-Policies.md):** Supported financial strategies and allocation templates.
+*   **[Step 4.3 - User Configuration](file:///d:/AI/Antigravity/Artha/docs/06-User-Configuration.md):** Stores customized ratios, safety multiples, and goal limits.
+*   **[Step 4.4 - Recommendation Engine](file:///d:/AI/Antigravity/Artha/docs/07-Recommendation-Engine.md):** AI advisor advisory rules, rebalancing triggers, and card spend yields.
 *   **[Memory Log](file:///d:/AI/Antigravity/Artha/docs/memory.md):** Session learning tracker and design constraints.
 
 ### Legacy Specification Archive
