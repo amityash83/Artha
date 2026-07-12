@@ -342,6 +342,7 @@ const App: React.FC = () => {
             entities={data.accounts} 
             categories={data.categories} 
             institutions={data.institutions} 
+            goals={data.goals}
             onRefresh={fetchFinanceData} 
             showToast={showToast}
           />
@@ -352,6 +353,7 @@ const App: React.FC = () => {
             entities={data.assets} 
             categories={data.categories} 
             institutions={data.institutions} 
+            goals={data.goals}
             onRefresh={fetchFinanceData} 
             showToast={showToast}
           />
@@ -362,6 +364,7 @@ const App: React.FC = () => {
             entities={data.liabilities} 
             categories={data.categories} 
             institutions={data.institutions} 
+            goals={data.goals}
             onRefresh={fetchFinanceData} 
             showToast={showToast}
           />
@@ -375,6 +378,7 @@ const App: React.FC = () => {
             entities={data.goals} 
             categories={data.categories} 
             institutions={data.institutions} 
+            goals={data.goals}
             onRefresh={fetchFinanceData} 
             showToast={showToast}
           />

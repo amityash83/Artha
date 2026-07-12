@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Category, Institution } from '../types';
+import { Category, Institution, Goal } from '../types';
 
 interface DynamicFormProps {
   entityType: 'accounts' | 'assets' | 'liabilities' | 'income' | 'expenses' | 'goals';
   category?: Category;
+  categories?: Category[];
   institutions: Institution[];
+  goals?: Goal[];
   initialData?: any;
   onSubmit: (data: any) => void;
   onCancel: () => void;
@@ -13,7 +15,9 @@ interface DynamicFormProps {
 export const DynamicForm: React.FC<DynamicFormProps> = ({
   entityType,
   category,
+  categories,
   institutions,
+  goals,
   initialData,
   onSubmit,
   onCancel,
@@ -22,7 +26,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
   const [fields, setFields] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    // 1. Establish the standard fields based on entity type
+    // 1. Establish the standard fields based on entity type initially
     const standardFields: Record<string, string> = {
       name: 'text',
     };
@@ -35,7 +39,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       standardFields['owner'] = 'text';
       standardFields['tags'] = 'text';
     } else if (entityType === 'assets') {
+      standardFields['category_id'] = 'category_select';
       standardFields['institution_id'] = 'institution_select';
+      standardFields['goal_mapping'] = 'goal_select';
       standardFields['current_value'] = 'number';
       standardFields['invested_amount'] = 'number';
       standardFields['acquisition_date'] = 'date';
@@ -61,35 +67,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       standardFields['status'] = 'select_status';
     }
 
-    // 2. Append custom fields defined in metadata
-    if (category && category.fields_definition) {
-      try {
-        const customDefs = typeof category.fields_definition === 'string' 
-          ? JSON.parse(category.fields_definition) 
-          : category.fields_definition;
-          
-        if (Array.isArray(customDefs)) {
-          customDefs.forEach((item: any) => {
-            if (item && item.name && !standardFields[item.name]) {
-              standardFields[item.name] = item.type || 'text';
-            }
-          });
-        } else if (typeof customDefs === 'object' && customDefs !== null) {
-          Object.keys(customDefs).forEach((k) => {
-            // Avoid overwriting standard fields
-            if (!standardFields[k]) {
-              standardFields[k] = customDefs[k];
-            }
-          });
-        }
-      } catch (e) {
-        console.error("Error parsing fields_definition:", e);
-      }
-    }
-
-    setFields(standardFields);
-
-    // 3. Populate default or initial values
+    // 2. Populate default or initial values
     const defaultData: any = {};
     Object.keys(standardFields).forEach((k) => {
       const type = standardFields[k];
@@ -99,6 +77,8 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         defaultData[k] = 0;
       } else if (type === 'institution_select') {
         defaultData[k] = institutions[0]?.id || '';
+      } else if (type === 'category_select') {
+        defaultData[k] = initialData?.category_id || category?.id || '';
       } else if (type === 'select_status') {
         defaultData[k] = 'Active';
       } else if (type === 'select_priority') {
@@ -119,6 +99,72 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
     setFormData(defaultData);
   }, [entityType, category, institutions, initialData]);
 
+  useEffect(() => {
+    const standardFields: Record<string, string> = {
+      name: 'text',
+    };
+
+    if (entityType === 'accounts') {
+      standardFields['institution_id'] = 'institution_select';
+      standardFields['current_balance'] = 'number';
+      standardFields['currency'] = 'text';
+      standardFields['status'] = 'select_status';
+      standardFields['owner'] = 'text';
+      standardFields['tags'] = 'text';
+    } else if (entityType === 'assets') {
+      standardFields['category_id'] = 'category_select';
+      standardFields['institution_id'] = 'institution_select';
+      standardFields['goal_mapping'] = 'goal_select';
+      standardFields['current_value'] = 'number';
+      standardFields['invested_amount'] = 'number';
+      standardFields['acquisition_date'] = 'date';
+      standardFields['status'] = 'select_status';
+      standardFields['owner'] = 'text';
+    } else if (entityType === 'liabilities') {
+      standardFields['lender_institution_id'] = 'institution_select';
+      standardFields['outstanding'] = 'number';
+      standardFields['interest_rate'] = 'number';
+      standardFields['emi'] = 'number';
+      standardFields['tenure_months'] = 'number';
+      standardFields['status'] = 'select_status';
+      standardFields['owner'] = 'text';
+    } else if (entityType === 'goals') {
+      standardFields['target_amount'] = 'number';
+      standardFields['current_amount'] = 'number';
+      standardFields['monthly_contribution'] = 'number';
+      standardFields['target_date'] = 'date';
+      standardFields['priority'] = 'select_priority';
+    } else if (entityType === 'income' || entityType === 'expenses') {
+      standardFields['amount'] = 'number';
+      standardFields['frequency'] = 'text';
+      standardFields['status'] = 'select_status';
+    }
+
+    // Append custom fields defined in metadata for current selected category
+    const currentCategoryId = formData.category_id || category?.id;
+    const currentCategory = categories?.find((c) => c.id === currentCategoryId) || category;
+
+    if (currentCategory && currentCategory.fields_definition) {
+      try {
+        const customDefs = typeof currentCategory.fields_definition === 'string'
+          ? JSON.parse(currentCategory.fields_definition)
+          : currentCategory.fields_definition;
+          
+        if (Array.isArray(customDefs)) {
+          customDefs.forEach((item: any) => {
+            if (item && item.name && !standardFields[item.name]) {
+              standardFields[item.name] = item.type || 'text';
+            }
+          });
+        }
+      } catch (e) {
+        console.error("Error parsing fields_definition:", e);
+      }
+    }
+
+    setFields(standardFields);
+  }, [formData.category_id, category, entityType, categories]);
+
   const handleChange = (key: string, val: any) => {
     setFormData((prev: any) => ({
       ...prev,
@@ -132,11 +178,14 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
   };
 
   const getLabel = (key: string) => {
-    if (category && category.fields_definition) {
+    const currentCategoryId = formData.category_id || category?.id;
+    const currentCategory = categories?.find((c) => c.id === currentCategoryId) || category;
+
+    if (currentCategory && currentCategory.fields_definition) {
       try {
-        const customDefs = typeof category.fields_definition === 'string'
-          ? JSON.parse(category.fields_definition)
-          : category.fields_definition;
+        const customDefs = typeof currentCategory.fields_definition === 'string'
+          ? JSON.parse(currentCategory.fields_definition)
+          : currentCategory.fields_definition;
         if (Array.isArray(customDefs)) {
           const found = customDefs.find((item: any) => item && item.name === key);
           if (found && found.label) {
@@ -154,13 +203,16 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       .join(' ');
   };
 
+  const currentCategoryIdForTitle = formData.category_id || category?.id;
+  const currentCategoryForTitle = categories?.find((c) => c.id === currentCategoryIdForTitle) || category;
+
   return (
     <form onSubmit={handleSubmit} className="glass-panel" style={{ padding: '24px', borderRadius: '12px', border: '1px solid var(--border-glass)' }}>
       <h3 style={{ fontSize: '18px', fontWeight: 600, color: '#f8fafc', marginBottom: '20px' }}>
-        {initialData ? 'Modify' : 'Add New'} {category ? category.name : getLabel(entityType)}
+        {initialData ? 'Modify' : 'Add New'} {currentCategoryForTitle ? currentCategoryForTitle.name : getLabel(entityType)}
       </h3>
       
-      {category && category.fields_definition && (
+      {currentCategoryForTitle && currentCategoryForTitle.fields_definition && (
         <div style={{ 
           background: 'rgba(167, 139, 250, 0.05)', 
           border: '1px solid rgba(167, 139, 250, 0.15)', 
@@ -174,9 +226,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           <span style={{ color: 'var(--accent-light)' }}>
             {(() => {
               try {
-                const parsed = typeof category.fields_definition === 'string'
-                  ? JSON.parse(category.fields_definition)
-                  : category.fields_definition;
+                const parsed = typeof currentCategoryForTitle.fields_definition === 'string'
+                  ? JSON.parse(currentCategoryForTitle.fields_definition)
+                  : currentCategoryForTitle.fields_definition;
                 if (Array.isArray(parsed)) {
                   return parsed.map((f: any) => `${f.label || f.name} (${f.type})`).join(', ');
                 }
@@ -205,6 +257,49 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
                   {[...institutions].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })).map((inst) => (
                     <option key={inst.id} value={inst.id}>
                       {inst.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            );
+          }
+
+          if (type === 'category_select') {
+            const assetCategories = categories ? categories.filter((c) => c.entity_type === 'Asset') : [];
+            return (
+              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Asset Class (Category)</label>
+                <select
+                  className="form-control"
+                  value={formData[k] || ''}
+                  onChange={(e) => handleChange(k, parseInt(e.target.value))}
+                  required
+                >
+                  <option value="">Select Category</option>
+                  {assetCategories.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            );
+          }
+
+          if (type === 'goal_select') {
+            const activeGoals = goals || [];
+            return (
+              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Linked Financial Goal</label>
+                <select
+                  className="form-control"
+                  value={formData[k] || ''}
+                  onChange={(e) => handleChange(k, e.target.value)}
+                >
+                  <option value="">None (Unmapped)</option>
+                  {activeGoals.map((g) => (
+                    <option key={g.id} value={g.name}>
+                      {g.name}
                     </option>
                   ))}
                 </select>

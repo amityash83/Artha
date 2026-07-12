@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Category, Institution } from '../types';
+import { Category, Institution, Goal } from '../types';
 import { DynamicForm } from './DynamicForm';
 import { Plus, Edit2, Trash2, Search } from 'lucide-react';
 import { API_BASE_URL } from '../config';
@@ -9,6 +9,7 @@ interface EntityGridProps {
   entities: any[];
   categories: Category[];
   institutions: Institution[];
+  goals?: Goal[];
   onRefresh: () => void;
   showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
@@ -18,6 +19,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
   entities,
   categories,
   institutions,
+  goals,
   onRefresh,
   showToast,
 }) => {
@@ -333,7 +335,9 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
             <DynamicForm
               entityType={entityType}
               category={activeCategory || typeCategories[0]}
+              categories={categories}
               institutions={institutions}
+              goals={goals}
               initialData={editingEntity}
               onSubmit={handleFormSubmit}
               onCancel={() => {

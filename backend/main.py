@@ -552,6 +552,17 @@ def create_entity(entity_type: str, payload: dict):
                 "add"
             )
             
+        if entity_type == "assets":
+            goal_mapping = payload.get("goal_mapping")
+            if goal_mapping:
+                cursor.execute("SELECT id FROM goals WHERE name = ?", (goal_mapping,))
+                g_row = cursor.fetchone()
+                if g_row:
+                    cursor.execute("""
+                    INSERT OR REPLACE INTO goal_holdings (goal_id, asset_id, allocation_weight)
+                    VALUES (?, ?, 1.0)
+                    """, (g_row["id"], entity_id))
+
         conn.commit()
         return {"status": "success", "id": entity_id}
     except Exception as e:
@@ -604,7 +615,6 @@ def update_entity(entity_type: str, id: int, payload: dict):
         cursor.execute(query, standard_params)
         
         if entity_type == "transactions":
-            # Apply new balances
             adjust_double_entry_balances(
                 cursor,
                 standard_params.get("type"),
@@ -615,7 +625,19 @@ def update_entity(entity_type: str, id: int, payload: dict):
                 int(standard_params.get("dest_ref_id")) if standard_params.get("dest_ref_id") is not None else None,
                 "add"
             )
-            
+
+        if entity_type == "assets":
+            cursor.execute("DELETE FROM goal_holdings WHERE asset_id = ?", (id,))
+            goal_mapping = payload.get("goal_mapping")
+            if goal_mapping:
+                cursor.execute("SELECT id FROM goals WHERE name = ?", (goal_mapping,))
+                g_row = cursor.fetchone()
+                if g_row:
+                    cursor.execute("""
+                    INSERT OR REPLACE INTO goal_holdings (goal_id, asset_id, allocation_weight)
+                    VALUES (?, ?, 1.0)
+                    """, (g_row["id"], id))
+
         conn.commit()
         return {"status": "success"}
     except Exception as e:
@@ -650,6 +672,9 @@ def delete_entity(entity_type: str, id: int):
                     "revert"
                 )
                 
+        if entity_type == "assets":
+            cursor.execute("DELETE FROM goal_holdings WHERE asset_id = ?", (id,))
+
         cursor.execute(f"DELETE FROM {entity_type} WHERE id = ?", (id,))
         conn.commit()
         return {"status": "success"}
