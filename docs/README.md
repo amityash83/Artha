@@ -19,6 +19,7 @@ The documentation is organized strictly under the **Enterprise Design Methodolog
 *   **[Step 4.2 - Financial Policies](file:///d:/AI/Antigravity/Artha/docs/05-Financial-Policies.md):** Supported financial strategies and allocation templates.
 *   **[Step 4.3 - User Configuration](file:///d:/AI/Antigravity/Artha/docs/06-User-Configuration.md):** Stores customized ratios, safety multiples, and goal limits.
 *   **[Step 4.4 - Recommendation Engine](file:///d:/AI/Antigravity/Artha/docs/07-Recommendation-Engine.md):** AI advisor advisory rules, rebalancing triggers, and card spend yields.
+*   **[Step 5 - Workflows](file:///d:/AI/Antigravity/Artha/docs/08-Workflows.md):** Operational execution sequences and dynamic event charts.
 *   **[Memory Log](file:///d:/AI/Antigravity/Artha/docs/memory.md):** Session learning tracker and design constraints.
 
 ### Legacy Specification Archive
