@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { 
   Landmark, LandmarkIcon, PiggyBank, 
   Target, FileText, Database, Compass, Calendar, Calculator, Zap, LineChart, ArrowRightLeft, Sliders,
-  CheckCircle2, AlertCircle, Info, X
+  CheckCircle2, AlertCircle, Info, X, CreditCard
 } from 'lucide-react';
 import { InitData } from './types';
 import { Dashboard } from './components/Dashboard';
@@ -16,6 +16,7 @@ import { LoanOptimizer } from './components/LoanOptimizer';
 import { CashFlowPlanning } from './components/CashFlowPlanning';
 import { TransactionsLedger } from './components/TransactionsLedger';
 import { BudgetPlanner } from './components/BudgetPlanner';
+import { CreditCards } from './components/CreditCards';
 import { API_BASE_URL } from './config';
 
 const App: React.FC = () => {
@@ -249,6 +250,15 @@ const App: React.FC = () => {
             </li>
             <li>
               <div 
+                className={`sidebar-item ${activeTab === 'credit-cards' ? 'active' : ''}`}
+                onClick={() => handleNavigate('credit-cards')}
+              >
+                <CreditCard size={16} />
+                Credit Cards
+              </div>
+            </li>
+            <li>
+              <div 
                 className={`sidebar-item ${activeTab === 'goals' ? 'active' : ''}`}
                 onClick={() => handleNavigate('goals')}
               >
@@ -352,6 +362,9 @@ const App: React.FC = () => {
             onRefresh={fetchFinanceData} 
             showToast={showToast}
           />
+        )}
+        {activeTab === 'credit-cards' && (
+          <CreditCards data={data} onRefresh={fetchFinanceData} showToast={showToast} />
         )}
         {activeTab === 'goals' && (
           <EntityGrid 

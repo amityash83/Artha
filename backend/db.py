@@ -275,7 +275,22 @@ def init_db():
         # Liabilities
         ('Liability', 'Home Loan', None),
         ('Liability', 'Personal Loan', None),
-        ('Liability', 'Credit Card', json.dumps([{"name": "credit_limit", "type": "number", "label": "Credit Limit"}, {"name": "statement_date", "type": "number", "label": "Statement Day of Month"}, {"name": "due_date", "type": "number", "label": "Due Day of Month"}])),
+        ('Liability', 'Credit Card', json.dumps([
+            {"name": "credit_limit", "type": "number", "label": "Credit Limit"},
+            {"name": "statement_date", "type": "number", "label": "Statement Day of Month"},
+            {"name": "due_date", "type": "number", "label": "Due Day of Month"},
+            {"name": "annual_fee", "type": "number", "label": "Annual Fee (INR)"},
+            {"name": "renewal_date", "type": "date", "label": "Renewal Date"},
+            {"name": "reward_points", "type": "number", "label": "Reward Points Balance"},
+            {"name": "point_value", "type": "number", "label": "Point Value (INR)"},
+            {"name": "network", "type": "text", "label": "Card Network (Visa/MC/Rupay/Amex)"},
+            {"name": "lounge_visits_limit", "type": "number", "label": "Annual Lounge Access Limit"},
+            {"name": "lounge_visits_used", "type": "number", "label": "Lounge Access Used"},
+            {"name": "milestone_spend_target", "type": "number", "label": "Next Milestone Spend Target"},
+            {"name": "milestone_spend_current", "type": "number", "label": "Current Annual Spend"},
+            {"name": "milestone_reward_desc", "type": "text", "label": "Milestone Reward Details"},
+            {"name": "remarks", "type": "text", "label": "Remarks"}
+        ])),
         ('Liability', 'Car Loan', None),
         # Income
         ('Income', 'Salary', None),
@@ -603,6 +618,33 @@ def init_db():
                 print("[Migration] Goals migrated to new schema successfully.")
     except Exception as e:
         print("[Migration Warning] Goals migration error:", e)
+
+    # E. Update Credit Card category fields definition
+    try:
+        cursor.execute("SELECT id FROM categories WHERE name = 'Credit Card'")
+        row = cursor.fetchone()
+        if row:
+            cat_id = row['id']
+            new_fields = [
+                {"name": "credit_limit", "type": "number", "label": "Credit Limit"},
+                {"name": "statement_date", "type": "number", "label": "Statement Day of Month"},
+                {"name": "due_date", "type": "number", "label": "Due Day of Month"},
+                {"name": "annual_fee", "type": "number", "label": "Annual Fee (INR)"},
+                {"name": "renewal_date", "type": "date", "label": "Renewal Date"},
+                {"name": "reward_points", "type": "number", "label": "Reward Points Balance"},
+                {"name": "point_value", "type": "number", "label": "Point Value (INR)"},
+                {"name": "network", "type": "text", "label": "Card Network (Visa/MC/Rupay/Amex)"},
+                {"name": "lounge_visits_limit", "type": "number", "label": "Annual Lounge Access Limit"},
+                {"name": "lounge_visits_used", "type": "number", "label": "Lounge Access Used"},
+                {"name": "milestone_spend_target", "type": "number", "label": "Next Milestone Spend Target"},
+                {"name": "milestone_spend_current", "type": "number", "label": "Current Annual Spend"},
+                {"name": "milestone_reward_desc", "type": "text", "label": "Milestone Reward Details"},
+                {"name": "remarks", "type": "text", "label": "Remarks"}
+            ]
+            cursor.execute("UPDATE categories SET fields_definition = ? WHERE id = ?", (json.dumps(new_fields), cat_id))
+            print("[Migration] Credit card category fields_definition expanded successfully.")
+    except Exception as e:
+        print("[Migration Warning] Credit card category update error:", e)
 
     conn.commit()
     conn.close()
