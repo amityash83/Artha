@@ -56,6 +56,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
     liquidityHealthLabel = 'Warning - Near Limit';
   }
 
+  const totalAssets = summary.total_assets;
+  const liquidPct = totalAssets > 0 ? (liquidFunds / totalAssets) * 100 : 0;
+  const lockedPct = Math.max(0, 100 - liquidPct);
+
+  const debtToAssetRatio = totalAssets > 0 ? (summary.total_debt / totalAssets) * 100 : 0;
+  let leverageHealth = 'green';
+  let leverageLabel = 'Safe Leverage';
+  if (debtToAssetRatio > 50) {
+    leverageHealth = 'red';
+    leverageLabel = 'High Debt Load';
+  } else if (debtToAssetRatio > 30) {
+    leverageHealth = 'yellow';
+    leverageLabel = 'Moderate Leverage';
+  }
+
   // Dynamic Asset Allocation for Doughnut Chart
   const assetAllocation: Record<string, number> = {
     'Liquid Cash': liquidFunds
@@ -193,7 +208,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
       </div>
 
       {/* Top Summaries Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '24px', marginBottom: '32px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '24px', marginBottom: '32px' }}>
         {/* Net Worth Card */}
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div>
@@ -215,43 +230,76 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
           </div>
           <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: 'var(--text-muted)', borderTop: '1px solid var(--border-glass)', paddingTop: '10px', marginTop: '10px' }}>
             <span>Assets: <strong style={{ color: '#f8fafc' }}>{formatCurrency(summary.total_assets)}</strong></span>
-            <span>Liabilities: <strong style={{ color: '#f8fafc' }}>{formatCurrency(summary.total_debt)}</strong></span>
+            <span>Debt: <strong style={{ color: '#f8fafc' }}>{formatCurrency(summary.total_debt)}</strong></span>
           </div>
         </div>
 
         {/* Liquid Reserve Health Indicator */}
-        <div className="glass-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500 }}>Liquid Capital Status</span>
-            <span className={`badge badge-${liquidityHealth}`} style={{ fontSize: '10px' }}>
-              {liquidityHealthLabel}
+        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500 }}>Emergency Reserve Status</span>
+              <span className={`badge badge-${liquidityHealth}`} style={{ fontSize: '10px' }}>
+                {liquidityHealthLabel}
+              </span>
+            </div>
+            <h2 style={{ fontSize: '22px', fontWeight: 600, color: '#f8fafc', margin: '4px 0 8px 0' }}>
+              {formatCurrency(liquidFunds)}
+            </h2>
+          </div>
+          
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+              <span>Liquid: <strong style={{ color: '#10b981' }}>{liquidPct.toFixed(0)}%</strong></span>
+              <span>Locked: <strong style={{ color: '#3b82f6' }}>{lockedPct.toFixed(0)}%</strong></span>
+            </div>
+            <div style={{ height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', overflow: 'hidden', display: 'flex', marginBottom: '8px' }}>
+              <div style={{ width: `${liquidPct}%`, height: '100%', background: '#10b981' }} title="Liquid Capital"></div>
+              <div style={{ width: `${lockedPct}%`, height: '100%', background: '#3b82f6' }} title="Locked Capital"></div>
+            </div>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+              Reserve Target: {formatCurrency(targetLiquidity)}
             </span>
           </div>
-          <h2 style={{ fontSize: '22px', fontWeight: 600, color: '#f8fafc', margin: '4px 0 8px 0' }}>
-            {formatCurrency(liquidFunds)}
-          </h2>
-          <div style={{ height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', overflow: 'hidden', marginBottom: '8px' }}>
-            <div style={{ 
-              width: `${Math.min(liquidityRatio * 100, 100)}%`, 
-              height: '100%', 
-              background: liquidityHealth === 'green' ? 'var(--success)' : liquidityHealth === 'yellow' ? 'var(--warning)' : 'var(--danger)'
-            }}></div>
+        </div>
+
+        {/* Leverage Risk Card */}
+        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500 }}>Leverage Risk (Debt/Assets)</span>
+              <span className={`badge badge-${leverageHealth}`} style={{ fontSize: '10px' }}>
+                {leverageLabel}
+              </span>
+            </div>
+            <h2 style={{ fontSize: '22px', fontWeight: 600, color: '#f8fafc', margin: '4px 0 8px 0' }}>
+              {debtToAssetRatio.toFixed(1)}%
+            </h2>
           </div>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-            Target Emergency Liquidity: {formatCurrency(targetLiquidity)}
-          </span>
+          <div>
+            <div style={{ height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', overflow: 'hidden', marginBottom: '8px' }}>
+              <div style={{ 
+                width: `${Math.min(debtToAssetRatio, 100)}%`, 
+                height: '100%', 
+                background: leverageHealth === 'green' ? 'var(--success)' : leverageHealth === 'yellow' ? 'var(--warning)' : 'var(--danger)'
+              }}></div>
+            </div>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+              Risk Threshold Limit: Under 30%
+            </span>
+          </div>
         </div>
 
         {/* Target Progress Card */}
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '130px' }}>
           <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500 }}>Goal Allocations</span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {goals.slice(0, 3).map((goal) => {
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, justifyContent: 'center' }}>
+            {goals.slice(0, 2).map((goal) => {
               const progress = goal.target_amount > 0 ? (goal.current_amount / goal.target_amount) * 100 : 0;
               return (
                 <div key={goal.id}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '3px' }}>
-                    <span style={{ color: '#e2e8f0' }}>{goal.name}</span>
+                    <span style={{ color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '140px' }}>{goal.name}</span>
                     <span style={{ color: 'var(--text-muted)' }}>{progress.toFixed(0)}%</span>
                   </div>
                   <div style={{ height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', overflow: 'hidden' }}>
@@ -261,14 +309,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
               );
             })}
             {goals.length === 0 && (
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>No goals set yet.</span>
+              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>No active planning goals.</span>
             )}
           </div>
         </div>
       </div>
 
       {/* Charts & Recommendations Split */}
-      <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: '24px', flexWrap: 'wrap' }} className="grid-split">
+      <div style={{ display: 'grid', gridTemplateColumns: '3.1fr 2fr', gap: '24px', flexWrap: 'wrap' }} className="grid-split">
         {/* Left Side Charts Panel */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           <div className="glass-panel" style={{ height: '320px', display: 'flex', flexDirection: 'column' }}>
@@ -278,11 +326,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }} className="sub-charts">
+          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '24px' }} className="sub-charts">
+            {/* Doughnut + Allocation Table */}
             <div className="glass-panel" style={{ height: '240px', display: 'flex', flexDirection: 'column' }}>
-              <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '12px' }}>Asset Distribution</h3>
-              <div style={{ flex: 1, position: 'relative' }}>
-                <Doughnut data={doughnutData} options={doughnutOptions} />
+              <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '12px' }}>Asset Distribution &amp; Allocation</h3>
+              <div style={{ display: 'flex', gap: '16px', flex: 1, alignItems: 'center' }}>
+                <div style={{ flex: 1.1, height: '160px', position: 'relative' }}>
+                  <Doughnut data={doughnutData} options={doughnutOptions} />
+                </div>
+                <div style={{ flex: 1.4, maxHeight: '160px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
+                  {doughnutLabels.map((label, idx) => {
+                    const value = doughnutValues[idx];
+                    const percent = summary.total_assets > 0 ? (value / summary.total_assets) * 100 : 0;
+                    return (
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', borderBottom: '1px solid rgba(255,255,255,0.02)', paddingBottom: '4px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
+                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: doughnutColors[idx], flexShrink: 0 }}></span>
+                          <span style={{ color: '#e2e8f0', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '80px' }} title={label}>{label}</span>
+                        </div>
+                        <div style={{ color: '#f1f5f9', textAlign: 'right', flexShrink: 0 }}>
+                          <div>{formatCurrency(value)}</div>
+                          <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{percent.toFixed(1)}%</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
