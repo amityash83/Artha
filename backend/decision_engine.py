@@ -19,7 +19,20 @@ def generate_recommendations(conn) -> list:
     ins_renewal_alert_days = rules.get("insurance_renewal_alert_days", {}).get("value", 30.0) if rules.get("insurance_renewal_alert_days", {}).get("enabled", True) else 30.0
     
     # 2. Fetch Accounts (liquid funds)
-    cursor.execute("SELECT current_balance, name FROM accounts")
+    cursor.execute("""
+        SELECT 
+            name,
+            (
+                SELECT COALESCE(SUM(t.amount), 0.0) 
+                FROM transactions t 
+                WHERE t.dest_ref_type = 'Account' AND t.dest_ref_id = a.id
+            ) - (
+                SELECT COALESCE(SUM(t.amount), 0.0) 
+                FROM transactions t 
+                WHERE t.source_ref_type = 'Account' AND t.source_ref_id = a.id
+            ) AS current_balance
+        FROM accounts a
+    """)
     accounts = cursor.fetchall()
     total_liquid = sum(row["current_balance"] for row in accounts)
     

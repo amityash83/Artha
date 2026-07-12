@@ -1212,12 +1212,21 @@ async def import_mmex_csv(file: UploadFile = File(...)):
                 inst_id = cursor.lastrowid
                 
             cursor.execute(
-                """INSERT INTO accounts (name, institution_id, current_balance, status)
-                   VALUES (?, ?, ?, ?)
-                   ON CONFLICT(name, institution_id) DO UPDATE SET
-                   current_balance=excluded.current_balance""",
-                (name, inst_id, val, "Active")
+                """INSERT INTO accounts (name, institution_id, owner_id, status)
+                   VALUES (?, ?, 1, 'Active')
+                   ON CONFLICT(name, institution_id, owner_id) DO UPDATE SET status = 'Active'""",
+                (name, inst_id)
             )
+            account_id = cursor.lastrowid
+            if not account_id:
+                cursor.execute("SELECT id FROM accounts WHERE name = ? AND institution_id = ? AND owner_id = 1", (name, inst_id))
+                account_id = cursor.fetchone()["id"]
+                
+            if val > 0.0:
+                cursor.execute("""
+                INSERT INTO transactions (source_ref_type, source_ref_id, dest_ref_type, dest_ref_id, type, amount, transaction_date, notes)
+                VALUES ('None', NULL, 'Account', ?, 'Credit', ?, ?, 'CSV Import Initial Balance')
+                """, (account_id, val, date.today().isoformat()))
             imported_count += 1
             
         conn.commit()
