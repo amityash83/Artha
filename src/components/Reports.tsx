@@ -43,6 +43,8 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
   const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
   const [editingInstId, setEditingInstId] = useState<number | null>(null);
   const [editingInstName, setEditingInstName] = useState<string>('');
+  const [deletingCategoryId, setDeletingCategoryId] = useState<number | null>(null);
+  const [deletingInstId, setDeletingInstId] = useState<number | null>(null);
   const [customFields, setCustomFields] = useState<Array<{ name: string; label: string; type: 'text' | 'number' | 'date' }>>([]);
 
   const [ruleSaveStatus, setRuleSaveStatus] = useState<Record<string, string>>({});
@@ -182,7 +184,6 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
   };
 
   const handleDeleteMetadata = async (type: 'categories' | 'institutions', id: number) => {
-    if (!window.confirm("Are you sure you want to delete this metadata? This cannot be undone.")) return;
     try {
       setMetaStatus("Deleting metadata item...");
       const res = await fetch(`${API_BASE_URL}/api/metadata/${type}/${id}`, {
@@ -190,6 +191,8 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
       });
       if (res.ok) {
         setMetaStatus("Metadata item deleted successfully.");
+        setDeletingCategoryId(null);
+        setDeletingInstId(null);
         if (type === 'categories') fetchCategoriesList();
         else fetchInstitutionsList();
         onRefresh();
@@ -902,19 +905,45 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
                       return (
                         <div key={cat.id} className="glass-panel" style={{ padding: '12px', background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.04)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <strong style={{ fontSize: '13px', color: '#fff' }}>{cat.name}</strong>
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                              <Edit2 
-                                size={12} 
-                                style={{ color: 'var(--info)', cursor: 'pointer', opacity: 0.8 }} 
-                                onClick={() => handleEditCategorySchema(cat)} 
-                              />
-                              <Trash2 
-                                size={12} 
-                                style={{ color: '#ef4444', cursor: 'pointer', opacity: 0.8 }} 
-                                onClick={() => handleDeleteMetadata('categories', cat.id)} 
-                              />
-                            </div>
+                            {deletingCategoryId === cat.id ? (
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flex: 1 }}>
+                                <span style={{ color: 'var(--danger-light)', fontSize: '12px', fontWeight: 500 }}>Confirm Delete?</span>
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                  <button 
+                                    type="button" 
+                                    className="btn btn-secondary" 
+                                    style={{ padding: '2px 6px', fontSize: '10px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444', minWidth: 'auto' }}
+                                    onClick={() => handleDeleteMetadata('categories', cat.id)}
+                                  >
+                                    Confirm
+                                  </button>
+                                  <button 
+                                    type="button" 
+                                    className="btn btn-secondary" 
+                                    style={{ padding: '2px 6px', fontSize: '10px', minWidth: 'auto' }}
+                                    onClick={() => setDeletingCategoryId(null)}
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <strong style={{ fontSize: '13px', color: '#fff' }}>{cat.name}</strong>
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                  <Edit2 
+                                    size={12} 
+                                    style={{ color: 'var(--info)', cursor: 'pointer', opacity: 0.8 }} 
+                                    onClick={() => handleEditCategorySchema(cat)} 
+                                  />
+                                  <Trash2 
+                                    size={12} 
+                                    style={{ color: '#ef4444', cursor: 'pointer', opacity: 0.8 }} 
+                                    onClick={() => setDeletingCategoryId(cat.id)} 
+                                  />
+                                </div>
+                              </>
+                            )}
                           </div>
 
                           <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
@@ -963,6 +992,7 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', overflowY: 'auto', paddingRight: '4px' }}>
                 {institutions.map((inst: any) => {
                   const isEditing = editingInstId === inst.id;
+                  const isDeleting = deletingInstId === inst.id;
                   return (
                     <div key={inst.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: '8px', fontSize: '12px' }}>
                       {isEditing ? (
@@ -992,6 +1022,28 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
                             <X size={12} />
                           </button>
                         </div>
+                      ) : isDeleting ? (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flex: 1 }}>
+                          <span style={{ color: 'var(--danger-light)', fontWeight: 500 }}>Confirm Delete?</span>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button 
+                              type="button" 
+                              className="btn btn-secondary" 
+                              style={{ padding: '4px 8px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444', minWidth: 'auto', height: '26px' }}
+                              onClick={() => handleDeleteMetadata('institutions', inst.id)}
+                            >
+                              Confirm
+                            </button>
+                            <button 
+                              type="button" 
+                              className="btn btn-secondary" 
+                              style={{ padding: '4px 8px', minWidth: 'auto', height: '26px' }}
+                              onClick={() => setDeletingInstId(null)}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
                       ) : (
                         <>
                           <span style={{ fontWeight: 500 }}>{inst.name}</span>
@@ -1008,7 +1060,7 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
                               type="button"
                               className="btn btn-secondary" 
                               style={{ padding: '4px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px' }}
-                              onClick={() => handleDeleteMetadata('institutions', inst.id)} 
+                              onClick={() => setDeletingInstId(inst.id)} 
                             >
                               <Trash2 size={11} style={{ color: '#ef4444' }} />
                             </button>
