@@ -1,45 +1,40 @@
-# Implementation Plan: Credit Cards Module Expansion
+# Implementation Plan: Annual Prepayments for Multi-Loan Optimizer
 
-This plan outlines the database migration, backend router, and frontend UI changes to expand the **Credit Cards** module. The goal is to evolve the card registry from a simple liability tracker to a comprehensive inventory for optimization (annual fees, waiver milestones, rewards value, and lounge access).
+This plan outlines the changes to implement annual prepayments in the Multi-Loan Payoff Optimizer module.
 
 ## Proposed Changes
 
-### 1. Database Layer (`backend/db.py`)
-Add support for card inventory details in the SQLite `credit_cards` table. If the database file exists, run structural migration queries automatically to add the new columns:
-* `annual_fee` (REAL, default `0.0`): The annual card fee in INR.
-* `renewal_date` (TEXT, YYYY-MM-DD): The next billing/renewal date.
-* `reward_points` (INTEGER, default `0`): Current accrued reward points.
-* `point_value` (REAL, default `0.25`): Monetary value of 1 reward point in INR (e.g. ₹0.25).
-* `lounge_access_domestic` (TEXT, optional): Quick reference text for domestic lounges (e.g., "4/Quarter").
-* `lounge_access_international` (TEXT, optional): Quick reference text for international lounges (e.g., "4/Year").
-* `spend_milestone_waiver` (REAL, default `0.0`): Target annual spend to trigger fee waiver (e.g., ₹1,50,000).
+### 1. Backend Calculations (`backend/calculations.py`)
+- Update the `simulate_multi_loan_payoff` function to accept:
+  - `prepayment_frequency` (defaults to `"monthly"`)
+  - `prepayment_amount` (defaults to `0.0`)
+  - `prepayment_month` (defaults to `3` - March)
+  - `prepayment_day` (defaults to `31`)
+- Compute the current calendar month dynamically in the simulation loop.
+- Apply the annual prepayment amount in simulation months matching the selected `prepayment_month` when frequency is set to `"annually"`.
+- Modify the prepayment distribution logic so that extra funds cascade to subsequent loans if the target loan is fully paid off.
 
-### 2. Application Layer (`backend/main.py`)
-* **Pydantic Model Updates**: Expand `CreditCardSchema` to capture the new fields.
-* **CRUD API Updates**: Update the SQL statements in the POST endpoint to save and edit these new attributes.
-* **Aggregate API Updates**: Update `get_init_data` to ensure all fields are returned to the frontend.
+### 2. FastAPI Endpoint (`backend/main.py`)
+- Update the `LoanOptimizerRequest` Pydantic model to include the new fields:
+  - `prepayment_frequency: str = "monthly"`
+  - `prepayment_amount: float = 0.0`
+  - `prepayment_month: int = 3`
+  - `prepayment_day: int = 31`
+- Pass these parameters to the `simulate_multi_loan_payoff` calls inside `optimize_loans`.
 
-### 3. UI Component (`src/components/CreditCards.tsx`)
-Redesign the Credit Cards panel into a modular view containing:
-* **Metrics Cards Summary**:
-  * Total Outstanding Balance
-  * Total Billed Amount (Due Next)
-  * Total Accrued Reward Points Value (in INR: `reward_points * point_value`)
-  * Upcoming Annual Fees Outflow (next 12 months)
-* **Expanded Registry Grid**: Render the list of cards in a grid of stylized cards instead of a wide, crowded table, showing:
-  * Card Issuer Logo/Badge
-  * Credit Limit & Utilization bar
-  * Statement Cycles & Due Dates
-  * Rewards tally & estimated cash equivalent (e.g., "5,000 pts ≈ ₹1,250")
-  * Benefits Quick Info: Domestic & International lounge limits, annual fee & waiver milestone progress bar
-* **Add/Edit Card Modal Form**: Integrated input fields for these detailed properties.
+### 3. Frontend React Component (`src/components/LoanOptimizer.tsx`)
+- Introduce UI inputs for frequency toggle ("Monthly" vs. "Annually").
+- Create fields for annual prepayment amount, a dropdown/select input for the target Month, and a numeric input for the target Day (1-31).
+- Conditionally render inputs depending on the selected frequency mode.
+- Update the fetch payload in `calculateOptimalPayoffs` to pass the frequency, annual amount, month, and day parameters.
+- Dynamically calculate the maximum annual prepayment limit based on the total outstanding loan balance (using a 10L fallback minimum), rounding to the nearest 50k for smooth increments.
 
 ## Verification Plan
 
 ### Automated Tests
-* Run direct Python queries to verify the database migrations and ensure the `credit_cards` schema includes all new columns.
-* Launch compilation check: `npm run build:frontend` to verify TypeScript builds cleanly.
+- Created and executed a test script `scratch/test_loan_optimizer.py` that confirms both monthly and annual simulation modes operate successfully, and verify that the annual prepayment is correctly applied to the principal in the target month (Month 9).
 
 ### Manual Verification
-* Deploy the updated build.
-* Add/edit a card with annual fees, reward points, and lounge details. Verify that the calculations and card indicators display the cash equivalent values and milestone waivers.
+- Toggle between **Monthly** and **Annually** prepayment modes.
+- Verify that changing the prepayment month shifts the Comparative Payoff Curves and alters the payoff month count.
+- Verify that the annual prepayment slider dynamically adjusts its maximum limit to the total outstanding loan balance (capped at a minimum of ₹10,00,000).

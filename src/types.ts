@@ -133,6 +133,19 @@ export interface CreditCard {
   remarks: string;
 }
 
+export interface MonthlyCashFlow {
+  id: number;
+  month: string;
+  net_salary: number;
+  other_income: number;
+  household_expenses: number;
+  emi: number;
+  insurance_premium: number;
+  investments: number;
+  one_time_expenses: number;
+  notes: string;
+}
+
 export interface InitData {
   summary: Summary;
   accounts: Account[];
@@ -144,4 +157,5 @@ export interface InitData {
   rules: FinancialRule[];
   recommendations: Recommendation[];
   credit_cards: CreditCard[];
+  cash_flows?: MonthlyCashFlow[];
 }

@@ -12,6 +12,10 @@ interface LoanOptimizerProps {
 export const LoanOptimizer: React.FC<LoanOptimizerProps> = ({ data }) => {
   const { loans } = data;
   const [budget, setBudget] = useState<number>(50000); // 50k default extra monthly
+  const [frequency, setFrequency] = useState<'monthly' | 'annually'>('monthly');
+  const [annualAmount, setAnnualAmount] = useState<number>(200000); // 200k default annual
+  const [prepayMonth, setPrepayMonth] = useState<number>(3); // March default
+  const [prepayDay, setPrepayDay] = useState<number>(31); // 31st default
   const [loading, setLoading] = useState<boolean>(false);
   const [results, setResults] = useState<any>(null);
 
@@ -24,7 +28,11 @@ export const LoanOptimizer: React.FC<LoanOptimizerProps> = ({ data }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           loans: loans,
-          extra_monthly_budget: budget
+          extra_monthly_budget: frequency === 'monthly' ? budget : 0,
+          prepayment_frequency: frequency,
+          prepayment_amount: frequency === 'annually' ? annualAmount : 0,
+          prepayment_month: prepayMonth,
+          prepayment_day: prepayDay
         })
       });
       if (res.ok) {
@@ -40,7 +48,7 @@ export const LoanOptimizer: React.FC<LoanOptimizerProps> = ({ data }) => {
 
   useEffect(() => {
     calculateOptimalPayoffs();
-  }, [budget, loans]);
+  }, [budget, frequency, annualAmount, prepayMonth, prepayDay, loans]);
 
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -60,6 +68,8 @@ export const LoanOptimizer: React.FC<LoanOptimizerProps> = ({ data }) => {
   };
 
   const activeLoans = loans.filter(l => l.outstanding > 0);
+  const totalOutstanding = activeLoans.reduce((sum, l) => sum + l.outstanding, 0);
+  const maxAnnualLimit = Math.max(1000000, Math.ceil(totalOutstanding / 50000) * 50000);
 
   const buildChartData = () => {
     if (!results) return null;
@@ -164,42 +174,155 @@ export const LoanOptimizer: React.FC<LoanOptimizerProps> = ({ data }) => {
         <div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: '24px', marginBottom: '24px' }}>
             <div className="glass-panel" style={{ padding: '24px' }}>
-              <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Zap size={18} style={{ color: 'var(--accent-light)' }} />
-                Set Monthly Prepayment Surplus
-              </h3>
-              <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '20px' }}>
-                Define the extra cash you can allocate towards debt principal reductions every month in addition to normal EMIs.
-              </p>
-              
-              <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
-                <div style={{ flexGrow: 1 }}>
-                  <input 
-                    type="range" 
-                    min={5000} 
-                    max={200000} 
-                    step={5000}
-                    value={budget} 
-                    onChange={e => setBudget(Number(e.target.value))}
-                    style={{ width: '100%', accentColor: 'var(--accent)' }}
-                  />
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    <span>₹5,000 / month</span>
-                    <span>₹1,00,000 / month</span>
-                    <span>₹2,00,000 / month</span>
-                  </div>
-                </div>
-                <div style={{ position: 'relative' }}>
-                  <span style={{ position: 'absolute', left: '10px', top: '8px', color: 'var(--text-muted)', fontSize: '14px' }}>₹</span>
-                  <input 
-                    type="number" 
-                    className="form-input" 
-                    style={{ width: '140px', padding: '6px 12px 6px 24px', textAlign: 'right', fontSize: '15px', fontWeight: 600 }}
-                    value={budget} 
-                    onChange={e => setBudget(Math.max(Number(e.target.value), 0))}
-                  />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h3 style={{ fontSize: '15px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                  <Zap size={18} style={{ color: 'var(--accent-light)' }} />
+                  Set {frequency === 'monthly' ? 'Monthly' : 'Annual'} Prepayment Surplus
+                </h3>
+
+                {/* Frequency Toggle */}
+                <div style={{ display: 'flex', gap: '4px', background: 'rgba(255,255,255,0.03)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
+                  <button 
+                    onClick={() => setFrequency('monthly')} 
+                    style={{
+                      padding: '4px 12px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: frequency === 'monthly' ? 'var(--accent)' : 'transparent',
+                      color: '#fff',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    Monthly
+                  </button>
+                  <button 
+                    onClick={() => setFrequency('annually')} 
+                    style={{
+                      padding: '4px 12px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: frequency === 'annually' ? 'var(--accent)' : 'transparent',
+                      color: '#fff',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    Annually
+                  </button>
                 </div>
               </div>
+
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '20px' }}>
+                {frequency === 'monthly' 
+                  ? 'Define the extra cash you can allocate towards debt principal reductions every month in addition to normal EMIs.' 
+                  : 'Define a one-time yearly prepayment (e.g., from an annual bonus) and select the month and date to apply it.'}
+              </p>
+              
+              {frequency === 'monthly' ? (
+                <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
+                  <div style={{ flexGrow: 1 }}>
+                    <input 
+                      type="range" 
+                      min={5000} 
+                      max={200000} 
+                      step={5000}
+                      value={budget} 
+                      onChange={e => setBudget(Number(e.target.value))}
+                      style={{ width: '100%', accentColor: 'var(--accent)' }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      <span>₹5,000 / month</span>
+                      <span>₹1,00,000 / month</span>
+                      <span>₹2,00,000 / month</span>
+                    </div>
+                  </div>
+                  <div style={{ position: 'relative' }}>
+                    <span style={{ position: 'absolute', left: '10px', top: '8px', color: 'var(--text-muted)', fontSize: '14px' }}>₹</span>
+                    <input 
+                      type="number" 
+                      className="form-input" 
+                      style={{ width: '140px', padding: '6px 12px 6px 24px', textAlign: 'right', fontSize: '15px', fontWeight: 600 }}
+                      value={budget} 
+                      onChange={e => setBudget(Math.max(Number(e.target.value), 0))}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
+                    <div style={{ flexGrow: 1 }}>
+                      <input 
+                        type="range" 
+                        min={10000} 
+                        max={maxAnnualLimit} 
+                        step={Math.max(10000, Math.round(maxAnnualLimit / 100))}
+                        value={annualAmount} 
+                        onChange={e => setAnnualAmount(Number(e.target.value))}
+                        style={{ width: '100%', accentColor: 'var(--accent)' }}
+                      />
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                        <span>₹10,000 / year</span>
+                        <span>{formatCurrency(maxAnnualLimit / 2)} / year</span>
+                        <span>{formatCurrency(maxAnnualLimit)} / year</span>
+                      </div>
+                    </div>
+                    <div style={{ position: 'relative' }}>
+                      <span style={{ position: 'absolute', left: '10px', top: '8px', color: 'var(--text-muted)', fontSize: '14px' }}>₹</span>
+                      <input 
+                        type="number" 
+                        className="form-input" 
+                        style={{ width: '140px', padding: '6px 12px 6px 24px', textAlign: 'right', fontSize: '15px', fontWeight: 600 }}
+                        value={annualAmount} 
+                        onChange={e => setAnnualAmount(Math.max(Number(e.target.value), 0))}
+                      />
+                    </div>
+                  </div>
+                  
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'center', borderTop: '1px solid var(--border-glass)', paddingTop: '16px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <label style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.5px' }}>Prepayment Month</label>
+                      <select 
+                        className="form-input" 
+                        value={prepayMonth} 
+                        onChange={e => setPrepayMonth(Number(e.target.value))}
+                        style={{ width: '160px', padding: '6px 12px', fontSize: '13px', background: 'var(--bg-glass)' }}
+                      >
+                        {[
+                          "January", "February", "March", "April", "May", "June", 
+                          "July", "August", "September", "October", "November", "December"
+                        ].map((m, idx) => (
+                          <option key={idx} value={idx + 1} style={{ background: '#0d111d', color: '#fff' }}>{m}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <label style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.5px' }}>Prepayment Day</label>
+                      <input 
+                        type="number" 
+                        className="form-input" 
+                        min={1} 
+                        max={31} 
+                        value={prepayDay} 
+                        onChange={e => setPrepayDay(Math.min(Math.max(Number(e.target.value), 1), 31))}
+                        style={{ width: '80px', padding: '6px 12px', textAlign: 'center', fontSize: '13px' }}
+                      />
+                    </div>
+
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', alignSelf: 'flex-end', marginBottom: '8px' }}>
+                      Applied annually on <strong>{[
+                        "January", "February", "March", "April", "May", "June", 
+                        "July", "August", "September", "October", "November", "December"
+                      ][prepayMonth - 1]} {prepayDay}</strong>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>

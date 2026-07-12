@@ -91,6 +91,37 @@ class RuleSchema(BaseModel):
     value: float
     is_enabled: bool
 
+class CashFlowSchema(BaseModel):
+    id: Optional[int] = None
+    month: str
+    net_salary: float
+    other_income: float
+    household_expenses: float
+    emi: float
+    insurance_premium: float
+    investments: float
+    one_time_expenses: float
+    notes: Optional[str] = ""
+
+class CashFlowSimulationRequest(BaseModel):
+    net_salary: float
+    other_income: float
+    household_expenses: float
+    emi: float
+    insurance_premium: float
+    investments: float
+    one_time_expenses: float
+    
+    # Adjustments
+    salary_change_pct: Optional[float] = 0.0
+    salary_change_abs: Optional[float] = 0.0
+    one_time_bonus: Optional[float] = 0.0
+    new_emi: Optional[float] = 0.0
+    emi_reduction: Optional[float] = 0.0
+    additional_investment: Optional[float] = 0.0
+    expense_reduction_pct: Optional[float] = 0.0
+    expense_reduction_abs: Optional[float] = 0.0
+
 class SimulationRequestSchema(BaseModel):
     scenario_type: str # close_loan, delay_goal, increase_sip, salary_change, receive_bonus, roi_reduction, brother_property
     params: dict # parameters specific to the scenario
@@ -147,6 +178,10 @@ def get_init_data():
         cursor.execute("SELECT * FROM financial_rules")
         rules = [dict(row) for row in cursor.fetchall()]
         
+        # Monthly Cash Flows
+        cursor.execute("SELECT * FROM monthly_cash_flows ORDER BY month DESC")
+        cash_flows = [dict(row) for row in cursor.fetchall()]
+        
         # Recommendations
         recommendations = generate_recommendations(conn)
         
@@ -199,7 +234,8 @@ def get_init_data():
             "goals": goals,
             "rules": rules,
             "recommendations": recommendations,
-            "credit_cards": credit_cards
+            "credit_cards": credit_cards,
+            "cash_flows": cash_flows
         }
     finally:
         conn.close()
@@ -1287,13 +1323,41 @@ def get_financial_calendar():
 class LoanOptimizerRequest(BaseModel):
     loans: list
     extra_monthly_budget: float
+    prepayment_frequency: Optional[str] = "monthly"
+    prepayment_amount: Optional[float] = 0.0
+    prepayment_month: Optional[int] = 3
+    prepayment_day: Optional[int] = 31
 
 @app.post("/api/calculations/loan-optimizer")
 def optimize_loans(req: LoanOptimizerRequest):
     try:
-        baseline = calc.simulate_multi_loan_payoff(req.loans, req.extra_monthly_budget, "baseline")
-        avalanche = calc.simulate_multi_loan_payoff(req.loans, req.extra_monthly_budget, "avalanche")
-        snowball = calc.simulate_multi_loan_payoff(req.loans, req.extra_monthly_budget, "snowball")
+        baseline = calc.simulate_multi_loan_payoff(
+            req.loans, 
+            req.extra_monthly_budget, 
+            "baseline",
+            prepayment_frequency=req.prepayment_frequency,
+            prepayment_amount=req.prepayment_amount,
+            prepayment_month=req.prepayment_month,
+            prepayment_day=req.prepayment_day
+        )
+        avalanche = calc.simulate_multi_loan_payoff(
+            req.loans, 
+            req.extra_monthly_budget, 
+            "avalanche",
+            prepayment_frequency=req.prepayment_frequency,
+            prepayment_amount=req.prepayment_amount,
+            prepayment_month=req.prepayment_month,
+            prepayment_day=req.prepayment_day
+        )
+        snowball = calc.simulate_multi_loan_payoff(
+            req.loans, 
+            req.extra_monthly_budget, 
+            "snowball",
+            prepayment_frequency=req.prepayment_frequency,
+            prepayment_amount=req.prepayment_amount,
+            prepayment_month=req.prepayment_month,
+            prepayment_day=req.prepayment_day
+        )
         
         return {
             "baseline": baseline,
@@ -1367,6 +1431,159 @@ def delete_credit_card(card_id: int):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
+
+# --- Monthly Cash Flows Router ---
+@app.get("/api/cash-flows")
+def get_cash_flows():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM monthly_cash_flows ORDER BY month DESC")
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+@app.post("/api/cash-flows")
+def save_cash_flow(cf: CashFlowSchema):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id FROM monthly_cash_flows WHERE month = ?", (cf.month,))
+        existing = cursor.fetchone()
+        
+        if existing:
+            cursor.execute("""
+                UPDATE monthly_cash_flows
+                SET net_salary = ?, other_income = ?, household_expenses = ?, emi = ?, 
+                    insurance_premium = ?, investments = ?, one_time_expenses = ?, notes = ?
+                WHERE id = ?
+            """, (cf.net_salary, cf.other_income, cf.household_expenses, cf.emi, 
+                  cf.insurance_premium, cf.investments, cf.one_time_expenses, cf.notes, existing["id"]))
+        else:
+            cursor.execute("""
+                INSERT INTO monthly_cash_flows (month, net_salary, other_income, household_expenses, emi, 
+                                                insurance_premium, investments, one_time_expenses, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (cf.month, cf.net_salary, cf.other_income, cf.household_expenses, cf.emi, 
+                  cf.insurance_premium, cf.investments, cf.one_time_expenses, cf.notes))
+        conn.commit()
+        return {"status": "success"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+@app.delete("/api/cash-flows/{cf_id}")
+def delete_cash_flow(cf_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM monthly_cash_flows WHERE id = ?", (cf_id,))
+        conn.commit()
+        return {"status": "success"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+@app.post("/api/calculations/cash-flow/simulate")
+def simulate_cash_flow(req: CashFlowSimulationRequest):
+    try:
+        # 1. Current State Calculations
+        curr_income = req.net_salary + req.other_income
+        curr_expenses = req.household_expenses + req.one_time_expenses
+        curr_surplus = curr_income - curr_expenses - req.emi - req.insurance_premium - req.investments
+        curr_savings_rate = (curr_surplus / curr_income * 100.0) if curr_income > 0 else 0.0
+        curr_debt_ratio = (req.emi / curr_income * 100.0) if curr_income > 0 else 0.0
+        curr_investment_rate = (req.investments / curr_income * 100.0) if curr_income > 0 else 0.0
+        curr_expense_ratio = (req.household_expenses / curr_income * 100.0) if curr_income > 0 else 0.0
+        
+        # 2. Simulated State Calculations
+        sim_salary = req.net_salary * (1 + req.salary_change_pct / 100.0) + req.salary_change_abs
+        sim_income = sim_salary + req.other_income
+        
+        sim_expenses = (req.household_expenses * (1 - req.expense_reduction_pct / 100.0) - req.expense_reduction_abs) + req.one_time_expenses
+        sim_emi = max(req.emi + req.new_emi - req.emi_reduction, 0.0)
+        sim_investments = req.investments + req.additional_investment
+        
+        sim_surplus = sim_income - sim_expenses - sim_emi - req.insurance_premium - sim_investments
+        
+        sim_savings_rate = (sim_surplus / sim_income * 100.0) if sim_income > 0 else 0.0
+        sim_debt_ratio = (sim_emi / sim_income * 100.0) if sim_income > 0 else 0.0
+        sim_investment_rate = (sim_investments / sim_income * 100.0) if sim_income > 0 else 0.0
+        sim_expense_ratio = (sim_expenses / sim_income * 100.0) if sim_income > 0 else 0.0
+        
+        # 3. Financial Impact Statement
+        impact_parts = []
+        surplus_diff = sim_surplus - curr_surplus
+        if surplus_diff != 0:
+            direction = "increases" if surplus_diff > 0 else "decreases"
+            impact_parts.append(f"Monthly surplus {direction} by ₹{abs(surplus_diff):,.0f} (from ₹{curr_surplus:,.0f} to ₹{sim_surplus:,.0f}).")
+            
+        sr_diff = sim_savings_rate - curr_savings_rate
+        if sr_diff != 0:
+            direction = "grows" if sr_diff > 0 else "drops"
+            impact_parts.append(f"Savings rate {direction} by {abs(sr_diff):.1f}% (from {curr_savings_rate:.1f}% to {sim_savings_rate:.1f}%).")
+            
+        dr_diff = sim_debt_ratio - curr_debt_ratio
+        if dr_diff != 0:
+            direction = "increases" if dr_diff > 0 else "decreases"
+            impact_parts.append(f"Debt burden ratio {direction} by {abs(dr_diff):.1f}% (from {curr_debt_ratio:.1f}% to {sim_debt_ratio:.1f}%).")
+            
+        if req.one_time_bonus > 0:
+            impact_parts.append(f"One-time windfall bonus of ₹{req.one_time_bonus:,.0f} received, raising investable capital.")
+            
+        impact_summary = " ".join(impact_parts) if impact_parts else "No cash flow impact observed."
+        
+        # 4. Recommended Actions
+        recommendations = []
+        if sim_surplus > curr_surplus:
+            extra = sim_surplus - curr_surplus
+            recommendations.append(f"Allocate the extra surplus of ₹{extra:,.0f}/month toward increasing your Mutual Fund SIP or prepaying high-interest loans.")
+        if sim_debt_ratio > 40:
+            recommendations.append("Warning: Debt burden ratio exceeds 40%. Consider deferring new loans and focusing on debt prepayment.")
+        elif sim_savings_rate < 20:
+            recommendations.append("Notice: Savings rate is below 20%. Look for areas to reduce discretionary household spending.")
+        else:
+            recommendations.append("Your cash flow parameters are healthy. Consider mapping extra savings to long-term goals.")
+            
+        if req.one_time_bonus > 0:
+            recommendations.append(f"We recommend allocating 70% of the ₹{req.one_time_bonus:,.0f} bonus toward loan prepayments or long-term investments, keeping 30% for emergency liquidity or lifestyle expenses.")
+            
+        return {
+            "current": {
+                "income": curr_income,
+                "expenses": curr_expenses,
+                "emi": req.emi,
+                "insurance": req.insurance_premium,
+                "investments": req.investments,
+                "surplus": curr_surplus,
+                "savings_rate": round(curr_savings_rate, 2),
+                "debt_ratio": round(curr_debt_ratio, 2),
+                "investment_rate": round(curr_investment_rate, 2),
+                "expense_ratio": round(curr_expense_ratio, 2)
+            },
+            "simulated": {
+                "income": sim_income,
+                "expenses": sim_expenses,
+                "emi": sim_emi,
+                "insurance": req.insurance_premium,
+                "investments": sim_investments,
+                "surplus": sim_surplus,
+                "savings_rate": round(sim_savings_rate, 2),
+                "debt_ratio": round(sim_debt_ratio, 2),
+                "investment_rate": round(sim_investment_rate, 2),
+                "expense_ratio": round(sim_expense_ratio, 2)
+            },
+            "impact_summary": impact_summary,
+            "recommendations": recommendations
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

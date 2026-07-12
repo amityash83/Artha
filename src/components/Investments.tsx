@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Plus, Edit2, Trash2, PieChart, X } from 'lucide-react';
+import { Plus, Edit2, Trash2, PieChart, X, TrendingUp } from 'lucide-react';
+import { Line } from 'react-chartjs-2';
 import { Investment, Goal } from '../types';
 
 interface InvestmentsProps {
@@ -11,6 +12,12 @@ interface InvestmentsProps {
 export const Investments: React.FC<InvestmentsProps> = ({ investments, goals, onRefresh }) => {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingInv, setEditingInv] = useState<Investment | null>(null);
+
+  // Future Wealth Projection States
+  const defaultSip = goals.reduce((sum, g) => sum + g.monthly_contribution, 0) || 10000;
+  const [projectRoi, setProjectRoi] = useState<number>(12);
+  const [projectSip, setProjectSip] = useState<number>(defaultSip);
+  const [projectYears, setProjectYears] = useState<number>(15);
 
   // Sorting State
   const [sortColumn, setSortColumn] = useState<keyof Investment>('name');
@@ -98,6 +105,110 @@ export const Investments: React.FC<InvestmentsProps> = ({ investments, goals, on
   const totalCurrent = investments.reduce((sum, i) => sum + i.current_value, 0);
   const gainLoss = totalCurrent - totalInvested;
   const gainPercent = totalInvested > 0 ? (gainLoss / totalInvested) * 100 : 0;
+
+  // Corpus Growth Projection calculations
+  const calculateProjection = () => {
+    const schedule = [];
+    const monthlyRate = projectRoi / 12 / 100;
+    const totalMonths = projectYears * 12;
+    let currentCorpus = totalCurrent;
+    let totalInvestedCapital = totalCurrent;
+
+    // Push initial year 0
+    schedule.push({
+      year: 0,
+      corpus: Math.round(currentCorpus),
+      invested: Math.round(totalInvestedCapital)
+    });
+
+    for (let m = 1; m <= totalMonths; m++) {
+      currentCorpus = currentCorpus * (1 + monthlyRate) + projectSip;
+      totalInvestedCapital += projectSip;
+
+      if (m % 12 === 0 || m === totalMonths) {
+        schedule.push({
+          year: Math.round(m / 12),
+          corpus: Math.round(currentCorpus),
+          invested: Math.round(totalInvestedCapital)
+        });
+      }
+    }
+    return schedule;
+  };
+
+  const projectionData = calculateProjection();
+  const finalCorpus = projectionData[projectionData.length - 1].corpus;
+  const finalInvested = projectionData[projectionData.length - 1].invested;
+  const wealthGained = Math.max(finalCorpus - finalInvested, 0);
+
+  // Prepare chart datasets
+  const chartLabels = projectionData.map(d => `Yr ${d.year}`);
+  const chartCorpusData = projectionData.map(d => d.corpus);
+  const chartInvestedData = projectionData.map(d => d.invested);
+
+  const chartData = {
+    labels: chartLabels,
+    datasets: [
+      {
+        label: 'Total Invested Capital',
+        data: chartInvestedData,
+        borderColor: '#94a3b8',
+        borderDash: [5, 5],
+        borderWidth: 1.5,
+        tension: 0.1,
+        pointRadius: 2
+      },
+      {
+        label: 'Projected Corpus Value',
+        data: chartCorpusData,
+        borderColor: '#10b981',
+        borderWidth: 2.5,
+        tension: 0.1,
+        pointRadius: 2
+      }
+    ]
+  };
+
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        labels: {
+          color: '#94a3b8',
+          font: { family: 'Inter', size: 11 }
+        }
+      },
+      tooltip: {
+        backgroundColor: '#0d111d',
+        titleFont: { family: 'Outfit' },
+        bodyFont: { family: 'Inter' },
+        borderColor: 'rgba(255,255,255,0.08)',
+        borderWidth: 1,
+        callbacks: {
+          label: (context: any) => ` Value: ${formatCurrency(context.parsed.y)}`
+        }
+      }
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: { color: '#64748b', font: { family: 'Inter', size: 10 } }
+      },
+      y: {
+        grid: { color: 'rgba(255,255,255,0.04)' },
+        ticks: { 
+          color: '#64748b', 
+          font: { family: 'Inter', size: 10 },
+          callback: (value: any) => {
+            if (value >= 10000000) return `₹${(value/10000000).toFixed(1)}Cr`;
+            if (value >= 100000) return `₹${(value/100000).toFixed(0)}L`;
+            return `₹${value}`;
+          }
+        }
+      }
+    }
+  };
 
   return (
     <div>
@@ -220,6 +331,108 @@ export const Investments: React.FC<InvestmentsProps> = ({ investments, goals, on
             })()}
           </tbody>
         </table>
+      </div>
+
+      {/* Future Wealth & Corpus Projector Panel */}
+      <div className="glass-panel" style={{ padding: '24px', marginTop: '24px' }}>
+        <h2 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <TrendingUp size={18} style={{ color: 'var(--success)' }} />
+          Future Wealth &amp; Corpus Projection Sandbox
+        </h2>
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '24px' }}>
+          Simulate how your current holdings of <strong>{formatCurrency(totalCurrent)}</strong> grow over time with compound returns and monthly SIP contributions.
+        </p>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: '32px' }}>
+          {/* Controls */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', borderRight: '1px solid var(--border-glass)', paddingRight: '32px' }}>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
+                <span>Expected Annual Return (ROI)</span>
+                <strong style={{ color: 'var(--success)' }}>{projectRoi}%</strong>
+              </div>
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                <input 
+                  type="range" min={5} max={25} step={0.5}
+                  value={projectRoi} 
+                  onChange={e => setProjectRoi(Number(e.target.value))}
+                  style={{ width: '100%', accentColor: 'var(--accent)' }}
+                />
+                <input 
+                  type="number" className="form-input" 
+                  value={projectRoi} 
+                  onChange={e => setProjectRoi(Math.max(Number(e.target.value), 0))}
+                  style={{ width: '60px', padding: '4px 6px', textAlign: 'center', fontSize: '12px' }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
+                <span>Monthly SIP Contribution</span>
+                <strong style={{ color: 'var(--info)' }}>{formatCurrency(projectSip)}</strong>
+              </div>
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                <input 
+                  type="range" min={0} max={200000} step={5000}
+                  value={projectSip} 
+                  onChange={e => setProjectSip(Number(e.target.value))}
+                  style={{ width: '100%', accentColor: 'var(--accent)' }}
+                />
+                <input 
+                  type="number" className="form-input" 
+                  value={projectSip} 
+                  onChange={e => setProjectSip(Math.max(Number(e.target.value), 0))}
+                  style={{ width: '90px', padding: '4px 6px', textAlign: 'right', fontSize: '12px' }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
+                <span>Time Horizon (Years)</span>
+                <strong style={{ color: '#fff' }}>{projectYears} Years</strong>
+              </div>
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                <input 
+                  type="range" min={5} max={35} step={1}
+                  value={projectYears} 
+                  onChange={e => setProjectYears(Number(e.target.value))}
+                  style={{ width: '100%', accentColor: 'var(--accent)' }}
+                />
+                <input 
+                  type="number" className="form-input" 
+                  value={projectYears} 
+                  onChange={e => setProjectYears(Math.max(Number(e.target.value), 1))}
+                  style={{ width: '60px', padding: '4px 6px', textAlign: 'center', fontSize: '12px' }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Outputs & Graph */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+              <div className="glass-card" style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.01)' }}>
+                <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Projected Total Corpus</span>
+                <h4 style={{ fontSize: '18px', fontWeight: 700, marginTop: '4px', color: 'var(--success)' }}>{formatCurrency(finalCorpus)}</h4>
+              </div>
+              <div className="glass-card" style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.01)' }}>
+                <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Total Capital Invested</span>
+                <h4 style={{ fontSize: '18px', fontWeight: 700, marginTop: '4px' }}>{formatCurrency(finalInvested)}</h4>
+              </div>
+              <div className="glass-card" style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.01)' }}>
+                <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Estimated Returns Earned</span>
+                <h4 style={{ fontSize: '18px', fontWeight: 700, marginTop: '4px', color: 'var(--info)' }}>{formatCurrency(wealthGained)}</h4>
+              </div>
+            </div>
+
+            {/* Line chart container */}
+            <div style={{ height: '240px', position: 'relative', marginTop: '10px' }}>
+              <Line data={chartData} options={chartOptions} />
+            </div>
+          </div>
+        </div>
       </div>
 
       {modalOpen && (

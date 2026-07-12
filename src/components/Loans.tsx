@@ -269,22 +269,38 @@ export const Loans: React.FC<LoansProps> = ({ loans, onRefresh }) => {
                     </h4>
 
                     <div className="form-group" style={{ marginBottom: '16px' }}>
-                      <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
                         <span>Prepayment Amount</span>
-                        <span style={{ color: 'var(--success)', fontWeight: 600 }}>{formatCurrency(prepaySimAmt)}</span>
                       </label>
-                      <input 
-                        type="range" 
-                        min="10000" 
-                        max={Math.min(loan.outstanding, 2000000)} 
-                        step="10000"
-                        value={prepaySimAmt}
-                        onChange={e => {
-                          const val = parseInt(e.target.value) || 0;
-                          setSimPrepaymentAmounts({...simPrepaymentAmounts, [loan.id]: val});
-                        }}
-                        style={{ width: '100%', accentColor: 'var(--success)' }}
-                      />
+                      <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                        <div style={{ flexGrow: 1 }}>
+                          <input 
+                            type="range" 
+                            min="10000" 
+                            max={Math.min(loan.outstanding, 2000000)} 
+                            step="10000"
+                            value={prepaySimAmt}
+                            onChange={e => {
+                              const val = parseInt(e.target.value) || 0;
+                              setSimPrepaymentAmounts({...simPrepaymentAmounts, [loan.id]: val});
+                            }}
+                            style={{ width: '100%', accentColor: 'var(--success)' }}
+                          />
+                        </div>
+                        <div style={{ position: 'relative' }}>
+                          <span style={{ position: 'absolute', left: '10px', top: '8px', color: 'var(--text-muted)', fontSize: '13px' }}>₹</span>
+                          <input 
+                            type="number" 
+                            className="form-input" 
+                            style={{ width: '130px', padding: '6px 12px 6px 22px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: 'var(--success)' }}
+                            value={prepaySimAmt}
+                            onChange={e => {
+                              const val = Math.min(Math.max(parseInt(e.target.value) || 0, 0), loan.outstanding);
+                              setSimPrepaymentAmounts({...simPrepaymentAmounts, [loan.id]: val});
+                            }}
+                          />
+                        </div>
+                      </div>
                     </div>
 
                     <div style={{ background: 'var(--success-bg)', border: '1px solid rgba(16,185,129,0.15)', borderRadius: 'var(--radius-sm)', padding: '16px', textAlign: 'center' }}>

@@ -1,65 +1,108 @@
-# Walkthrough — Artha Core Features Release
+# Walkthrough - Annual Prepayments in Loan Optimizer
 
-All Version 2 and 3 core features outlined in the roadmap have been fully built, verified, and packaged into the portable release.
+We have successfully implemented annual prepayments for the Multi-Loan Payoff Optimizer module.
 
-## Key Accomplishments
+## Changes Made
 
-### 1. Credit Cards Inventory Optimization
-- **Expanded Schema & Fields**: Tracks annual fees, renewal dates, accrued reward points, point values, domestic & international lounge counts, and spend waiver milestones.
-- **Cash Rewards Estimator**: Computes cash equivalence value (e.g. ₹1,250 based on 5,000 points at ₹0.25/point) and tallies overall reward assets.
-- **Card Layout Grid UI**: Displays cards as glassmorphic credit card components with brand color gradients, limit utilization progress bars, statement cycles, benefits, and waiver thresholds.
-- **Master vs. Transactional Separation**: Refactored the dashboard view into two distinct sub-tabs: **Balances & Transactions** and **Benefits & Master Profiles**, keeping operational tracking separate from static configurations.
-- **Quick Balance Updates**: Added a lightweight, fast Quick Update Balance popup tool that edits *only* outstanding amounts, statement balance due, and points without exposing the full configuration form.
-- **Responsive Container Reflow**: Applied fluid flex layouts and responsive grid constraints to cards and KPI metrics panels to eliminate manual horizontal scrollbars on smaller screen resolutions.
-- **Modal Controls**: Adds input properties to save and edit these detailed card parameters in the SQLite database.
+### 1. Calculations Engine
+- **File:** [calculations.py](file:///d:/AI/Antigravity/Artha/backend/calculations.py#L305-L386)
+- Modified `simulate_multi_loan_payoff` to take the following new parameters:
+  - `prepayment_frequency` (defaults to `"monthly"`)
+  - `prepayment_amount` (defaults to `0.0`)
+  - `prepayment_month` (defaults to `3` / March)
+  - `prepayment_day` (defaults to `31`)
+- The simulator tracks the calendar month dynamically starting from the current month.
+- It applies the annual prepayment amount only during the month matching the user-selected `prepayment_month`.
+- Upgraded the distribution algorithm to **cascade** any remainder of the prepayment budget (if a target loan is fully cleared) onto subsequent loans in the strategy queue rather than throwing the extra funds away.
 
-### 2. Global Registry Manual Sorting Features (Across All Modules)
-- **Table Registries Sorting (Accounts & Investments)**: Added manual sorting on column header clicks for Accounts and Investments, featuring visible ascending/descending indicators (▲/▼) next to column names (such as Institution, Purpose, Balance, Asset Type, Capital, and Goal Mapping).
-- **Card Registries Sorting Toolbars (Loans, Properties, & Goals)**: Integrated Sort Toolbars at the top of Loans, Properties, and Goals registries. Users can choose sorting fields (such as Name, Lender, Outstanding, Monthly EMI, Purchase Price, Rental Yield, Target Value, or Monthly Saving) and toggle sorting direction (Ascending / Descending) with one click.
-- **Insurance Section Refinements**: Restored the missing **Premium Amount (₹)** form input control inside the Add/Edit Policy modal form.
+### 2. FastAPI Request Schema & Router
+- **File:** [main.py](file:///d:/AI/Antigravity/Artha/backend/main.py#L1287-L1305)
+- Extended `LoanOptimizerRequest` with the new schema parameters.
+- Updated the `/api/calculations/loan-optimizer` endpoint to pass the parameters to all simulation calls (Baseline, Avalanche, Snowball).
 
-### 3. MMEx-Style Automated Backups System
-- **Lifecycle Integration**: Configured Electron to trigger automatic database backups on app startup (`open`) and app shutdown (`close`). The shutdown backup intercepts the window close and completes before the process exits.
-- **Settings Panel UI**: Added a settings panel in [src/components/Reports.tsx](file:///d:/AI/Antigravity/src/components/Reports.tsx) to toggle startup/shutdown backups, customize the backup folder path, and adjust the backup retention limit.
-- **Automated Retention Management**: Implemented backend cleanup rules in [backend/main.py](file:///d:/AI/Antigravity/backend/main.py). When backups exceed the retention limit (e.g., 10 files), older automatic files are automatically deleted to optimize disk space.
+### 3. Frontend React Component
+- **File:** [LoanOptimizer.tsx](file:///d:/AI/Antigravity/Artha/src/components/LoanOptimizer.tsx)
+- Added states `frequency`, `annualAmount`, `prepayMonth`, and `prepayDay`.
+- Created a beautiful tab switcher for "Monthly" vs. "Annually" modes.
+- Added sliding and numeric input fields for annual prepayments.
+- Included dropdowns for selecting the target calendar month and day to apply the annual payment.
+- **Dynamic Prepayment Limit:** Computed the total outstanding loan balance and set the slider's `max` dynamically to this balance (with a 10L fallback minimum), rounding to the nearest 50k for smooth increments. Added formatted currency labels for the slider's start, mid, and end limits.
+- **Interactive Prepayment Simulator Input ([Loans.tsx](file:///d:/AI/Antigravity/Artha/src/components/Loans.tsx)):** Added a typed numeric input field to the Interactive Prepayment Simulator in the Loans panel, allowing users to type their exact prepayment amount alongside the range slider.
 
-### 4. Interactive Charts Dashboard
-- **Asset Allocation Doughnut Chart:** Configured dynamic category groupings matching liquid funds, investments, and property holdings directly from database snapshots.
-- **Insights Alert Cards:** Re-architected recommendations display to render as high-impact notifications at the top of the dashboard.
+## Verification & Testing
 
-### 4. Chronological Cash Agenda (Financial Calendar)
-- **Automatic Syncing:** Connected a calendar timeline query inside the FastAPI sidecar engine, projecting due dates for loan EMIs, insurance renewals, and SIP goals dynamically for the next 12 months.
-- **SQLite operational Fix:** Corrected an database constraint query issue where `goals` did not have a raw `gap` column (resolved by evaluating `target_amount - current_amount` directly in SQLite queries).
-- **Credit Card Outstandings:** Integrated credit card accounts. If an account has its purpose set to `"Credit Card"` and has a negative balance (debt), it automatically schedules a bill payment reminder for the 20th of the month, using the absolute value of the balance.
-- **Filter Tags:** Enabled quick category switches (All, EMIs, SIPs, Insurance, Credit Cards) and tallying of projected cash outlays in view.
+We created and executed a test script at `scratch/test_loan_optimizer.py`. 
 
-### 3. Multi-Loan Payoff Optimizer Workspace
-- **payoff Curve Graph:** Visualized debt-reduction trajectories, allowing users to define a monthly surplus budget (₹5k–₹200k) and compare Avalanche vs. Snowball payoff curves against the baseline.
-- **Roll-over Ledger:** Simulates automated EMI redirections, routing cash instantly to target loans until the portfolio is 100% debt-free.
-
-### 4. Comprehensive Data Exports
-- Added dedicated CSV export streams inside the Reports center for:
-  - Loans portfolio registers.
-  - Investment holdings logs.
-  - Insurance coverage policies.
-
----
-
-## Technical Details
-
-### Modified Source Files
-- [backend/calculations.py](file:///d:/AI/Antigravity/backend/calculations.py#L305-L386): Added `simulate_multi_loan_payoff` rollover bisection algorithms.
-- [backend/main.py](file:///d:/AI/Antigravity/backend/main.py#L1056-L1171): Implemented `GET /api/calendar` and `POST /api/calculations/loan-optimizer` API routers, with Credit Card logic.
-- [src/components/Dashboard.tsx](file:///d:/AI/Antigravity/src/components/Dashboard.tsx): Embedded allocations Doughnut datasets and responsive JSX alerts card elements.
-- [src/App.tsx](file:///d:/AI/Antigravity/src/App.tsx): Registered new navigation links and views.
-- [src/components/Reports.tsx](file:///d:/AI/Antigravity/src/components/Reports.tsx): Integrated CSV export downloads.
-- [src/components/Accounts.tsx](file:///d:/AI/Antigravity/src/components/Accounts.tsx): Added `"Credit Card"` to standard bank account purposes.
-- [src/components/FinancialCalendar.tsx](file:///d:/AI/Antigravity/src/components/FinancialCalendar.tsx): [NEW] Chronological cash timeline agenda.
-- [src/components/LoanOptimizer.tsx](file:///d:/AI/Antigravity/src/components/LoanOptimizer.tsx): [NEW] Payoff curve visualizer workspace.
-- [Artha.md](file:///d:/AI/Antigravity/Artha.md): Updated spec files roadmap listings.
+The test verified that:
+1. Both Monthly and Annual payloads are parsed successfully.
+2. Under Annual Prepayment, the baseline calculations remain unchanged.
+3. In Month 9 (which corresponds to March, starting from July), the annual prepayment of ₹1,20,000 is correctly injected:
+   ```
+   Month 8: Outstanding=471706.35, Principal Paid=16454.58, Interest=3545.42
+   Month 9: Outstanding=335129.7, Principal Paid=136576.65, Interest=3423.35  <-- Prepayment successfully applied
+   ```
+4. All simulation models output correct graphs and savings values.
 
 ---
 
-## Standalone Portable Executable
-The updated binary is packaged and ready for use:
-📂 **[Artha 1.0.4.exe](file:///d:/AI/Antigravity/dist-portable/Artha%201.0.4.exe)**
+# Release: Income, Cash Flow & Financial Planning Module
+
+We have successfully implemented the **Income, Cash Flow & Financial Planning Module** in Artha.
+
+## What Was Added
+
+### 1. Database Table
+- **File:** [db.py](file:///d:/AI/Antigravity/Artha/backend/db.py)
+- Created the `monthly_cash_flows` table to track month, net salary, other income, household expenses, EMI, insurance premium, investments, one-time expenses, and notes.
+
+### 2. FastAPI Endpoints
+- **File:** [main.py](file:///d:/AI/Antigravity/Artha/backend/main.py)
+- Added schemas `CashFlowSchema` and `CashFlowSimulationRequest`.
+- Registered CRUD routers: `GET /api/cash-flows`, `POST /api/cash-flows`, and `DELETE /api/cash-flows/{id}`.
+- Integrated `cash_flows` retrieval into the aggregate `/api/init` data.
+- Built a dedicated What-If sandbox endpoint: `POST /api/calculations/cash-flow/simulate`. This endpoint takes current snapshot metrics and adjustments (salary raise %, absolute bonus windfall, new EMIs, etc.) to compute current vs simulated states, highlight the financial impact, and provide recommended actions.
+
+### 3. Frontend Dashboard
+- **File:** [App.tsx](file:///d:/AI/Antigravity/Artha/src/App.tsx) & [CashFlowPlanning.tsx](file:///d:/AI/Antigravity/Artha/src/components/CashFlowPlanning.tsx)
+- Registered the **Cash Flow Planning** tab in the sidebar layout.
+- Developed the sub-tabs workspace:
+  - **Dashboard & Ratios:** Shows summary widgets (Income, Expenses, Investments, Surplus, Savings Rate) and health meters for ratios (Savings Rate, Investment Rate, Expense Ratio, Debt Burden Ratio, and Liquidity Ratio emergency buffers).
+  - **What-If Sandbox:** Sliders and inputs to simulate salary raise, bonus, new loans, closed loans, or SIP increases. It updates in real time to show current vs simulated outcomes, delta change, and recommended actions.
+  - **Monthly Logs:** Allows logging, editing, and deleting cash flow snapshots.
+- **Auto-Fill from Portfolio:** Added an "Auto-Fill" button inside the entry form modal. This query sums up EMIs from `loans`, active rental income from `properties`, active monthly premium equivalent from `insurance`, and SIP contributions from `goals` to automatically populate inputs.
+
+## Verification & Testing
+Created and executed `scratch/test_cash_flow.py` to verify:
+1. `POST` and `GET` requests for `monthly_cash_flows` function successfully.
+2. The simulation sandbox computes ratios and outputs a descriptive delta analysis (e.g., `Monthly surplus increases by Rs.25,500. Savings rate grows by 8.7%...`).
+
+---
+
+# Release: Future Wealth & Corpus Projection Sandbox
+
+We have successfully implemented the **Future Wealth & Corpus Projection Sandbox** in the Investments tab.
+
+## What Was Added
+
+### 1. Future Wealth Projection States ([Investments.tsx](file:///d:/AI/Antigravity/Artha/src/components/Investments.tsx))
+- Integrated `Line` from `react-chartjs-2` to render comparative lines.
+- Declared state variables: `projectRoi` (Expected ROI), `projectSip` (Monthly SIP), and `projectYears` (Time Horizon in years). Set default values, seeding the SIP contribution automatically from active goals (`goals.reduce((sum, g) => sum + g.monthly_contribution, 0)`).
+
+### 2. Math Calculations
+- Computed the future value of the lump sum (active investments current value total) and monthly compounding SIP contributions over the time horizon:
+  $$FV_t = PV \times (1 + r)^t + PMT \times \frac{(1 + r)^t - 1}{r}$$
+- Extracted annual snapshot arrays containing:
+  - **Total Capital Invested** (Initial Lump Sum + Accumulated SIP contributions).
+  - **Projected Corpus Value** (Future Value with compound interest).
+  - **Estimated Returns Earned** (Projected Corpus - Total Capital Invested).
+
+### 3. Glassmorphic Simulation Dashboard
+- Built a gorgeous dashboard panel at the bottom of the page containing:
+  - **Interactive Controls (Sliders & Sync Inputs):** Allows users to adjust the expected ROI (5% to 25%), monthly SIP contribution (₹0 to ₹2L), and time horizon (5 to 35 years) dynamically.
+  - **Summary Output Cards:** Displays Total projected corpus, Total invested capital, and Net returns earned.
+  - **Visual Line Graph:** Renders the comparative curves of total invested capital vs. projected corpus progression year-over-year.
+
+## Verification & Testing
+- Executed `npm run build:frontend` to compile the TypeScript files and verify bundler success.
+- Verified slider hooks and chart reactivity inside the browser client.
+

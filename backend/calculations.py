@@ -302,7 +302,15 @@ def calculate_advanced_emi_schedule(
         "tenure_months": month_index
     }
 
-def simulate_multi_loan_payoff(loans_list: list, extra_monthly: float, strategy: str = "baseline") -> dict:
+def simulate_multi_loan_payoff(
+    loans_list: list, 
+    extra_monthly: float, 
+    strategy: str = "baseline",
+    prepayment_frequency: str = "monthly",
+    prepayment_amount: float = 0.0,
+    prepayment_month: int = 3,
+    prepayment_day: int = 31
+) -> dict:
     loans = [
         {
             "name": l["name"],
@@ -322,11 +330,26 @@ def simulate_multi_loan_payoff(loans_list: list, extra_monthly: float, strategy:
     
     max_simulation_months = 360 # 30 years safety limit
     
+    # Track calendar date starting from today to determine the annual prepayment month
+    today = date.today()
+    current_year = today.year
+    current_month = today.month
+    
     while any(l["outstanding"] > 0 for l in loans) and month < max_simulation_months:
         month += 1
         interest_this_month = 0.0
         principal_this_month = 0.0
-        extra_available = extra_monthly if strategy != "baseline" else 0.0
+        
+        # Determine extra_available budget for this month
+        extra_available = 0.0
+        if strategy != "baseline":
+            if prepayment_frequency == "monthly":
+                extra_available = extra_monthly
+            elif prepayment_frequency == "annually":
+                # Compute simulation month (1-12)
+                sim_month = (current_month + month - 2) % 12 + 1
+                if sim_month == prepayment_month:
+                    extra_available = prepayment_amount
         
         # 1. Deduct standard monthly interest and determine minimum payments
         temp_minimums = {}
@@ -363,11 +386,15 @@ def simulate_multi_loan_payoff(loans_list: list, extra_monthly: float, strategy:
                     # Sort by lowest balance first, then highest ROI
                     active_loans.sort(key=lambda x: (x["outstanding"], -x["roi"]))
                 
-                # Pay the extra cash to the primary target
-                target = active_loans[0]
-                prepayment = min(extra_available, target["outstanding"])
-                target["outstanding"] = max(target["outstanding"] - prepayment, 0.0)
-                principal_this_month += prepayment
+                # Pay the extra cash to target loans, cascading excess funds to next target loans
+                remaining_extra = extra_available
+                for target in active_loans:
+                    if remaining_extra <= 0:
+                        break
+                    prepayment = min(remaining_extra, target["outstanding"])
+                    target["outstanding"] = max(target["outstanding"] - prepayment, 0.0)
+                    principal_this_month += prepayment
+                    remaining_extra -= prepayment
                 
         # Record monthly snapshot
         schedule.append({
@@ -382,4 +409,5 @@ def simulate_multi_loan_payoff(loans_list: list, extra_monthly: float, strategy:
         "months": month,
         "schedule": schedule
     }
+
 

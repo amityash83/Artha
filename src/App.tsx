@@ -18,6 +18,7 @@ import { EmiCalculator } from './components/EmiCalculator';
 import { FinancialCalendar } from './components/FinancialCalendar';
 import { LoanOptimizer } from './components/LoanOptimizer';
 import { CreditCards } from './components/CreditCards';
+import { CashFlowPlanning } from './components/CashFlowPlanning';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
@@ -157,13 +158,22 @@ const App: React.FC = () => {
                 Dashboard
               </div>
             </li>
-            <li>
+             <li>
               <div 
                 className={`sidebar-item ${activeTab === 'snapshot' ? 'active' : ''}`}
                 onClick={() => handleNavigate('snapshot')}
               >
                 <Calendar size={16} />
                 Monthly Snapshot
+              </div>
+            </li>
+            <li>
+              <div 
+                className={`sidebar-item ${activeTab === 'cash-flow' ? 'active' : ''}`}
+                onClick={() => handleNavigate('cash-flow')}
+              >
+                <LineChart size={16} />
+                Cash Flow Planning
               </div>
             </li>
             <li>
@@ -298,6 +308,9 @@ const App: React.FC = () => {
         )}
         {activeTab === 'snapshot' && (
           <Snapshot data={data} onRefresh={fetchFinanceData} />
+        )}
+        {activeTab === 'cash-flow' && (
+          <CashFlowPlanning data={data} onRefresh={fetchFinanceData} />
         )}
         {activeTab === 'accounts' && (
           <Accounts accounts={data.accounts} onRefresh={fetchFinanceData} />

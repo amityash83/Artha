@@ -1,7 +1,10 @@
-# Execution Checklist: Credit Cards Expansion
+# Tasks
 
-- [x] Step 1: Migrate database schema in `backend/db.py` and sync tables
-- [x] Step 2: Update FastAPI request schemas and CRUD endpoints in `backend/main.py`
-- [x] Step 3: Expand TypeScript types inside `src/types.ts`
-- [x] Step 4: Redesign and implement the card inventory interface in `src/components/CreditCards.tsx`
-- [x] Step 5: Verify TypeScript compilation and bundle successfully
+- `[x]` Update backend calculations for multi-loan payoff simulation
+- `[x]` Update backend endpoints and models in FastAPI main.py
+- `[x]` Update frontend UI in LoanOptimizer.tsx component
+- `[x]` Implement dynamic maximum limits based on outstanding loan balance
+- `[x]` Add option to type prepayment amount in Loans simulator panel
+- `[x]` Build the CashFlowPlanning.tsx React UI component
+- `[x]` Connect the sidebar routing inside App.tsx
+- `[x]` Verify and test the cash flow module features

@@ -208,6 +208,22 @@ def init_db():
     )
     """)
 
+    # Monthly Cash Flows Table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS monthly_cash_flows (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        month TEXT NOT NULL UNIQUE,
+        net_salary REAL NOT NULL DEFAULT 0.0,
+        other_income REAL NOT NULL DEFAULT 0.0,
+        household_expenses REAL NOT NULL DEFAULT 0.0,
+        emi REAL NOT NULL DEFAULT 0.0,
+        insurance_premium REAL NOT NULL DEFAULT 0.0,
+        investments REAL NOT NULL DEFAULT 0.0,
+        one_time_expenses REAL NOT NULL DEFAULT 0.0,
+        notes TEXT
+    )
+    """)
+
     # Financial Rules Table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS financial_rules (

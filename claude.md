@@ -81,11 +81,12 @@ Electron resolves the fallback path on launch and creates it. It passes the path
 - [electron/main.js](file:///d:/AI/Antigravity/electron/main.js): Spawns the backend sidecar, resolves paths, sets environment variables, registers native dialog IPC channels, and launches the Electron window.
 - [backend/main.py](file:///d:/AI/Antigravity/backend/main.py): FastAPI server, API routers, and database settings switch / calculations endpoints.
 - [backend/db.py](file:///d:/AI/Antigravity/backend/db.py): SQLite table creations, automated migration scripts, preference loads/saves, and database switches.
-- [backend/calculations.py](file:///d:/AI/Antigravity/backend/calculations.py): Core mathematical formulas (remaining tenure, prepayment interest saved, XIRR solver, and daily pro-rata mid-month prepayment amortizations).
+- [backend/calculations.py](file:///d:/AI/Antigravity/backend/calculations.py): Core mathematical formulas (remaining tenure, prepayment interest saved, XIRR solver, multi-loan payoff simulation with monthly/annual cascading prepayments, and daily pro-rata mid-month prepayment amortizations).
 - [backend/decision_engine.py](file:///d:/AI/Antigravity/backend/decision_engine.py): Financial sanity check rules and warning alerts.
 - [src/index.css](file:///d:/AI/Antigravity/src/index.css): Theme styling tokens, premium Glassmorphism variables, custom scrollbars, and select-dropdown visibility fixes.
 - [src/components/Accounts.tsx](file:///d:/AI/Antigravity/src/components/Accounts.tsx): Savings view. Displays accounts filtered/shortlisted by Bank Name.
 - [src/components/EmiCalculator.tsx](file:///d:/AI/Antigravity/src/components/EmiCalculator.tsx): Standalone advanced EMI prepayments calculator view.
+- [src/components/LoanOptimizer.tsx](file:///d:/AI/Antigravity/src/components/LoanOptimizer.tsx): Multi-loan payoff curves comparison workspace comparing Snowball, Avalanche, and Baseline strategies under monthly or annual prepayment configurations.
 - [FOS.md](file:///d:/AI/Antigravity/FOS.md): Master specification document containing application vision, architecture, features roadmap, and structural principles.
 
 ---
