@@ -884,6 +884,34 @@ def init_db():
     except Exception as e:
         print("[Migration Warning] Credit card category update error:", e)
 
+    # F. Sync goal_mapping from assets metadata to goal_holdings
+    try:
+        cursor.execute("SELECT * FROM goal_holdings LIMIT 1")
+        if not cursor.fetchone():
+            print("[Migration] Syncing legacy assets goal_mapping to goal_holdings...")
+            cursor.execute("SELECT id, metadata_json FROM assets")
+            assets_rows = cursor.fetchall()
+            for asset in assets_rows:
+                meta_str = asset['metadata_json']
+                if meta_str:
+                    try:
+                        meta = json.loads(meta_str)
+                        goal_name = meta.get("goal_mapping")
+                        if goal_name:
+                            cursor.execute("SELECT id FROM goals WHERE name = ?", (goal_name,))
+                            goal_row = cursor.fetchone()
+                            if goal_row:
+                                goal_id = goal_row['id']
+                                cursor.execute("""
+                                INSERT OR IGNORE INTO goal_holdings (goal_id, asset_id, allocation_weight)
+                                VALUES (?, ?, 1.0)
+                                """, (goal_id, asset['id']))
+                    except Exception as e:
+                        print("Error parsing asset metadata during goal sync:", e)
+            print("[Migration] Legacy assets goal_mapping synced successfully.")
+    except Exception as e:
+        print("[Migration Warning] goal_holdings sync failed:", e)
+
     conn.commit()
     conn.close()
 

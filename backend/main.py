@@ -263,8 +263,20 @@ def get_init_data():
         """)
         expenses = [dict(row) for row in cursor.fetchall()]
 
-        # Goals
-        cursor.execute("SELECT * FROM goals")
+        # Goals (derived current_amount from holdings weight mapping)
+        cursor.execute("""
+            SELECT 
+                g.*,
+                COALESCE(
+                    (
+                        SELECT SUM(a.current_value * gh.allocation_weight)
+                        FROM assets a
+                        JOIN goal_holdings gh ON a.id = gh.asset_id
+                        WHERE gh.goal_id = g.id
+                    ), 0.0
+                ) AS current_amount
+            FROM goals g
+        """)
         goals_raw = cursor.fetchall()
         goals = []
         for r in goals_raw:
@@ -402,6 +414,20 @@ def get_entities(entity_type: str):
                         WHERE t.source_ref_type = 'Account' AND t.source_ref_id = a.id
                     ) AS current_balance
                 FROM accounts a
+            """)
+        elif entity_type == "goals":
+            cursor.execute("""
+                SELECT 
+                    g.*,
+                    COALESCE(
+                        (
+                            SELECT SUM(a.current_value * gh.allocation_weight)
+                            FROM assets a
+                            JOIN goal_holdings gh ON a.id = gh.asset_id
+                            WHERE gh.goal_id = g.id
+                        ), 0.0
+                    ) AS current_amount
+                FROM goals g
             """)
         else:
             cursor.execute(f"SELECT * FROM {entity_type}")
@@ -815,7 +841,19 @@ def run_simulation(req: SimulationRequestSchema):
         """)
         total_properties = sum(row["current_value"] for row in cursor.fetchall())
         
-        cursor.execute("SELECT * FROM goals")
+        cursor.execute("""
+            SELECT 
+                g.*,
+                COALESCE(
+                    (
+                        SELECT SUM(a.current_value * gh.allocation_weight)
+                        FROM assets a
+                        JOIN goal_holdings gh ON a.id = gh.asset_id
+                        WHERE gh.goal_id = g.id
+                    ), 0.0
+                ) AS current_amount
+            FROM goals g
+        """)
         goals = [dict(row) for row in cursor.fetchall()]
         
         total_assets = total_liquid + total_investments + total_properties
