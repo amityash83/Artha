@@ -250,7 +250,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
             <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
               <input
-                type={type === 'number' ? 'number' : 'text'}
+                type={type === 'number' ? 'number' : type === 'date' ? 'date' : 'text'}
                 step={type === 'number' ? 'any' : undefined}
                 className="form-control"
                 value={formData[k] !== undefined ? formData[k] : ''}
