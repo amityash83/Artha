@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, Database, FileText, Download, Plus, Trash2, Edit2 } from 'lucide-react';
+import { Upload, Database, FileText, Download, Plus, Trash2, Edit2, Check, X } from 'lucide-react';
 import { InitData } from '../types';
 import { API_BASE_URL } from '../config';
 
@@ -41,6 +41,8 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
   const [newCatType, setNewCatType] = useState('Asset');
   const [newInstName, setNewInstName] = useState('');
   const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
+  const [editingInstId, setEditingInstId] = useState<number | null>(null);
+  const [editingInstName, setEditingInstName] = useState<string>('');
   const [customFields, setCustomFields] = useState<Array<{ name: string; label: string; type: 'text' | 'number' | 'date' }>>([]);
 
   const [ruleSaveStatus, setRuleSaveStatus] = useState<Record<string, string>>({});
@@ -209,18 +211,22 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
       }
       return;
     }
-    const newName = window.prompt("Rename this institution:", currentName);
-    if (!newName || newName.trim() === '' || newName === currentName) return;
+    setEditingInstId(id);
+    setEditingInstName(currentName);
+  };
 
+  const handleSaveInstitutionRename = async (id: number) => {
+    if (!editingInstName || editingInstName.trim() === '') return;
     try {
       setMetaStatus("Updating institution...");
       const res = await fetch(`${API_BASE_URL}/api/metadata/institutions/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName.trim() })
+        body: JSON.stringify({ name: editingInstName.trim() })
       });
       if (res.ok) {
         setMetaStatus("Institution updated successfully.");
+        setEditingInstId(null);
         fetchInstitutionsList();
         onRefresh();
         setTimeout(() => setMetaStatus(null), 3000);
@@ -955,29 +961,63 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh }) => {
               </form>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', overflowY: 'auto', paddingRight: '4px' }}>
-                {institutions.map((inst: any) => (
-                  <div key={inst.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: '8px', fontSize: '12px' }}>
-                    <span style={{ fontWeight: 500 }}>{inst.name}</span>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button 
-                        type="button"
-                        className="btn btn-secondary" 
-                        style={{ padding: '4px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px' }}
-                        onClick={() => handleEditMetadata('institutions', inst.id, inst.name)} 
-                      >
-                        <Edit2 size={11} style={{ color: 'var(--info)' }} />
-                      </button>
-                      <button 
-                        type="button"
-                        className="btn btn-secondary" 
-                        style={{ padding: '4px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px' }}
-                        onClick={() => handleDeleteMetadata('institutions', inst.id)} 
-                      >
-                        <Trash2 size={11} style={{ color: '#ef4444' }} />
-                      </button>
+                {institutions.map((inst: any) => {
+                  const isEditing = editingInstId === inst.id;
+                  return (
+                    <div key={inst.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: '8px', fontSize: '12px' }}>
+                      {isEditing ? (
+                        <div style={{ display: 'flex', gap: '8px', flex: 1, alignItems: 'center' }}>
+                          <input 
+                            type="text" 
+                            className="form-control" 
+                            style={{ flex: 1, padding: '4px 8px', fontSize: '12px', height: '28px' }}
+                            value={editingInstName} 
+                            onChange={e => setEditingInstName(e.target.value)} 
+                            required
+                          />
+                          <button 
+                            type="button" 
+                            className="btn btn-secondary" 
+                            style={{ padding: '4px 8px', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', color: '#10b981', minWidth: 'auto', height: '28px' }}
+                            onClick={() => handleSaveInstitutionRename(inst.id)}
+                          >
+                            <Check size={12} />
+                          </button>
+                          <button 
+                            type="button" 
+                            className="btn btn-secondary" 
+                            style={{ padding: '4px 8px', minWidth: 'auto', height: '28px' }}
+                            onClick={() => setEditingInstId(null)}
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <span style={{ fontWeight: 500 }}>{inst.name}</span>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button 
+                              type="button"
+                              className="btn btn-secondary" 
+                              style={{ padding: '4px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px' }}
+                              onClick={() => handleEditMetadata('institutions', inst.id, inst.name)} 
+                            >
+                              <Edit2 size={11} style={{ color: 'var(--info)' }} />
+                            </button>
+                            <button 
+                              type="button"
+                              className="btn btn-secondary" 
+                              style={{ padding: '4px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px' }}
+                              onClick={() => handleDeleteMetadata('institutions', inst.id)} 
+                            >
+                              <Trash2 size={11} style={{ color: '#ef4444' }} />
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
