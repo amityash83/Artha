@@ -25,6 +25,42 @@ export interface Account {
   metadata_json?: string;
 }
 
+export interface InsuranceDetails {
+  asset_id?: number;
+  policy_type: 'Life' | 'Term' | 'Health' | 'Vehicle';
+  policy_number?: string;
+  premium: number;
+  frequency: string;
+  renewal_date?: string;
+  sum_assured?: number;
+  surrender_value?: number;
+  sum_insured?: number;
+  claims_made?: number;
+  claims_amount?: number;
+  idv?: number;
+  vehicle_registration?: string;
+}
+
+export interface HoldingLot {
+  id?: number;
+  asset_id?: number;
+  purchase_date: string;
+  quantity: number;
+  price_per_unit: number;
+  notes?: string;
+}
+
+export interface CreditCardDetails {
+  liability_id?: number;
+  credit_limit: number;
+  statement_balance: number;
+  statement_date?: number;
+  due_date?: number;
+  annual_fee: number;
+  reward_points: number;
+  point_value: number;
+}
+
 export interface Asset {
   id: number;
   name: string;
@@ -38,6 +74,8 @@ export interface Asset {
   status?: string;
   owner?: string;
   metadata_json?: string;
+  insurance_details?: InsuranceDetails;
+  holding_lots?: HoldingLot[];
   [key: string]: any; // Allows holding dynamic deserialized parameters
 }
 
@@ -55,6 +93,8 @@ export interface Liability {
   status?: string;
   owner?: string;
   metadata_json?: string;
+  liability_kind?: 'loan' | 'revolving_credit';
+  credit_card_details?: CreditCardDetails;
   // Computed fields
   remaining_tenure?: number;
   remaining_interest?: number;

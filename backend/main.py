@@ -179,6 +179,15 @@ def get_init_data():
                     d.update(json.loads(d["metadata_json"]))
                 except:
                     pass
+            if d.get("category_name") == "Insurance":
+                cursor.execute("SELECT * FROM insurance_details WHERE asset_id = ?", (d["id"],))
+                details_row = cursor.fetchone()
+                if details_row:
+                    d["insurance_details"] = dict(details_row)
+                    d.update({k: v for k, v in dict(details_row).items() if k != "asset_id"})
+            if d.get("category_name") in ("Stock", "Mutual Fund"):
+                cursor.execute("SELECT * FROM holding_lots WHERE asset_id = ? ORDER BY purchase_date", (d["id"],))
+                d["holding_lots"] = [dict(lot) for lot in cursor.fetchall()]
             assets.append(d)
 
         # Liabilities (Home loans, car loans, credit cards)
@@ -197,6 +206,12 @@ def get_init_data():
                     d.update(json.loads(d["metadata_json"]))
                 except:
                     pass
+            if d.get("category_name") == "Credit Card":
+                cursor.execute("SELECT * FROM credit_card_details WHERE liability_id = ?", (d["id"],))
+                details_row = cursor.fetchone()
+                if details_row:
+                    d["credit_card_details"] = dict(details_row)
+                    d.update({k: v for k, v in dict(details_row).items() if k != "liability_id"})
             # Add dynamic tenure and progress math if it is a reducing balance loan
             if d.get("outstanding", 0.0) > 0 and d.get("interest_rate", 0.0) > 0 and d.get("emi", 0.0) > 0:
                 rem_n = calc.calculate_remaining_tenure(d["outstanding"], d["interest_rate"], d["emi"])
@@ -521,6 +536,198 @@ def delete_entity(entity_type: str, id: int):
         cursor.execute(f"DELETE FROM {entity_type} WHERE id = ?", (id,))
         conn.commit()
         return {"status": "success"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+# --- Satellite Details Routers (Credit Card, Insurance, Holdings) ---
+class CreditCardDetailsSchema(BaseModel):
+    credit_limit: float = 0.0
+    statement_balance: float = 0.0
+    statement_date: Optional[int] = None
+    due_date: Optional[int] = None
+    annual_fee: float = 0.0
+    reward_points: float = 0.0
+    point_value: float = 0.25
+
+@app.get("/api/liabilities/{id}/credit-card-details")
+def get_credit_card_details(id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM credit_card_details WHERE liability_id = ?", (id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+@app.put("/api/liabilities/{id}/credit-card-details")
+def put_credit_card_details(id: int, details: CreditCardDetailsSchema):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT liability_id FROM credit_card_details WHERE liability_id = ?", (id,))
+        exists = cursor.fetchone()
+        payload = details.dict()
+        if exists:
+            set_clauses = [f"{c} = :{c}" for c in payload.keys()]
+            payload["id"] = id
+            cursor.execute(f"UPDATE credit_card_details SET {', '.join(set_clauses)} WHERE liability_id = :id", payload)
+        else:
+            payload["liability_id"] = id
+            columns = list(payload.keys())
+            placeholders = [f":{c}" for c in columns]
+            cursor.execute(
+                f"INSERT INTO credit_card_details ({', '.join(columns)}) VALUES ({', '.join(placeholders)})",
+                payload
+            )
+        cursor.execute("UPDATE liabilities SET liability_kind = 'revolving_credit', interest_rate = 0, emi = 0, tenure_months = 0 WHERE id = ?", (id,))
+        conn.commit()
+        return {"status": "success"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+class InsuranceDetailsSchema(BaseModel):
+    policy_type: str = "Life"
+    policy_number: Optional[str] = None
+    premium: float = 0.0
+    frequency: str = "Yearly"
+    renewal_date: Optional[str] = None
+    sum_assured: float = 0.0
+    surrender_value: float = 0.0
+    sum_insured: float = 0.0
+    claims_made: int = 0
+    claims_amount: float = 0.0
+    idv: float = 0.0
+    vehicle_registration: Optional[str] = None
+
+@app.get("/api/assets/{id}/insurance-details")
+def get_insurance_details(id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM insurance_details WHERE asset_id = ?", (id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+@app.put("/api/assets/{id}/insurance-details")
+def put_insurance_details(id: int, details: InsuranceDetailsSchema):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT asset_id FROM insurance_details WHERE asset_id = ?", (id,))
+        exists = cursor.fetchone()
+        payload = details.dict()
+        if exists:
+            set_clauses = [f"{c} = :{c}" for c in payload.keys()]
+            payload["id"] = id
+            cursor.execute(f"UPDATE insurance_details SET {', '.join(set_clauses)} WHERE asset_id = :id", payload)
+        else:
+            payload["asset_id"] = id
+            columns = list(payload.keys())
+            placeholders = [f":{c}" for c in columns]
+            cursor.execute(
+                f"INSERT INTO insurance_details ({', '.join(columns)}) VALUES ({', '.join(placeholders)})",
+                payload
+            )
+        conn.commit()
+        return {"status": "success"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+def recompute_holding_aggregates(cursor, asset_id: int):
+    cursor.execute("SELECT quantity, price_per_unit FROM holding_lots WHERE asset_id = ?", (asset_id,))
+    lots = cursor.fetchall()
+    total_qty = sum(lot["quantity"] for lot in lots)
+    total_cost = sum(lot["quantity"] * lot["price_per_unit"] for lot in lots)
+    avg_cost = (total_cost / total_qty) if total_qty > 0 else 0.0
+    cursor.execute("UPDATE assets SET quantity = ?, cost_price = ? WHERE id = ?", (total_qty, avg_cost, asset_id))
+
+class HoldingLotSchema(BaseModel):
+    purchase_date: str
+    quantity: float
+    price_per_unit: float
+    notes: Optional[str] = ""
+
+@app.get("/api/assets/{id}/holdings")
+def get_holdings(id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM holding_lots WHERE asset_id = ? ORDER BY purchase_date", (id,))
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+@app.post("/api/assets/{id}/holdings")
+def create_holding(id: int, lot: HoldingLotSchema):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO holding_lots (asset_id, purchase_date, quantity, price_per_unit, notes) VALUES (?, ?, ?, ?, ?)",
+            (id, lot.purchase_date, lot.quantity, lot.price_per_unit, lot.notes)
+        )
+        recompute_holding_aggregates(cursor, id)
+        conn.commit()
+        return {"status": "success", "id": cursor.lastrowid}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.put("/api/holdings/{lot_id}")
+def update_holding(lot_id: int, lot: HoldingLotSchema):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT asset_id FROM holding_lots WHERE id = ?", (lot_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Holding lot not found")
+        asset_id = row["asset_id"]
+        cursor.execute(
+            "UPDATE holding_lots SET purchase_date = ?, quantity = ?, price_per_unit = ?, notes = ? WHERE id = ?",
+            (lot.purchase_date, lot.quantity, lot.price_per_unit, lot.notes, lot_id)
+        )
+        recompute_holding_aggregates(cursor, asset_id)
+        conn.commit()
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.delete("/api/holdings/{lot_id}")
+def delete_holding(lot_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT asset_id FROM holding_lots WHERE id = ?", (lot_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Holding lot not found")
+        asset_id = row["asset_id"]
+        cursor.execute("DELETE FROM holding_lots WHERE id = ?", (lot_id,))
+        recompute_holding_aggregates(cursor, asset_id)
+        conn.commit()
+        return {"status": "success"}
+    except HTTPException:
+        raise
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -1306,22 +1513,22 @@ def get_financial_calendar():
         
     # Fetch insurance policies (assets where category is 'Insurance')
     cursor.execute("""
-        SELECT inst.name as company, a.metadata_json 
+        SELECT inst.name as company, ins.policy_number, ins.premium, ins.frequency, ins.renewal_date
         FROM assets a
         LEFT JOIN institutions inst ON a.institution_id = inst.id
+        LEFT JOIN insurance_details ins ON ins.asset_id = a.id
         WHERE a.category_id = (SELECT id FROM categories WHERE name = 'Insurance')
     """)
     insurance_raw = cursor.fetchall()
     insurance = []
     for r in insurance_raw:
         d = dict(r)
-        meta = json.loads(d["metadata_json"]) if d.get("metadata_json") else {}
         insurance.append({
             "company": d["company"] or "Insurance",
-            "policy_number": meta.get("policy_number", "N/A"),
-            "premium": float(meta.get("premium", 0.0)),
-            "frequency": meta.get("frequency", "Yearly"),
-            "renewal_date": meta.get("renewal_date")
+            "policy_number": d["policy_number"] or "N/A",
+            "premium": float(d["premium"] or 0.0),
+            "frequency": d["frequency"] or "Yearly",
+            "renewal_date": d["renewal_date"]
         })
         
     # Fetch goals
@@ -1330,21 +1537,22 @@ def get_financial_calendar():
 
     # Fetch credit cards (liabilities where category is 'Credit Card')
     cursor.execute("""
-        SELECT name, outstanding, metadata_json 
-        FROM liabilities
-        WHERE category_id = (SELECT id FROM categories WHERE name = 'Credit Card') AND outstanding > 0
+        SELECT l.name, l.outstanding, ccd.statement_balance, ccd.due_date, inst.name as issuer
+        FROM liabilities l
+        LEFT JOIN institutions inst ON l.lender_institution_id = inst.id
+        LEFT JOIN credit_card_details ccd ON ccd.liability_id = l.id
+        WHERE l.category_id = (SELECT id FROM categories WHERE name = 'Credit Card') AND l.outstanding > 0
     """)
     cc_raw = cursor.fetchall()
     credit_cards = []
     for r in cc_raw:
         d = dict(r)
-        meta = json.loads(d["metadata_json"]) if d.get("metadata_json") else {}
         credit_cards.append({
             "name": d["name"],
             "outstanding": d["outstanding"],
-            "statement_balance": float(meta.get("statement_balance", 0.0)),
-            "due_date": int(meta.get("due_date", 15)),
-            "issuer": meta.get("issuer", "Issuer")
+            "statement_balance": float(d["statement_balance"] or 0.0),
+            "due_date": int(d["due_date"] or 15),
+            "issuer": d["issuer"] or "Issuer"
         })
         
     conn.close()

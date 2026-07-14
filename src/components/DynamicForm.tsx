@@ -1,28 +1,49 @@
 import React, { useState, useEffect } from 'react';
-import { Category, Institution } from '../types';
+import { Category, Institution, Liability } from '../types';
+import { HoldingLotsEditor } from './HoldingLotsEditor';
 
 interface DynamicFormProps {
   entityType: 'accounts' | 'assets' | 'liabilities' | 'income' | 'expenses' | 'goals';
   category?: Category;
   institutions: Institution[];
   initialData?: any;
+  liabilities?: Liability[];
+  properties?: any[];
   onSubmit: (data: any) => void;
   onCancel: () => void;
 }
+
+const HOLDING_CATEGORIES = ['Stock', 'Mutual Fund'];
+
+const INSURANCE_TYPE_FIELDS: Record<string, string[]> = {
+  Life: ['sum_assured', 'surrender_value'],
+  Term: ['sum_assured'],
+  Health: ['sum_insured', 'claims_made', 'claims_amount'],
+  Vehicle: ['idv', 'vehicle_registration'],
+};
 
 export const DynamicForm: React.FC<DynamicFormProps> = ({
   entityType,
   category,
   institutions,
   initialData,
+  liabilities = [],
+  properties = [],
   onSubmit,
   onCancel,
 }) => {
   const [formData, setFormData] = useState<any>({});
   const [fields, setFields] = useState<Record<string, string>>({});
+  const [holdingLots, setHoldingLots] = useState<any[]>([]);
 
-  useEffect(() => {
-    // 1. Establish the standard fields based on entity type
+  const categoryName = category?.name;
+  const isCreditCard = entityType === 'liabilities' && categoryName === 'Credit Card';
+  const isHomeLoan = entityType === 'liabilities' && categoryName === 'Home Loan';
+  const isInsurance = entityType === 'assets' && categoryName === 'Insurance';
+  const isProperty = entityType === 'assets' && categoryName === 'Property';
+  const isHolding = entityType === 'assets' && HOLDING_CATEGORIES.includes(categoryName || '');
+
+  const buildFieldSet = (policyType?: string) => {
     const standardFields: Record<string, string> = {
       name: 'text',
     };
@@ -35,20 +56,58 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       standardFields['owner'] = 'text';
       standardFields['tags'] = 'text';
     } else if (entityType === 'assets') {
-      standardFields['institution_id'] = 'institution_select';
-      standardFields['current_value'] = 'number';
-      standardFields['invested_amount'] = 'number';
-      standardFields['acquisition_date'] = 'date';
-      standardFields['status'] = 'select_status';
-      standardFields['owner'] = 'text';
+      if (isInsurance) {
+        standardFields['policy_type'] = 'select_policy_type';
+        standardFields['institution_id'] = 'institution_select';
+        standardFields['policy_number'] = 'text';
+        standardFields['premium'] = 'number';
+        standardFields['frequency'] = 'text';
+        standardFields['renewal_date'] = 'date';
+        (INSURANCE_TYPE_FIELDS[policyType || 'Life'] || []).forEach((f) => {
+          standardFields[f] = f === 'vehicle_registration' ? 'text' : 'number';
+        });
+        standardFields['status'] = 'select_status';
+        standardFields['owner'] = 'text';
+      } else if (isHolding) {
+        standardFields['institution_id'] = 'institution_select';
+        standardFields['acquisition_date'] = 'date';
+        standardFields['current_value'] = 'number';
+        standardFields['status'] = 'select_status';
+        standardFields['owner'] = 'text';
+      } else {
+        standardFields['institution_id'] = 'institution_select';
+        standardFields['current_value'] = 'number';
+        standardFields['invested_amount'] = 'number';
+        standardFields['acquisition_date'] = 'date';
+        standardFields['status'] = 'select_status';
+        standardFields['owner'] = 'text';
+        if (isProperty) {
+          standardFields['linked_liability_id'] = 'home_loan_select';
+        }
+      }
     } else if (entityType === 'liabilities') {
-      standardFields['lender_institution_id'] = 'institution_select';
-      standardFields['outstanding'] = 'number';
-      standardFields['interest_rate'] = 'number';
-      standardFields['emi'] = 'number';
-      standardFields['tenure_months'] = 'number';
-      standardFields['status'] = 'select_status';
-      standardFields['owner'] = 'text';
+      if (isCreditCard) {
+        standardFields['lender_institution_id'] = 'institution_select';
+        standardFields['outstanding'] = 'number';
+        standardFields['credit_limit'] = 'number';
+        standardFields['statement_balance'] = 'number';
+        standardFields['statement_date'] = 'number';
+        standardFields['due_date'] = 'number';
+        standardFields['annual_fee'] = 'number';
+        standardFields['status'] = 'select_status';
+        standardFields['owner'] = 'text';
+      } else {
+        standardFields['lender_institution_id'] = 'institution_select';
+        standardFields['outstanding'] = 'number';
+        standardFields['interest_rate'] = 'number';
+        standardFields['emi'] = 'number';
+        standardFields['tenure_months'] = 'number';
+        standardFields['status'] = 'select_status';
+        standardFields['owner'] = 'text';
+        if (isHomeLoan) {
+          standardFields['linked_asset_id'] = 'property_select';
+        }
+      }
     } else if (entityType === 'goals') {
       standardFields['target_amount'] = 'number';
       standardFields['current_amount'] = 'number';
@@ -61,13 +120,13 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       standardFields['status'] = 'select_status';
     }
 
-    // 2. Append custom fields defined in metadata
+    // Append any category-defined custom fields not already covered above
     if (category && category.fields_definition) {
       try {
-        const customDefs = typeof category.fields_definition === 'string' 
-          ? JSON.parse(category.fields_definition) 
+        const customDefs = typeof category.fields_definition === 'string'
+          ? JSON.parse(category.fields_definition)
           : category.fields_definition;
-          
+
         if (Array.isArray(customDefs)) {
           customDefs.forEach((item: any) => {
             if (item && item.name && !standardFields[item.name]) {
@@ -76,7 +135,6 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           });
         } else if (typeof customDefs === 'object' && customDefs !== null) {
           Object.keys(customDefs).forEach((k) => {
-            // Avoid overwriting standard fields
             if (!standardFields[k]) {
               standardFields[k] = customDefs[k];
             }
@@ -87,9 +145,14 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       }
     }
 
+    return standardFields;
+  };
+
+  useEffect(() => {
+    const initialPolicyType = initialData?.policy_type || initialData?.insurance_details?.policy_type || 'Life';
+    const standardFields = buildFieldSet(initialPolicyType);
     setFields(standardFields);
 
-    // 3. Populate default or initial values
     const defaultData: any = {};
     Object.keys(standardFields).forEach((k) => {
       const type = standardFields[k];
@@ -103,12 +166,13 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         defaultData[k] = 'Active';
       } else if (type === 'select_priority') {
         defaultData[k] = 'Medium';
+      } else if (type === 'select_policy_type') {
+        defaultData[k] = 'Life';
       } else {
         defaultData[k] = '';
       }
     });
 
-    // Populate extra fields from metadata if they exist
     if (initialData && initialData.metadata_json) {
       const meta = typeof initialData.metadata_json === 'string'
         ? JSON.parse(initialData.metadata_json)
@@ -116,10 +180,31 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       Object.assign(defaultData, meta);
     }
 
+    if (isProperty && 'linked_liability_id' in standardFields) {
+      const linkedLoan = liabilities.find((l) => l.category_name === 'Home Loan' && l.linked_asset_id === initialData?.id);
+      defaultData['linked_liability_id'] = linkedLoan?.id || '';
+    }
+
     setFormData(defaultData);
+    setHoldingLots(initialData?.holding_lots ? [...initialData.holding_lots] : []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entityType, category, institutions, initialData]);
 
   const handleChange = (key: string, val: any) => {
+    if (key === 'policy_type') {
+      const nextFields = buildFieldSet(val);
+      setFields(nextFields);
+      setFormData((prev: any) => {
+        const next = { ...prev, [key]: val };
+        Object.keys(nextFields).forEach((k) => {
+          if (next[k] === undefined) {
+            next[k] = nextFields[k] === 'number' ? 0 : '';
+          }
+        });
+        return next;
+      });
+      return;
+    }
     setFormData((prev: any) => ({
       ...prev,
       [key]: val,
@@ -128,7 +213,11 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit(formData);
+    const payload = { ...formData };
+    if (isHolding) {
+      payload.holding_lots = holdingLots;
+    }
+    onSubmit(payload);
   };
 
   const getLabel = (key: string) => {
@@ -148,22 +237,53 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       }
     }
 
+    const knownLabels: Record<string, string> = {
+      linked_liability_id: 'Linked Home Loan',
+      linked_asset_id: 'Linked Property',
+      sum_assured: 'Sum Assured',
+      surrender_value: 'Surrender Value',
+      sum_insured: 'Sum Insured',
+      claims_made: 'Claims Made',
+      claims_amount: 'Claims Amount',
+      idv: 'Insured Declared Value (IDV)',
+      vehicle_registration: 'Vehicle Registration No.',
+      credit_limit: 'Credit Limit',
+      statement_balance: 'Statement Balance',
+      statement_date: 'Statement Day of Month',
+      due_date: 'Due Day of Month',
+      annual_fee: 'Annual Fee',
+      policy_type: 'Policy Type',
+      policy_number: 'Policy Number',
+    };
+    if (knownLabels[key]) return knownLabels[key];
+
     return key
       .split('_')
       .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(' ');
   };
 
+  // Property's "linked_liability_id" is a form-only convenience field: it selects which Home
+  // Loan liability should have its linked_asset_id set to this property. There is no
+  // linked_liability_id column on assets — liabilities.linked_asset_id is the single source
+  // of truth for this relationship (see EntityGrid's dispatchSatelliteData).
+  const availableHomeLoans = liabilities.filter(
+    (l) => l.category_name === 'Home Loan' && (!l.linked_asset_id || l.linked_asset_id === initialData?.id)
+  );
+  const availableProperties = properties.filter(
+    (p) => !liabilities.some((l) => l.linked_asset_id === p.id && l.id !== initialData?.id)
+  );
+
   return (
     <form onSubmit={handleSubmit} className="glass-panel" style={{ padding: '24px', borderRadius: '12px', border: '1px solid var(--border-glass)' }}>
       <h3 style={{ fontSize: '18px', fontWeight: 600, color: '#f8fafc', marginBottom: '20px' }}>
         {initialData ? 'Modify' : 'Add New'} {category ? category.name : getLabel(entityType)}
       </h3>
-      
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
         {Object.keys(fields).map((k) => {
           const type = fields[k];
-          
+
           if (type === 'institution_select') {
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -178,6 +298,46 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
                   {institutions.map((inst) => (
                     <option key={inst.id} value={inst.id}>
                       {inst.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            );
+          }
+
+          if (type === 'home_loan_select') {
+            return (
+              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
+                <select
+                  className="form-control"
+                  value={formData[k] || ''}
+                  onChange={(e) => handleChange(k, e.target.value ? parseInt(e.target.value) : null)}
+                >
+                  <option value="">None</option>
+                  {availableHomeLoans.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            );
+          }
+
+          if (type === 'property_select') {
+            return (
+              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
+                <select
+                  className="form-control"
+                  value={formData[k] || ''}
+                  onChange={(e) => handleChange(k, e.target.value ? parseInt(e.target.value) : null)}
+                >
+                  <option value="">None</option>
+                  {availableProperties.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
                     </option>
                   ))}
                 </select>
@@ -219,11 +379,29 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
             );
           }
 
+          if (type === 'select_policy_type') {
+            return (
+              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Policy Type</label>
+                <select
+                  className="form-control"
+                  value={formData[k] || 'Life'}
+                  onChange={(e) => handleChange(k, e.target.value)}
+                >
+                  <option value="Life">Life</option>
+                  <option value="Term">Term</option>
+                  <option value="Health">Health</option>
+                  <option value="Vehicle">Vehicle</option>
+                </select>
+              </div>
+            );
+          }
+
           return (
             <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
               <input
-                type={type === 'number' ? 'number' : 'text'}
+                type={type === 'number' ? 'number' : type === 'date' ? 'date' : 'text'}
                 step={type === 'number' ? 'any' : undefined}
                 className="form-control"
                 value={formData[k] !== undefined ? formData[k] : ''}
@@ -233,6 +411,10 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
             </div>
           );
         })}
+
+        {isHolding && (
+          <HoldingLotsEditor lots={holdingLots} onChange={setHoldingLots} />
+        )}
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>

@@ -155,6 +155,52 @@ def init_db():
     )
     """)
 
+    # Credit Card details (satellite table: 1:1 with liabilities, for revolving credit)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS credit_card_details (
+        liability_id INTEGER PRIMARY KEY REFERENCES liabilities(id) ON DELETE CASCADE,
+        credit_limit REAL DEFAULT 0.0,
+        statement_balance REAL DEFAULT 0.0,
+        statement_date INTEGER,
+        due_date INTEGER,
+        annual_fee REAL DEFAULT 0.0,
+        reward_points REAL DEFAULT 0.0,
+        point_value REAL DEFAULT 0.25
+    )
+    """)
+
+    # Insurance details (satellite table: 1:1 with assets, carries the policy_type sub-type)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS insurance_details (
+        asset_id INTEGER PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE,
+        policy_type TEXT NOT NULL DEFAULT 'Life',
+        policy_number TEXT,
+        premium REAL DEFAULT 0.0,
+        frequency TEXT DEFAULT 'Yearly',
+        renewal_date TEXT,
+        sum_assured REAL DEFAULT 0.0,
+        surrender_value REAL DEFAULT 0.0,
+        sum_insured REAL DEFAULT 0.0,
+        claims_made INTEGER DEFAULT 0,
+        claims_amount REAL DEFAULT 0.0,
+        idv REAL DEFAULT 0.0,
+        vehicle_registration TEXT
+    )
+    """)
+
+    # Holding lots (satellite table: 1:many with assets, for Stock/Mutual Fund purchase lots)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS holding_lots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+        purchase_date TEXT NOT NULL,
+        quantity REAL NOT NULL,
+        price_per_unit REAL NOT NULL,
+        notes TEXT
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_holding_lots_asset ON holding_lots(asset_id)")
+
     # Income
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS income (
@@ -254,7 +300,7 @@ def init_db():
         ('Account', 'Demat Account', None),
         ('Account', 'Retirement Account', None),
         # Assets
-        ('Asset', 'Mutual Fund', json.dumps([{"name": "units", "type": "number", "label": "Units"}, {"name": "nav", "type": "number", "label": "NAV"}])),
+        ('Asset', 'Mutual Fund', json.dumps([{"name": "ticker", "type": "text", "label": "Scheme Code"}])),
         ('Asset', 'Stock', json.dumps([{"name": "ticker", "type": "text", "label": "Ticker Symbol"}])),
         ('Asset', 'Gold', None),
         ('Asset', 'EPF', None),
@@ -263,11 +309,13 @@ def init_db():
         ('Asset', 'Fixed Deposit', json.dumps([{"name": "duration_months", "type": "number", "label": "Duration (Months)"}])),
         ('Asset', 'Bond', json.dumps([{"name": "coupon_rate", "type": "number", "label": "Coupon Rate (%)"}])),
         ('Asset', 'Property', json.dumps([{"name": "rental_income", "type": "number", "label": "Rental Income"}, {"name": "maintenance_expenses", "type": "number", "label": "Maintenance Expenses"}])),
-        ('Asset', 'Insurance', json.dumps([{"name": "policy_number", "type": "text", "label": "Policy Number"}, {"name": "coverage", "type": "number", "label": "Coverage Amount"}, {"name": "surrender_value", "type": "number", "label": "Surrender Value"}])),
+        # Insurance sub-type (Life/Term/Health/Vehicle) and type-specific fields live in insurance_details, not here.
+        ('Asset', 'Insurance', None),
         # Liabilities
         ('Liability', 'Home Loan', None),
         ('Liability', 'Personal Loan', None),
-        ('Liability', 'Credit Card', json.dumps([{"name": "credit_limit", "type": "number", "label": "Credit Limit"}, {"name": "statement_date", "type": "number", "label": "Statement Day of Month"}, {"name": "due_date", "type": "number", "label": "Due Day of Month"}])),
+        # Credit card fields (credit_limit, statement_date, due_date, etc.) live in credit_card_details, not here.
+        ('Liability', 'Credit Card', None),
         ('Liability', 'Car Loan', None),
         # Income
         ('Income', 'Salary', None),
@@ -289,6 +337,30 @@ def init_db():
         INSERT OR IGNORE INTO categories (entity_type, name, fields_definition)
         VALUES (?, ?, ?)
         """, (entity_type, name, fields))
+
+    # Rewrite fields_definition for existing installs still holding the pre-satellite-table inline
+    # field defs, now that Insurance/Credit Card/Mutual Fund type-specific fields live in
+    # insurance_details/credit_card_details. Guarded so custom fields_definition edits aren't clobbered.
+    try:
+        cursor.execute("SELECT id, fields_definition FROM categories WHERE name = 'Insurance' AND entity_type = 'Asset'")
+        row = cursor.fetchone()
+        if row and row['fields_definition'] and '"policy_number"' in row['fields_definition']:
+            cursor.execute("UPDATE categories SET fields_definition = NULL WHERE id = ?", (row['id'],))
+
+        cursor.execute("SELECT id, fields_definition FROM categories WHERE name = 'Credit Card' AND entity_type = 'Liability'")
+        row = cursor.fetchone()
+        if row and row['fields_definition'] and '"credit_limit"' in row['fields_definition']:
+            cursor.execute("UPDATE categories SET fields_definition = NULL WHERE id = ?", (row['id'],))
+
+        cursor.execute("SELECT id, fields_definition FROM categories WHERE name = 'Mutual Fund' AND entity_type = 'Asset'")
+        row = cursor.fetchone()
+        if row and row['fields_definition'] and '"units"' in row['fields_definition']:
+            cursor.execute(
+                "UPDATE categories SET fields_definition = ? WHERE id = ?",
+                (json.dumps([{"name": "ticker", "type": "text", "label": "Scheme Code"}]), row['id'])
+            )
+    except Exception as e:
+        print("[Migration Warning] categories.fields_definition rewrite error:", e)
 
     default_rules = [
         ("min_emergency_fund", "Minimum Emergency Fund", "Never reduce Emergency Fund below this value", 1500000.0, "Emergency Fund", 1),
@@ -595,6 +667,120 @@ def init_db():
                 print("[Migration] Goals migrated to new schema successfully.")
     except Exception as e:
         print("[Migration Warning] Goals migration error:", e)
+
+    # E. Add liability_kind discriminator column (loan vs revolving_credit)
+    try:
+        cursor.execute("PRAGMA table_info('liabilities')")
+        liability_cols = [col['name'] for col in cursor.fetchall()]
+        if 'liability_kind' not in liability_cols:
+            cursor.execute("ALTER TABLE liabilities ADD COLUMN liability_kind TEXT DEFAULT 'loan'")
+            print("[Migration] Added liability_kind column to liabilities.")
+    except Exception as e:
+        print("[Migration Warning] liability_kind column migration error:", e)
+
+    # F. Backfill credit_card_details from existing Credit Card liabilities' metadata_json
+    try:
+        cursor.execute("""
+            SELECT l.id, l.metadata_json FROM liabilities l
+            JOIN categories c ON l.category_id = c.id
+            WHERE c.name = 'Credit Card'
+            AND l.id NOT IN (SELECT liability_id FROM credit_card_details)
+        """)
+        cc_rows = cursor.fetchall()
+        for row in cc_rows:
+            meta = json.loads(row['metadata_json']) if row['metadata_json'] else {}
+            cursor.execute("""
+                INSERT INTO credit_card_details
+                (liability_id, credit_limit, statement_balance, statement_date, due_date, annual_fee, reward_points, point_value)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                row['id'],
+                meta.get('credit_limit', 0.0),
+                meta.get('statement_balance', 0.0),
+                meta.get('statement_date'),
+                meta.get('due_date'),
+                meta.get('annual_fee', 0.0),
+                meta.get('reward_points', 0.0),
+                meta.get('point_value', 0.25)
+            ))
+            cursor.execute("""
+                UPDATE liabilities SET liability_kind = 'revolving_credit', interest_rate = 0, emi = 0, tenure_months = 0
+                WHERE id = ?
+            """, (row['id'],))
+        if cc_rows:
+            print(f"[Migration] Backfilled credit_card_details for {len(cc_rows)} credit card(s).")
+    except Exception as e:
+        print("[Migration Warning] credit_card_details backfill error:", e)
+
+    # G. Backfill insurance_details from existing Insurance assets' metadata_json
+    try:
+        cursor.execute("""
+            SELECT a.id, a.metadata_json FROM assets a
+            JOIN categories c ON a.category_id = c.id
+            WHERE c.name = 'Insurance'
+            AND a.id NOT IN (SELECT asset_id FROM insurance_details)
+        """)
+        ins_rows = cursor.fetchall()
+
+        def normalize_policy_type(legacy_type):
+            t = (legacy_type or '').strip().lower()
+            if 'health' in t:
+                return 'Health'
+            if 'term' in t:
+                return 'Term'
+            if 'vehicle' in t or 'motor' in t or 'car' in t:
+                return 'Vehicle'
+            return 'Life'
+
+        for row in ins_rows:
+            meta = json.loads(row['metadata_json']) if row['metadata_json'] else {}
+            policy_type = normalize_policy_type(meta.get('insurance_type'))
+            cursor.execute("""
+                INSERT INTO insurance_details
+                (asset_id, policy_type, policy_number, premium, frequency, renewal_date, sum_assured, surrender_value)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                row['id'],
+                policy_type,
+                meta.get('policy_number'),
+                meta.get('premium', 0.0),
+                meta.get('frequency', 'Yearly'),
+                meta.get('renewal_date'),
+                meta.get('coverage', 0.0),
+                meta.get('surrender_value', 0.0)
+            ))
+        if ins_rows:
+            print(f"[Migration] Backfilled insurance_details for {len(ins_rows)} insurance polic(y/ies).")
+    except Exception as e:
+        print("[Migration Warning] insurance_details backfill error:", e)
+
+    # H. Backfill holding_lots from existing Stock/Mutual Fund assets (one synthetic opening lot each)
+    try:
+        cursor.execute("""
+            SELECT a.id, a.purchase_date, a.quantity, a.cost_price FROM assets a
+            JOIN categories c ON a.category_id = c.id
+            WHERE c.name IN ('Stock', 'Mutual Fund')
+            AND a.id NOT IN (SELECT DISTINCT asset_id FROM holding_lots)
+        """)
+        holding_rows = cursor.fetchall()
+        for row in holding_rows:
+            qty = row['quantity'] if row['quantity'] and row['quantity'] > 0 else 1.0
+            cost = row['cost_price'] if row['cost_price'] and row['cost_price'] > 0 else 0.0
+            price_per_unit = (cost / qty) if qty > 0 else cost
+            cursor.execute("""
+                INSERT INTO holding_lots (asset_id, purchase_date, quantity, price_per_unit, notes)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                row['id'],
+                row['purchase_date'] or datetime.now().strftime('%Y-%m-%d'),
+                qty,
+                price_per_unit,
+                'Auto-migrated opening lot'
+            ))
+        if holding_rows:
+            print(f"[Migration] Backfilled holding_lots for {len(holding_rows)} stock/mutual fund asset(s).")
+    except Exception as e:
+        print("[Migration Warning] holding_lots backfill error:", e)
 
     conn.commit()
     conn.close()

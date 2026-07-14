@@ -1,5 +1,4 @@
 from datetime import datetime, date
-import json
 
 def get_rules(cursor):
     cursor.execute("SELECT rule_key, value, is_enabled FROM financial_rules")
@@ -167,33 +166,32 @@ def generate_recommendations(conn) -> list:
                 "suggested_amount": gap
             })
             
-    # Check 6: Insurance premium reminders (within 30 days) from assets metadata
+    # Check 6: Insurance premium reminders (within 30 days) from insurance_details
     cursor.execute("""
-        SELECT inst.name as company, a.metadata_json 
-        FROM assets a 
-        LEFT JOIN institutions inst ON a.institution_id = inst.id 
+        SELECT inst.name as company, ins.renewal_date, ins.premium
+        FROM assets a
+        LEFT JOIN institutions inst ON a.institution_id = inst.id
+        LEFT JOIN insurance_details ins ON ins.asset_id = a.id
         WHERE a.category_id = (SELECT id FROM categories WHERE name = 'Insurance')
     """)
     policies = cursor.fetchall()
     today_dt = date.today()
     for policy in policies:
-        if policy["metadata_json"]:
+        ren_date_str = policy["renewal_date"]
+        premium = float(policy["premium"] or 0.0)
+        if ren_date_str:
             try:
-                meta = json.loads(policy["metadata_json"])
-                ren_date_str = meta.get("renewal_date")
-                premium = float(meta.get("premium", 0.0))
-                if ren_date_str:
-                    ren_date = datetime.strptime(ren_date_str, "%Y-%m-%d").date()
-                    days_left = (ren_date - today_dt).days
-                    if 0 <= days_left <= ins_renewal_alert_days:
-                        recs.append({
-                            "category": "Insurance Renewal",
-                            "title": f"Premium Due: {policy['company'] or 'Insurance'}",
-                            "message": f"Premium of ₹{premium:,.0f} is due in {days_left} days ({ren_date_str}).",
-                            "status": "danger",
-                            "action_type": "info",
-                            "suggested_amount": premium
-                        })
+                ren_date = datetime.strptime(ren_date_str, "%Y-%m-%d").date()
+                days_left = (ren_date - today_dt).days
+                if 0 <= days_left <= ins_renewal_alert_days:
+                    recs.append({
+                        "category": "Insurance Renewal",
+                        "title": f"Premium Due: {policy['company'] or 'Insurance'}",
+                        "message": f"Premium of ₹{premium:,.0f} is due in {days_left} days ({ren_date_str}).",
+                        "status": "danger",
+                        "action_type": "info",
+                        "suggested_amount": premium
+                    })
             except Exception:
                 continue
 

@@ -303,21 +303,25 @@ const App: React.FC = () => {
           />
         )}
         {activeTab === 'assets' && (
-          <EntityGrid 
-            entityType="assets" 
-            entities={data.assets} 
-            categories={data.categories} 
-            institutions={data.institutions} 
-            onRefresh={fetchFinanceData} 
+          <EntityGrid
+            entityType="assets"
+            entities={data.assets}
+            categories={data.categories}
+            institutions={data.institutions}
+            liabilities={data.liabilities}
+            properties={data.assets.filter((a) => a.category_name === 'Property')}
+            onRefresh={fetchFinanceData}
           />
         )}
         {activeTab === 'liabilities' && (
-          <EntityGrid 
-            entityType="liabilities" 
-            entities={data.liabilities} 
-            categories={data.categories} 
-            institutions={data.institutions} 
-            onRefresh={fetchFinanceData} 
+          <EntityGrid
+            entityType="liabilities"
+            entities={data.liabilities}
+            categories={data.categories}
+            institutions={data.institutions}
+            liabilities={data.liabilities}
+            properties={data.assets.filter((a) => a.category_name === 'Property')}
+            onRefresh={fetchFinanceData}
           />
         )}
         {activeTab === 'goals' && (
