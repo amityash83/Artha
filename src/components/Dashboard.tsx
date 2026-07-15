@@ -81,8 +81,44 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
     assetAllocation[cat] = (assetAllocation[cat] || 0) + asset.current_value;
   });
 
-  const doughnutLabels = Object.keys(assetAllocation);
-  const doughnutValues = Object.values(assetAllocation);
+  // Hide zero-value categories (e.g. insurance with no surrender value) — a ₹0 slice
+  // renders invisibly in the doughnut and only adds noise to the legend.
+  const allocationEntries = Object.entries(assetAllocation).filter(([, value]) => value > 0);
+  const doughnutLabels = allocationEntries.map(([label]) => label);
+  const doughnutValues = allocationEntries.map(([, value]) => value);
+
+  // Insurance coverage overview (policies are Insurance-category assets; type-specific
+  // figures come from the insurance_details satellite record attached by /api/init)
+  const FREQ_MULTIPLIER: Record<string, number> = { 'Monthly': 12, 'Quarterly': 4, 'Half-Yearly': 2, 'Yearly': 1 };
+  const insurancePolicies = assets
+    .filter((a: any) => a.category_name === 'Insurance')
+    .map((a: any) => {
+      const det = a.insurance_details || {};
+      const premium = det.premium ?? a.premium ?? 0;
+      const frequency = det.frequency || a.frequency || 'Yearly';
+      return {
+        id: a.id,
+        name: a.name,
+        policyType: det.policy_type || a.policy_type || 'Life',
+        renewalDate: det.renewal_date || a.renewal_date || '',
+        coverage: Math.max(det.sum_assured || 0, det.sum_insured || 0, det.idv || 0, a.coverage || 0),
+        premium,
+        annualPremium: premium * (FREQ_MULTIPLIER[frequency] || 1)
+      };
+    });
+
+  const coverageByType: Record<string, number> = {};
+  insurancePolicies.forEach((p) => {
+    coverageByType[p.policyType] = (coverageByType[p.policyType] || 0) + p.coverage;
+  });
+  const totalCoverage = insurancePolicies.reduce((sum, p) => sum + p.coverage, 0);
+  const annualPremiumOutgo = insurancePolicies.reduce((sum, p) => sum + p.annualPremium, 0);
+
+  const daysUntil = (dateStr: string) => Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86400000);
+  const upcomingRenewals = insurancePolicies
+    .filter((p) => p.renewalDate && daysUntil(p.renewalDate) >= 0)
+    .sort((a, b) => new Date(a.renewalDate).getTime() - new Date(b.renewalDate).getTime())
+    .slice(0, 3);
 
   const colors = [
     '#10b981', // green
@@ -373,6 +409,84 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
               </div>
             </div>
           </div>
+
+          {/* Insurance Coverage Overview */}
+          {insurancePolicies.length > 0 && (
+            <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                  <ShieldCheck size={16} style={{ color: '#10b981' }} /> Insurance Coverage
+                </h3>
+                <button
+                  className="btn btn-secondary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 12px', fontSize: '11px', borderRadius: '16px' }}
+                  onClick={() => onNavigate('assets')}
+                >
+                  View Policies <ArrowRight size={11} />
+                </button>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px' }}>
+                <div style={{ background: 'rgba(255,255,255,0.02)', borderRadius: '10px', padding: '12px' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Active Policies</div>
+                  <div style={{ fontSize: '18px', fontWeight: 600, color: '#f8fafc' }}>{insurancePolicies.length}</div>
+                </div>
+                <div style={{ background: 'rgba(255,255,255,0.02)', borderRadius: '10px', padding: '12px' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Total Cover</div>
+                  <div style={{ fontSize: '18px', fontWeight: 600, color: '#10b981' }}>{formatCurrency(totalCoverage)}</div>
+                </div>
+                <div style={{ background: 'rgba(255,255,255,0.02)', borderRadius: '10px', padding: '12px' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Annual Premium Outgo</div>
+                  <div style={{ fontSize: '18px', fontWeight: 600, color: '#f8fafc' }}>{formatCurrency(annualPremiumOutgo)}</div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {Object.entries(coverageByType).map(([type, cover]) => (
+                  <span key={type} style={{
+                    fontSize: '11px',
+                    padding: '4px 10px',
+                    borderRadius: '14px',
+                    background: 'rgba(139, 92, 246, 0.12)',
+                    color: '#c4b5fd',
+                    fontWeight: 500
+                  }}>
+                    {type}: {formatCurrency(cover)}
+                  </span>
+                ))}
+              </div>
+
+              {upcomingRenewals.length > 0 && (
+                <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>Upcoming Renewals</span>
+                  {upcomingRenewals.map((p) => {
+                    const days = daysUntil(p.renewalDate);
+                    const urgent = days <= 30;
+                    return (
+                      <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', background: 'rgba(255,255,255,0.02)', padding: '8px 12px', borderRadius: '8px' }}>
+                        <span style={{ color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }} title={p.name}>
+                          {p.name}
+                        </span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+                          <span style={{ color: '#f1f5f9' }}>{formatCurrency(p.premium)}</span>
+                          <span style={{
+                            fontSize: '10px',
+                            fontWeight: 600,
+                            padding: '2px 8px',
+                            borderRadius: '10px',
+                            background: urgent ? 'rgba(245, 158, 11, 0.15)' : 'rgba(255,255,255,0.05)',
+                            color: urgent ? 'var(--warning-light)' : 'var(--text-muted)'
+                          }}>
+                            {days === 0 ? 'Due today' : `${days}d`}
+                          </span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right Side Actionable Recommendations Rules Panel */}

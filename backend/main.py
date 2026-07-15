@@ -794,6 +794,9 @@ def put_insurance_details(id: int, details: InsuranceDetailsSchema):
                 f"INSERT INTO insurance_details ({', '.join(columns)}) VALUES ({', '.join(placeholders)})",
                 payload
             )
+        # An insurance policy's realizable value is its surrender value — keep the
+        # asset's current_value in sync so net worth and allocation reflect it.
+        cursor.execute("UPDATE assets SET current_value = ? WHERE id = ?", (details.surrender_value, id))
         conn.commit()
         return {"status": "success"}
     except Exception as e:
