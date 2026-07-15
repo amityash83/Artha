@@ -2,77 +2,79 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## What this is
 
-**Artha** (formerly "FinanceOS") is a privacy-first, offline-first personal financial intelligence desktop app — a decision sandbox for retirement, loans, goals, and cash-flow simulations, *not* a transactional accounting tool (it complements Money Manager Ex rather than replacing it). It ships as a single portable Windows `.exe` with no installer.
+Artha is a privacy-first, offline-first personal finance desktop app (a "Financial Intelligence Layer" on top of raw account data, not an accounting tool). It's a single portable Windows executable: React/Electron frontend + a Python FastAPI backend + local SQLite database, no mandatory cloud or install step. See [Artha.md](Artha.md) for the full product vision/spec and [hardcoded_vs_dynamic.md](hardcoded_vs_dynamic.md) for which business rules are DB-configurable vs. hardcoded.
 
 ## Commands
 
 ```bash
-# Local development — starts Vite, FastAPI (--reload), and the Electron shell concurrently
+# One-time setup
+python -m venv venv
+venv\Scripts\activate               # Windows; this project targets Windows for packaging
+pip install -r backend/requirements.txt
+pip install pyinstaller
+npm install
+
+# Local development (Vite + FastAPI reload + Electron shell, concurrently)
 npm start
 
-# Type-check + build the React frontend only (outputs to dist/)
-npm run build:frontend
+# Frontend only
+npm run dev:frontend                # vite, http://localhost:5173
+tsc && vite build                   # npm run build:frontend — typecheck + build to dist/
 
-# Compile the Python backend into a standalone binary via PyInstaller (outputs to backend/dist/main/)
-npm run build:backend
+# Backend only (reload server)
+npm run dev:backend                 # uvicorn backend.main:app --reload on 127.0.0.1:8000
+venv\Scripts\python run.py          # manual sanity-check run, prints startup tracebacks directly
 
-# Full portable build: frontend + backend + electron-builder NSIS portable exe (outputs to dist-portable/)
-npm run package:portable
-
-# Same as above, invoked through the release script
-npm run build:exe
-
-# Run the backend directly for debugging startup tracebacks (bypasses Electron/uvicorn reload)
-venv\Scripts\python run.py
-
-# Run backend with hot reload only (no Electron/Vite)
-npm run dev:backend
+# Production packaging (PyInstaller backend + electron-builder portable NSIS exe)
+npm run package:portable            # -> dist-portable/Artha <version>.exe
+# equivalent to running build:frontend, build:backend, then:
+npx electron-builder --win portable
 ```
 
-There is no automated test suite or linter configured — `tsc` (via `build:frontend`) is the only static check. Verify backend changes by hitting `http://127.0.0.1:8000/api/init` after `npm run dev:backend`, and verify frontend changes by running `npm start` and exercising the affected screen.
+There is no test suite or lint script configured in `package.json` — `tsc` (via `build:frontend`) is the only automated check, and it enforces `strict`, `noUnusedLocals`, `noUnusedParameters`. Verify backend changes by running `npm run dev:backend` and hitting endpoints directly, or via the Electron app (`npm start`).
 
-`artha.ps1` (`.\artha.ps1 start|stop|status`) is a convenience wrapper that frees ports 8000/5173, launches backend+frontend+Electron as background processes, and tracks their PIDs in `.artha.pid` — useful for starting/stopping the whole stack from outside an interactive `npm start` session.
+CI (`.github/workflows/build-and-publish.yml`) runs on `windows-latest` only: builds the portable exe on every push to `main` and on PRs, and publishes it as a GitHub Release when a `v*` tag is pushed.
 
 ## Architecture
 
-Electron shell → spawns a Python FastAPI sidecar process (`backend.main:app`, port 8000) and loads the React/Vite frontend (`localhost:5173` in dev, `dist/index.html` when packaged). The frontend talks to the backend exclusively over HTTP (`src/config.ts` hardcodes `API_BASE_URL`). See `Artha.md` for the full product vision/module list and `docs/` for the enterprise-methodology spec suite (business object model → domain model → business rules → database → API → UX, numbered `00-`–`17-`).
+```
+Electron (electron/main.js)
+  ├─ spawns Python backend as a sidecar subprocess (venv python in dev, PyInstaller-built main.exe in prod)
+  ├─ dev: loads http://localhost:5173 (Vite)  |  prod: loads dist/index.html
+  └─ IPC: native save/open dialogs for picking a SQLite db file
 
-### Backend (`backend/`)
+React/TS frontend (src/)
+  └─ talks to backend purely over HTTP: fetch calls to API_BASE_URL (src/config.ts, hardcoded 127.0.0.1:8000)
 
-- `main.py` — the entire FastAPI app: Pydantic request schemas, a generic entity CRUD router (`/api/entities/{entity_type}`) shared across accounts/assets/liabilities/income/expenses/goals/transactions, plus dedicated routers for simulations, snapshots, MMex CSV import, and DB backup/restore/switching.
-- `db.py` — schema creation, **in-place migrations that run on every startup** (checked via `PRAGMA table_info` and applied idempotently — see the pattern for `accounts`/`transactions` restructuring and the legacy-table migrations near the bottom of `init_db()`), settings persistence (`~/.financeos/settings.json`), and DB path resolution.
-- `calculations.py` — pure financial math: EMI/tenure/remaining-interest formulas, XIRR, multi-loan payoff simulation (snowball/avalanche/baseline with monthly/annual cascading prepayments), daily pro-rata amortization.
-- `decision_engine.py` — reads `financial_rules` table thresholds and produces the dashboard's recommendation/alert list.
+FastAPI backend (backend/)
+  ├─ main.py           — all routes live in this one file
+  ├─ db.py             — SQLite connection, schema/migrations, settings.json, db path resolution
+  ├─ calculations.py   — pure financial math (EMI, XIRR, amortization, tenure/interest projections)
+  └─ decision_engine.py— reads financial_rules + entities, returns recommendation objects
+```
 
-**Data model conventions (see `docs/memory.md` for the full rationale — read it before touching schema or balance logic):**
-- **No stored balances.** Account `current_balance` and goal `current_amount` are never columns — they're computed on every read: account balance = sum of `transactions` where `dest_ref_id` matches minus where `source_ref_id` matches; goal progress = `SUM(assets.current_value * goal_holdings.allocation_weight)` joined through the `goal_holdings` junction table. Never add a stored balance column back.
-- **Double-entry transactions.** `transactions` rows have `source_ref_type`/`source_ref_id` and `dest_ref_type`/`dest_ref_id` (each `Account`, `Asset`, or `None`) instead of a single `account_id`, so transfers, buys/sells, and EMI/prepayments all flow through the same table. `adjust_double_entry_balances()` in `main.py` applies/reverts the asset-value and liability-outstanding side effects whenever a transaction is created/updated/deleted.
-- **Metadata-driven schema.** Product-specific fields (credit card reward rules, FD tenure, policy numbers, etc.) are never added as new columns — they're merged into a `metadata_json` (or `funding_sources_json` / `snapshot_data`) text column and deserialized on read (`serialize_entity_payload()` splits payload keys into known-column vs. JSON-blob automatically based on the target table's actual columns). `categories.fields_definition` (JSON) drives which extra fields `DynamicForm.tsx`/`EntityGrid.tsx` render per category — extend behavior by editing the seeded category definitions in `db.py`, not by writing new form components.
-- **Seed data is one-shot.** Default institutions/categories/rules are only inserted when `is_new_db` (DB file didn't exist before `init_db()` opened it) — never reseed unconditionally, or user renames/deletes of seeded rows will silently reappear.
-- **`goal_holdings` sync.** Whenever an asset's `goal_mapping` metadata field changes via the entity CRUD routes, the backend must keep the `goal_holdings` junction table in sync in the same request (see the create/update handlers for `assets` in `main.py`).
+**Startup sequence matters**: Electron spawns the backend, waits a fixed 1.5s, then creates the window; the React app then polls `GET /api/init` up to 15 times (1s apart) until the backend responds (`App.tsx`). If you change backend startup time or the port, this retry logic and the fixed Electron delay both need to stay compatible.
 
-### Frontend (`src/`)
+### Data model: metadata-driven entities, not per-domain tables
 
-- `App.tsx` is the single-page router: it fetches `/api/init` once on load (polls up to 15× until the backend sidecar responds), holds all app data in one `InitData` object, and switches between view components by a local `activeTab` string state — there is no client-side routing library.
-- `components/EntityGrid.tsx` + `components/DynamicForm.tsx` render generic CRUD screens (Accounts/Assets/Liabilities/Goals) driven entirely by each category's `fields_definition` JSON — prefer extending the schema/category definitions over adding bespoke form components.
-- Feature-specific screens (`LoanOptimizer.tsx`, `EmiCalculator.tsx`, `CashFlowPlanning.tsx`, `Simulations.tsx`, etc.) call dedicated backend simulation endpoints rather than doing projections client-side.
-- Sort dropdown/list data client-side (`[...list].sort(...)` immediately before `.map()`) even though the backend also orders by name — this guards against stale/hot-reload state (see `docs/memory.md`).
+The schema (see `init_db()` in `backend/db.py`) intentionally collapses what used to be separate tables (investments, properties, insurance, loans, credit_cards) into four generic tables: `accounts`, `assets`, `liabilities`, plus `income`/`expenses`/`goals`/`transactions`. Domain distinction comes from a `category_id` FK into `categories` (which carries a `fields_definition` JSON schema describing that category's custom fields), not from separate tables. Fields not in a table's fixed columns get folded into a `metadata_json` / `funding_sources_json` / `snapshot_data` blob — see `serialize_entity_payload()` in `main.py`, which splits any CRUD payload into "known columns" vs. "everything else goes into the JSON blob" automatically based on `PRAGMA table_info`.
 
-### Portability / DB path resolution
+`init_db()` also contains one-way legacy migrations (old `loans`/`investments`/`properties`/`insurance`/`credit_cards` tables → the new `assets`/`liabilities` shape) that run idempotently on every startup and rename old tables to `*_old` once migrated. When adding new entity kinds, prefer adding a new `categories` row + `fields_definition` over adding a new table.
 
-Electron resolves the active SQLite file at launch (dev: `d:\AI\Antigravity\data\finance.db`; packaged portable: `<exe-dir>/data/finance.db` via `PORTABLE_EXECUTABLE_DIR`; unpacked: `%APPDATA%/FinanceOS/data/finance.db`), creates the directory, and passes it to Python via the `FINANCE_DB_DIR` env var. The frontend can switch databases at runtime through Electron's native file dialog IPC (`select-db-file`) → `POST /api/settings/database`, which persists the choice to `~/.financeos/settings.json` and re-runs `init_db()` migrations against the new file. Preferences (`active_db_path`, `recent_databases`, backup settings) live outside the portable directory in `~/.financeos/settings.json`, not in the SQLite DB itself.
+### Generic CRUD + special-cased side effects
 
-### Windows/PowerShell gotchas (see `docs/memory.md`)
+`/api/entities/{entity_type}` (GET/POST/PUT/DELETE) is one generic handler for `accounts`, `assets`, `liabilities`, `income`, `expenses`, `goals`, `transactions` — the allowed table list is hardcoded in each route function (kept in sync manually, not shared as a constant). `transactions` writes are special-cased to also call `adjust_double_entry_balances()`, which mutates `accounts`/`assets`/`liabilities` balances depending on transaction `type` (investment, redemption, emi, prepayment, transfer, debit/expense, credit/income). Updates/deletes of a transaction first revert the old balance impact, then (for updates) reapply the new one — so transaction edits are effectively revert-then-reapply, not a diff.
 
-- `$PID`/`$pid` is a read-only PowerShell built-in — never use it as a loop variable name (use e.g. `$activePid`).
-- `npm` on Windows resolves to `npm.cmd`; pass that explicitly when spawning it as a child process.
-- Always free ports 8000 (FastAPI) and 5173 (Vite) before starting dev services to avoid `Errno 10048` bind errors — `artha.ps1`'s `Free-Port` does this automatically.
+### Database path resolution (portability)
 
-## Key Files Reference
+The active DB path is not fixed — resolution order is: `~/.financeos/settings.json` (`active_db_path`) → `FINANCE_DB_DIR` env var (set by Electron; points next to the portable exe via `PORTABLE_EXECUTABLE_DIR`, or to `app.getPath('userData')` if unpacked) → dev fallback of `<repo>/data/finance.db`. The frontend can trigger a native file dialog (Electron IPC `select-db-file`) and POST the chosen path to `/api/settings/database`, which calls `switch_database()` — this updates settings and re-runs `init_db()` against the new file, so switching databases always re-applies schema/migrations.
 
-- `run.py` — PyInstaller entry point; exists solely to put the `backend` package on `sys.path` correctly for the frozen build.
-- `electron/main.js` — spawns the backend sidecar (dev: venv python + uvicorn; packaged: compiled `main.exe`), resolves DB paths, handles the native save/open dialog IPC, and runs auto-backup on window open/close.
-- `main.spec` / `build_release.ps1` — PyInstaller spec and the scripted release build.
-- `docs/09-Database.md`, `docs/10-API.md` — authoritative schema and endpoint specs when `docs/memory.md`'s summary isn't enough detail.
+### Financial rules: DB-configurable with hardcoded fallbacks
+
+Thresholds like emergency fund target, high-interest loan ROI cutoff, prepayment liquidity buffer, insurance renewal alert window live in the `financial_rules` table (editable via `/api/rules`) but `decision_engine.py` and `calculations.py` fall back to hardcoded defaults if a rule is absent/disabled. See [hardcoded_vs_dynamic.md](hardcoded_vs_dynamic.md) for the authoritative list of which values are DB-driven vs. hardcoded in Python/TSX — check it before assuming a threshold is configurable.
+
+### Backend port/URL are hardcoded, not env-driven
+
+`127.0.0.1:8000` is duplicated in `electron/main.js`, `package.json` scripts, and `src/config.ts`'s `API_BASE_URL`. There's no single source of truth for the port — changing it means updating all three.

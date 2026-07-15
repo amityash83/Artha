@@ -348,24 +348,28 @@ const App: React.FC = () => {
           />
         )}
         {activeTab === 'assets' && (
-          <EntityGrid 
-            entityType="assets" 
-            entities={data.assets} 
-            categories={data.categories} 
-            institutions={data.institutions} 
+          <EntityGrid
+            entityType="assets"
+            entities={data.assets}
+            categories={data.categories}
+            institutions={data.institutions}
             goals={data.goals}
-            onRefresh={fetchFinanceData} 
+            liabilities={data.liabilities}
+            properties={data.assets.filter((a) => a.category_name === 'Property')}
+            onRefresh={fetchFinanceData}
             showToast={showToast}
           />
         )}
         {activeTab === 'liabilities' && (
-          <EntityGrid 
-            entityType="liabilities" 
-            entities={data.liabilities} 
-            categories={data.categories} 
-            institutions={data.institutions} 
+          <EntityGrid
+            entityType="liabilities"
+            entities={data.liabilities}
+            categories={data.categories}
+            institutions={data.institutions}
             goals={data.goals}
-            onRefresh={fetchFinanceData} 
+            liabilities={data.liabilities}
+            properties={data.assets.filter((a) => a.category_name === 'Property')}
+            onRefresh={fetchFinanceData}
             showToast={showToast}
           />
         )}

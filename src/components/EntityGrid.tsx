@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Category, Institution, Goal } from '../types';
+import { Category, Institution, Asset, Liability, Goal } from '../types';
 import { DynamicForm } from './DynamicForm';
 import { Plus, Edit2, Trash2, Search } from 'lucide-react';
 import { API_BASE_URL } from '../config';
@@ -10,9 +10,72 @@ interface EntityGridProps {
   categories: Category[];
   institutions: Institution[];
   goals?: Goal[];
+  liabilities?: Liability[];
+  properties?: Asset[];
   onRefresh: () => void;
   showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
+
+interface Column {
+  label: string;
+  key: string;
+  alignRight?: boolean;
+  suffix?: string;
+}
+
+const COMMON_COLUMNS: Record<string, Column[]> = {
+  accounts: [
+    { label: 'Name', key: 'name' },
+    { label: 'Institution', key: 'institution_name' },
+    { label: 'Balance', key: 'current_balance', alignRight: true },
+    { label: 'Owner', key: 'owner' },
+    { label: 'Status', key: 'status' },
+  ],
+  assets: [
+    { label: 'Name', key: 'name' },
+    { label: 'Category', key: 'category_name' },
+    { label: 'Institution', key: 'institution_name' },
+    { label: 'Current Value', key: 'current_value', alignRight: true },
+    { label: 'Owner', key: 'owner' },
+  ],
+  liabilities: [
+    { label: 'Name', key: 'name' },
+    { label: 'Category', key: 'category_name' },
+    { label: 'Lender', key: 'lender_name' },
+    { label: 'Outstanding Balance', key: 'outstanding', alignRight: true },
+    { label: 'Status', key: 'status' },
+  ],
+  goals: [
+    { label: 'Goal Name', key: 'name' },
+    { label: 'Target Amount', key: 'target_amount', alignRight: true },
+    { label: 'Current Amount', key: 'current_amount', alignRight: true },
+    { label: 'Monthly SIP', key: 'monthly_contribution', alignRight: true },
+    { label: 'Expected Date', key: 'expected_completion' },
+  ],
+};
+
+const CATEGORY_COLUMNS: Record<string, Column[]> = {
+  'Stock': [{ label: 'Ticker', key: 'ticker' }, { label: 'Quantity', key: 'quantity', alignRight: true }],
+  'Mutual Fund': [{ label: 'Scheme Code', key: 'ticker' }, { label: 'Units', key: 'quantity', alignRight: true }],
+  'Insurance': [{ label: 'Policy Type', key: 'policy_type' }, { label: 'Premium', key: 'premium', alignRight: true }],
+  'Property': [{ label: 'Rental Income', key: 'rental_income', alignRight: true }],
+  'Home Loan': [
+    { label: 'Rate (ROI)', key: 'interest_rate', suffix: '%' },
+    { label: 'Monthly EMI', key: 'emi', alignRight: true },
+  ],
+  'Personal Loan': [
+    { label: 'Rate (ROI)', key: 'interest_rate', suffix: '%' },
+    { label: 'Monthly EMI', key: 'emi', alignRight: true },
+  ],
+  'Car Loan': [
+    { label: 'Rate (ROI)', key: 'interest_rate', suffix: '%' },
+    { label: 'Monthly EMI', key: 'emi', alignRight: true },
+  ],
+  'Credit Card': [
+    { label: 'Credit Limit', key: 'credit_limit', alignRight: true },
+    { label: 'Due Date', key: 'due_date' },
+  ],
+};
 
 export const EntityGrid: React.FC<EntityGridProps> = ({
   entityType,
@@ -20,6 +83,8 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
   categories,
   institutions,
   goals,
+  liabilities = [],
+  properties = [],
   onRefresh,
   showToast,
 }) => {
@@ -58,13 +123,89 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
     }
   };
 
+  const dispatchSatelliteData = async (entityId: number, categoryName: string | undefined, formData: any) => {
+    if (entityType === 'assets' && categoryName === 'Insurance') {
+      await fetch(`${API_BASE_URL}/api/assets/${entityId}/insurance-details`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          policy_type: formData.policy_type || 'Life',
+          policy_number: formData.policy_number || '',
+          premium: formData.premium || 0,
+          frequency: formData.frequency || 'Yearly',
+          renewal_date: formData.renewal_date || null,
+          sum_assured: formData.sum_assured || 0,
+          surrender_value: formData.surrender_value || 0,
+          sum_insured: formData.sum_insured || 0,
+          claims_made: formData.claims_made || 0,
+          claims_amount: formData.claims_amount || 0,
+          idv: formData.idv || 0,
+          vehicle_registration: formData.vehicle_registration || '',
+        }),
+      });
+    } else if (entityType === 'assets' && (categoryName === 'Stock' || categoryName === 'Mutual Fund')) {
+      const existingLots = await fetch(`${API_BASE_URL}/api/assets/${entityId}/holdings`).then((r) => r.json());
+      const existingIds = new Set(existingLots.map((l: any) => l.id));
+      const submittedIds = new Set((formData.holding_lots || []).filter((l: any) => l.id).map((l: any) => l.id));
+
+      for (const lot of formData.holding_lots || []) {
+        const body = JSON.stringify({
+          purchase_date: lot.purchase_date,
+          quantity: lot.quantity,
+          price_per_unit: lot.price_per_unit,
+          notes: lot.notes || '',
+        });
+        if (lot.id) {
+          await fetch(`${API_BASE_URL}/api/holdings/${lot.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body });
+        } else {
+          await fetch(`${API_BASE_URL}/api/assets/${entityId}/holdings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+        }
+      }
+      for (const existingId of existingIds) {
+        if (!submittedIds.has(existingId)) {
+          await fetch(`${API_BASE_URL}/api/holdings/${existingId}`, { method: 'DELETE' });
+        }
+      }
+    } else if (entityType === 'liabilities' && categoryName === 'Credit Card') {
+      await fetch(`${API_BASE_URL}/api/liabilities/${entityId}/credit-card-details`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          credit_limit: formData.credit_limit || 0,
+          statement_balance: formData.statement_balance || 0,
+          statement_date: formData.statement_date || null,
+          due_date: formData.due_date || null,
+          annual_fee: formData.annual_fee || 0,
+          reward_points: formData.reward_points || 0,
+          point_value: formData.point_value || 0.25,
+        }),
+      });
+    }
+
+    // Property <-> Home Loan bidirectional link
+    if (entityType === 'assets' && categoryName === 'Property' && formData.linked_liability_id) {
+      await fetch(`${API_BASE_URL}/api/entities/liabilities/${formData.linked_liability_id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ linked_asset_id: entityId }),
+      });
+    }
+    if (entityType === 'liabilities' && categoryName === 'Home Loan' && formData.linked_asset_id) {
+      await fetch(`${API_BASE_URL}/api/entities/assets/${formData.linked_asset_id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ linked_liability_id: entityId }),
+      });
+    }
+  };
+
   const handleFormSubmit = async (formData: any) => {
     try {
       const isEdit = !!editingEntity;
-      const url = isEdit 
+      const url = isEdit
         ? `${API_BASE_URL}/api/entities/${entityType}/${editingEntity.id}`
         : `${API_BASE_URL}/api/entities/${entityType}`;
-        
+
       // Ensure category_id is set if not 'all'
       if (!formData.category_id && selectedCategoryId !== 'all') {
         formData.category_id = selectedCategoryId;
@@ -72,13 +213,19 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
         formData.category_id = typeCategories[0].id;
       }
 
+      const categoryName = categories.find((c) => c.id === formData.category_id)?.name;
+      const { holding_lots, ...primaryPayload } = formData;
+
       const res = await fetch(url, {
         method: isEdit ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(primaryPayload),
       });
 
       if (res.ok) {
+        const data = await res.json();
+        const entityId = isEdit ? editingEntity.id : data.id;
+        await dispatchSatelliteData(entityId, categoryName, formData);
         setIsAdding(false);
         setEditingEntity(null);
         onRefresh();
@@ -102,53 +249,22 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
     return val?.toString() || '—';
   };
 
-  // Determine key columns depending on entity type
-  const getColumns = () => {
-    if (entityType === 'accounts') {
-      return [
-        { label: 'Name', key: 'name' },
-        { label: 'Category', key: 'category_name' },
-        { label: 'Institution', key: 'institution_name' },
-        { label: 'Balance', key: 'current_balance', alignRight: true },
-        { label: 'Owner', key: 'owner' },
-        { label: 'Status', key: 'status' },
-      ];
-    } else if (entityType === 'assets') {
-      return [
-        { label: 'Name', key: 'name' },
-        { label: 'Category', key: 'category_name' },
-        { label: 'Institution', key: 'institution_name' },
-        { label: 'Current Value', key: 'current_value', alignRight: true },
-        { label: 'Invested', key: 'invested_amount', alignRight: true },
-        { label: 'Owner', key: 'owner' },
-      ];
-    } else if (entityType === 'liabilities') {
-      return [
-        { label: 'Name', key: 'name' },
-        { label: 'Category', key: 'category_name' },
-        { label: 'Lender', key: 'lender_name' },
-        { label: 'Outstanding Balance', key: 'outstanding', alignRight: true },
-        { label: 'Rate (ROI)', key: 'interest_rate', suffix: '%' },
-        { label: 'Monthly EMI', key: 'emi', alignRight: true },
-        { label: 'Status', key: 'status' },
-      ];
-    } else if (entityType === 'goals') {
-      return [
-        { label: 'Goal Name', key: 'name' },
-        { label: 'Target Amount', key: 'target_amount', alignRight: true },
-        { label: 'Current Amount', key: 'current_amount', alignRight: true },
-        { label: 'Monthly SIP', key: 'monthly_contribution', alignRight: true },
-        { label: 'Expected Date', key: 'expected_completion' },
-      ];
-    }
-    return [{ label: 'Name', key: 'name' }];
-  };
-
   const activeCategory = categories.find((c) => c.id === selectedCategoryId);
+
+  // Determine key columns: common columns for the entity type, plus category-specific
+  // columns appended when a single category is selected (not "All Categories").
+  const getColumns = (): Column[] => {
+    const common = COMMON_COLUMNS[entityType] || [{ label: 'Name', key: 'name' }];
+    if (activeCategory && CATEGORY_COLUMNS[activeCategory.name]) {
+      return [...common, ...CATEGORY_COLUMNS[activeCategory.name]];
+    }
+    return common;
+  };
+  const columns = getColumns();
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', fontFamily: 'Inter, sans-serif' }}>
-      
+
       {/* Upper Control Bar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -174,8 +290,8 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
             />
           </div>
 
-          <button 
-            className="btn btn-primary" 
+          <button
+            className="btn btn-primary"
             style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
             onClick={() => {
               setEditingEntity(null);
@@ -339,6 +455,8 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
               institutions={institutions}
               goals={goals}
               initialData={editingEntity}
+              liabilities={liabilities}
+              properties={properties}
               onSubmit={handleFormSubmit}
               onCancel={() => {
                 setIsAdding(false);
@@ -354,13 +472,13 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
         <table className="table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
           <thead>
             <tr>
-              {getColumns().map((col) => (
-                <th 
-                  key={col.key} 
-                  style={{ 
-                    color: 'var(--text-muted)', 
-                    fontWeight: 600, 
-                    fontSize: '12px', 
+              {columns.map((col) => (
+                <th
+                  key={col.key}
+                  style={{
+                    color: 'var(--text-muted)',
+                    fontWeight: 600,
+                    fontSize: '12px',
                     padding: '12px 16px',
                     textAlign: col.alignRight ? 'right' : 'left'
                   }}
@@ -374,22 +492,22 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
           <tbody>
             {filteredEntities.length === 0 ? (
               <tr>
-                <td colSpan={getColumns().length + 1} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
+                <td colSpan={columns.length + 1} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
                   No entities found matching active filters.
                 </td>
               </tr>
             ) : (
               filteredEntities.map((ent) => (
                 <tr key={ent.id} style={{ borderBottom: '1px solid var(--border-glass)' }} className="table-row">
-                  {getColumns().map((col) => {
+                  {columns.map((col) => {
                     const rawVal = ent[col.key];
                     const val = col.suffix ? `${rawVal}${col.suffix}` : getFormatValue(rawVal);
                     return (
-                      <td 
-                        key={col.key} 
-                        style={{ 
-                          fontSize: '13px', 
-                          color: '#e2e8f0', 
+                      <td
+                        key={col.key}
+                        style={{
+                          fontSize: '13px',
+                          color: '#e2e8f0',
                           padding: '14px 16px',
                           textAlign: col.alignRight ? 'right' : 'left'
                         }}
@@ -403,8 +521,8 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
                       {deletingEntityId === ent.id ? (
                         <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
                           <span style={{ color: 'var(--danger-light)', fontSize: '11px', fontWeight: 500 }}>Confirm?</span>
-                          <button 
-                            className="btn btn-secondary" 
+                          <button
+                            className="btn btn-secondary"
                             style={{ padding: '3px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444' }}
                             onClick={() => {
                               handleDelete(ent.id);
@@ -413,8 +531,8 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
                           >
                             Yes
                           </button>
-                          <button 
-                            className="btn btn-secondary" 
+                          <button
+                            className="btn btn-secondary"
                             style={{ padding: '3px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px' }}
                             onClick={() => setDeletingEntityId(null)}
                           >
@@ -423,15 +541,15 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
                         </div>
                       ) : (
                         <>
-                          <button 
-                            className="btn btn-secondary" 
+                          <button
+                            className="btn btn-secondary"
                             style={{ padding: '6px', minWidth: 'auto', borderRadius: '8px' }}
                             onClick={() => setEditingEntity(ent)}
                           >
                             <Edit2 size={13} style={{ color: '#a78bfa' }} />
                           </button>
-                          <button 
-                            className="btn btn-secondary" 
+                          <button
+                            className="btn btn-secondary"
                             style={{ padding: '6px', minWidth: 'auto', borderRadius: '8px' }}
                             onClick={() => setDeletingEntityId(ent.id)}
                           >
