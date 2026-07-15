@@ -613,13 +613,35 @@ def init_db():
 
     # 4. RUN AUTOMATED LEGACY DATA MIGRATION
     # Check if legacy tables exist. If they do, migrate them to new metadata structure.
+
+    # A0. Self-heal: restore accounts stranded in accounts_old. A previous version of
+    # migration A matched the normalized schema too (it also lacks metadata_json), renamed
+    # the healthy accounts table to accounts_old, then crashed reading the legacy
+    # 'institution' column — leaving all rows stranded there.
     try:
-        # A. Migrate Accounts
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='accounts_old'")
+        if cursor.fetchone():
+            cursor.execute("PRAGMA table_info('accounts_old')")
+            old_cols = [col['name'] for col in cursor.fetchall()]
+            if 'owner_id' in old_cols:  # accounts_old holds already-normalized rows, not legacy ones
+                cursor.execute("SELECT COUNT(*) AS c FROM accounts")
+                if cursor.fetchone()['c'] == 0:
+                    cursor.execute("""
+                    INSERT OR IGNORE INTO accounts (id, name, institution_id, owner_id, status, currency)
+                    SELECT id, name, institution_id, owner_id, status, currency FROM accounts_old
+                    """)
+                    print("[Migration] Restored stranded accounts from accounts_old.")
+                    cursor.execute("DROP TABLE accounts_old")
+    except Exception as e:
+        print("[Migration Warning] accounts_old self-heal error:", e)
+
+    try:
+        # A. Migrate Accounts (legacy schema only: identified by its 'institution' TEXT column)
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='accounts_old'")
         if not cursor.fetchone():
             cursor.execute("PRAGMA table_info('accounts')")
             columns = [col['name'] for col in cursor.fetchall()]
-            if columns and 'metadata_json' not in columns:
+            if columns and 'metadata_json' not in columns and 'institution' in columns:
                 cursor.execute("ALTER TABLE accounts RENAME TO accounts_old")
                 cursor.execute("""
                 CREATE TABLE accounts (
