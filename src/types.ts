@@ -105,6 +105,89 @@ export interface CreditCardDetails {
   annual_fee: number;
   reward_points: number;
   point_value: number;
+  renewal_date?: string;
+  network?: string;
+  lounge_visits_limit?: number;
+  lounge_visits_used?: number;
+  lounge_int_limit?: number;
+  lounge_int_used?: number;
+  milestone_spend_target?: number;
+  milestone_spend_current?: number;
+  milestone_reward_desc?: string;
+  remarks?: string;
+  base_points?: number;
+  base_spend?: number;
+  current_statement_spend?: number;
+  category_rules_json?: string;
+  milestone_rules_json?: string;
+  redemption_partners_json?: string;
+}
+
+export interface CardVariant {
+  id: number;
+  name: string;
+  issuer: string;
+  network: string;
+  card_tier: string;
+  joining_fee: number;
+  annual_fee: number;
+  fee_waiver_spend: number;
+  base_points: number;
+  base_spend: number;
+  point_value: number;
+  lounge_visits_domestic: number;
+  lounge_visits_international: number;
+  eligibility_notes?: string;
+  category_rules_json: string;
+  milestone_rules_json: string;
+  redemption_partners_json: string;
+  pros_json: string;
+  cons_json: string;
+  is_seeded: number;
+  source_notes?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CardComparisonResult {
+  weights_used: Record<string, number>;
+  assumed_annual_spend: number;
+  cards: Array<{
+    id: number;
+    source: 'owned' | 'library';
+    label: string;
+    issuer: string;
+    scores: {
+      fee: number;
+      reward_value: number;
+      lounge_access: number;
+      milestone_ease: number;
+      simplicity: number;
+    };
+    weighted_total: number;
+    projected_annual_reward_value: number;
+    annual_fee: number;
+    net_annual_value: number;
+  }>;
+  winner_id: number | null;
+  winner_source: 'owned' | 'library' | null;
+  caveats: string[];
+}
+
+export interface CreditCardAnnualReview {
+  liability_id: number;
+  name: string;
+  issuer?: string;
+  verdict: 'Keep' | 'Close' | 'Downgrade' | 'Upgrade-Candidate';
+  worth_the_fee: boolean;
+  annual_fee: number;
+  reward_value: number;
+  net_value: number;
+  milestone_on_pace: boolean | null;
+  lounge_utilization: number | null;
+  reason: string;
+  next_review_date: string | null;
+  caveat: string;
 }
 
 export interface Asset {
@@ -330,6 +413,7 @@ export interface InitData {
   institutions: Institution[];
   people: Person[];
   tax_profiles: TaxProfile[];
+  card_variants: CardVariant[];
   recommendations: Recommendation[];
   cash_flows: MonthlyCashFlow[];
 }

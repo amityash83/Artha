@@ -1,10 +1,13 @@
 import React, { useState, useMemo } from 'react';
-import { 
+import {
   CreditCard as CardIcon, Plus, Edit2, Trash2, ShieldAlert,
   X, Sparkles
 } from 'lucide-react';
 import { InitData } from '../types';
 import { API_BASE_URL } from '../config';
+import { CardLibraryTab } from './creditcards/CardLibraryTab';
+import { CompareCardsTab } from './creditcards/CompareCardsTab';
+import { AnnualReviewTab } from './creditcards/AnnualReviewTab';
 
 interface CreditCardsProps {
   data: InitData;
@@ -112,7 +115,15 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
     return liabilities.filter((l: any) => l.category_name === 'Credit Card');
   }, [liabilities]);
 
-  const [activeSubTab, setActiveSubTab] = useState<'inventory' | 'milestones' | 'calculator'>('inventory');
+  const [activeSubTab, setActiveSubTab] = useState<
+    'inventory' | 'milestones' | 'calculator' | 'library' | 'compare' | 'annual-review'
+  >('inventory');
+  const [comparePreselect, setComparePreselect] = useState<number | null>(null);
+
+  const handleCompareAlternatives = (liabilityId: number) => {
+    setComparePreselect(liabilityId);
+    setActiveSubTab('compare');
+  };
   
   // Modals & Overlay forms
   const [modalOpen, setModalOpen] = useState(false);
@@ -192,6 +203,33 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
     setRedemptionPartners(preset.partners as RedemptionPartnerRatio[]);
     setRemarks(preset.remarks);
     if (showToast) showToast(`Preset template applied: ${preset.name}`, "info");
+  };
+
+  // Card Library variant picker — the real replacement for the hardcoded PRESETS
+  // array above. PRESETS stays only as a fallback for the rare case card_variants
+  // is empty (e.g. a fresh DB where the seed migration hasn't run for some reason).
+  const applyCardVariant = (variant: any) => {
+    setName(variant.name);
+    const inst = institutions.find(i => i.name.toLowerCase().includes(String(variant.issuer).toLowerCase()));
+    setLenderId(inst ? inst.id.toString() : '');
+    setNetwork(variant.network);
+    setBasePoints(variant.base_points);
+    setBaseSpend(variant.base_spend);
+    setPointValue(variant.point_value);
+    setAnnualFee(variant.annual_fee);
+    setLoungeVisitsLimit(variant.lounge_visits_domestic);
+    setLoungeIntLimit(variant.lounge_visits_international);
+    try {
+      setCategoryRules(variant.category_rules_json ? JSON.parse(variant.category_rules_json) : []);
+    } catch { setCategoryRules([]); }
+    try {
+      setMilestoneRules(variant.milestone_rules_json ? JSON.parse(variant.milestone_rules_json) : []);
+    } catch { setMilestoneRules([]); }
+    try {
+      setRedemptionPartners(variant.redemption_partners_json ? JSON.parse(variant.redemption_partners_json) : []);
+    } catch { setRedemptionPartners([]); }
+    if (variant.eligibility_notes) setRemarks(variant.eligibility_notes);
+    if (showToast) showToast(`Card Library entry applied: ${variant.name}`, "info");
   };
 
   const handleOpenEdit = (card: any) => {
@@ -656,12 +694,33 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
         >
           Waivers &amp; Milestones
         </button>
-        <button 
+        <button
           className={`tab-btn ${activeSubTab === 'calculator' ? 'active' : ''}`}
           onClick={() => setActiveSubTab('calculator')}
           style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === 'calculator' ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === 'calculator' ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
         >
           Smart Rewards Simulator
+        </button>
+        <button
+          className={`tab-btn ${activeSubTab === 'library' ? 'active' : ''}`}
+          onClick={() => setActiveSubTab('library')}
+          style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === 'library' ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === 'library' ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+        >
+          Card Library
+        </button>
+        <button
+          className={`tab-btn ${activeSubTab === 'compare' ? 'active' : ''}`}
+          onClick={() => setActiveSubTab('compare')}
+          style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === 'compare' ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === 'compare' ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+        >
+          Compare Cards
+        </button>
+        <button
+          className={`tab-btn ${activeSubTab === 'annual-review' ? 'active' : ''}`}
+          onClick={() => setActiveSubTab('annual-review')}
+          style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === 'annual-review' ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === 'annual-review' ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+        >
+          Annual Review
         </button>
       </div>
 
@@ -1079,6 +1138,26 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
         </div>
       )}
 
+      {/* --- CARD LIBRARY --- */}
+      {activeSubTab === 'library' && (
+        <CardLibraryTab cardVariants={data.card_variants || []} onRefresh={onRefresh} showToast={showToast} />
+      )}
+
+      {/* --- COMPARE CARDS --- */}
+      {activeSubTab === 'compare' && (
+        <CompareCardsTab
+          ownedCards={creditCards}
+          cardVariants={data.card_variants || []}
+          showToast={showToast}
+          preselectLiabilityId={comparePreselect}
+        />
+      )}
+
+      {/* --- ANNUAL REVIEW --- */}
+      {activeSubTab === 'annual-review' && (
+        <AnnualReviewTab onCompareAlternatives={handleCompareAlternatives} />
+      )}
+
       {/* --- ADD/EDIT TABBED MODAL OVERLAY --- */}
       {modalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' }}>
@@ -1094,18 +1173,30 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
               {editingCard ? `Configure Card: ${editingCard.name}` : 'Register Credit Card'}
             </h3>
 
-            {/* Presets Row (Only show when adding new card) */}
+            {/* Card Library Quick Fill (Only show when adding new card) */}
             {!editingCard && (
               <div style={{ background: 'rgba(139,92,246,0.04)', border: '1px solid rgba(139,92,246,0.12)', padding: '12px 16px', borderRadius: '10px', marginBottom: '20px' }}>
                 <span style={{ fontSize: '11px', color: '#a78bfa', fontWeight: 600, display: 'block', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  Quick Fill Premium Presets
+                  Quick Fill From Card Library
                 </span>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  {PRESETS.map((p, pIdx) => (
-                    <button 
+                  {(data.card_variants && data.card_variants.length > 0 ? data.card_variants : []).map((v: any) => (
+                    <button
+                      key={v.id}
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ padding: '6px 12px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-glass)' }}
+                      onClick={() => applyCardVariant(v)}
+                    >
+                      <Sparkles size={11} style={{ color: '#fcd34d' }} />
+                      {v.name}
+                    </button>
+                  ))}
+                  {(!data.card_variants || data.card_variants.length === 0) && PRESETS.map((p, pIdx) => (
+                    <button
                       key={pIdx}
-                      type="button" 
-                      className="btn btn-secondary" 
+                      type="button"
+                      className="btn btn-secondary"
                       style={{ padding: '6px 12px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-glass)' }}
                       onClick={() => applyPreset(p)}
                     >

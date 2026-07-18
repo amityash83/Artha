@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from backend.db import get_db_connection, init_db, get_db_path, get_db_dir
 import backend.calculations as calc
-from backend.decision_engine import generate_recommendations
+from backend.decision_engine import generate_recommendations, generate_credit_card_annual_reviews
 
 app = FastAPI(title="Artha API")
 
@@ -358,6 +358,9 @@ def get_init_data():
         """)
         tax_profiles = [dict(row) for row in cursor.fetchall()]
 
+        cursor.execute("SELECT * FROM card_variants ORDER BY is_seeded DESC, name ASC")
+        card_variants = [dict(row) for row in cursor.fetchall()]
+
         # Monthly Cash Flows logs
         cursor.execute("SELECT * FROM monthly_cash_flows ORDER BY month DESC")
         cash_flows = [dict(row) for row in cursor.fetchall()]
@@ -413,6 +416,7 @@ def get_init_data():
             "institutions": institutions,
             "people": people,
             "tax_profiles": tax_profiles,
+            "card_variants": card_variants,
             "recommendations": recommendations,
             "cash_flows": cash_flows
         }
@@ -871,6 +875,98 @@ def put_credit_card_details(id: int, details: CreditCardDetailsSchema):
                 payload
             )
         cursor.execute("UPDATE liabilities SET liability_kind = 'revolving_credit', interest_rate = 0, emi = 0, tenure_months = 0 WHERE id = ?", (id,))
+        conn.commit()
+        return {"status": "success"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+# --- Card Library (reference catalogue, distinct from owned cards above) ---
+class CardVariantSchema(BaseModel):
+    name: str
+    issuer: str
+    network: str = "Visa"
+    card_tier: str = "Premium"
+    joining_fee: float = 0.0
+    annual_fee: float = 0.0
+    fee_waiver_spend: float = 0.0
+    base_points: float = 1.0
+    base_spend: float = 100.0
+    point_value: float = 0.25
+    lounge_visits_domestic: int = 0
+    lounge_visits_international: int = 0
+    eligibility_notes: Optional[str] = None
+    category_rules_json: str = "[]"
+    milestone_rules_json: str = "[]"
+    redemption_partners_json: str = "[]"
+    pros_json: str = "[]"
+    cons_json: str = "[]"
+    source_notes: Optional[str] = None
+
+@app.get("/api/card-variants")
+def list_card_variants():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM card_variants ORDER BY is_seeded DESC, name ASC")
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+@app.post("/api/card-variants")
+def create_card_variant(variant: CardVariantSchema):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        payload = variant.dict()
+        payload["is_seeded"] = 0
+        columns = list(payload.keys())
+        placeholders = [f":{c}" for c in columns]
+        cursor.execute(
+            f"INSERT INTO card_variants ({', '.join(columns)}) VALUES ({', '.join(placeholders)})",
+            payload
+        )
+        conn.commit()
+        return {"status": "success", "id": cursor.lastrowid}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.put("/api/card-variants/{id}")
+def update_card_variant(id: int, variant: CardVariantSchema):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id FROM card_variants WHERE id = ?", (id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Card variant not found")
+        payload = variant.dict()
+        payload["id"] = id
+        set_clauses = [f"{c} = :{c}" for c in payload.keys() if c != "id"]
+        cursor.execute(
+            f"UPDATE card_variants SET {', '.join(set_clauses)}, updated_at = datetime('now') WHERE id = :id",
+            payload
+        )
+        conn.commit()
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.delete("/api/card-variants/{id}")
+def delete_card_variant(id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM card_variants WHERE id = ?", (id,))
         conn.commit()
         return {"status": "success"}
     except Exception as e:
@@ -2807,6 +2903,69 @@ def get_financial_calendar():
     return events
 
 # --- Multi-Loan Payoff Optimizer Endpoint ---
+class CompareCardsRequest(BaseModel):
+    owned_liability_ids: List[int] = []
+    library_variant_ids: List[int] = []
+    weights: Optional[dict] = None
+    assumed_annual_spend: float = 600000.0
+
+def _parse_card_json_fields(row: dict) -> dict:
+    d = dict(row)
+    for key in ("category_rules_json", "milestone_rules_json", "redemption_partners_json"):
+        target = key.replace("_json", "")
+        try:
+            d[target] = json.loads(d.get(key) or "[]")
+        except Exception:
+            d[target] = []
+    return d
+
+@app.post("/api/credit-cards/compare")
+def compare_credit_cards(req: CompareCardsRequest):
+    total_selected = len(req.owned_liability_ids) + len(req.library_variant_ids)
+    if total_selected < 2 or total_selected > 5:
+        raise HTTPException(status_code=400, detail="Select between 2 and 5 cards to compare.")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        normalized = []
+        if req.owned_liability_ids:
+            placeholders = ", ".join("?" for _ in req.owned_liability_ids)
+            cursor.execute(f"""
+                SELECT l.id as liability_id, l.name, inst.name as lender_name, ccd.*
+                FROM liabilities l
+                JOIN credit_card_details ccd ON ccd.liability_id = l.id
+                LEFT JOIN institutions inst ON l.lender_institution_id = inst.id
+                WHERE l.id IN ({placeholders})
+            """, req.owned_liability_ids)
+            for row in cursor.fetchall():
+                parsed = _parse_card_json_fields(dict(row))
+                normalized.append(calc.normalize_card_for_comparison(parsed, "owned"))
+
+        if req.library_variant_ids:
+            placeholders = ", ".join("?" for _ in req.library_variant_ids)
+            cursor.execute(f"SELECT * FROM card_variants WHERE id IN ({placeholders})", req.library_variant_ids)
+            for row in cursor.fetchall():
+                parsed = _parse_card_json_fields(dict(row))
+                normalized.append(calc.normalize_card_for_comparison(parsed, "library"))
+
+        if len(normalized) < 2:
+            raise HTTPException(status_code=400, detail="Could not resolve at least 2 valid cards to compare.")
+
+        return calc.compare_cards(normalized, req.weights, req.assumed_annual_spend)
+    except HTTPException:
+        raise
+    finally:
+        conn.close()
+
+@app.get("/api/credit-cards/annual-review")
+def get_annual_review(liability_id: Optional[int] = None):
+    conn = get_db_connection()
+    try:
+        return generate_credit_card_annual_reviews(conn, liability_id)
+    finally:
+        conn.close()
+
 class LoanOptimizerRequest(BaseModel):
     loans: list
     extra_monthly_budget: float

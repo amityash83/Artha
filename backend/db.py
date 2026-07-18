@@ -228,6 +228,43 @@ def init_db():
     )
     """)
 
+    # Card Library: a reference catalogue of card PRODUCTS a user might consider
+    # applying for, distinct from their own registered cards (liabilities +
+    # credit_card_details above). Deliberately reuses the exact same JSON field
+    # shapes (category_rules_json/milestone_rules_json/redemption_partners_json)
+    # as credit_card_details so both can share one normalization/scoring path in
+    # Compare Cards, and so a chosen variant can prefill a new card's details with
+    # zero transformation. Static reference data only — Artha never fetches live
+    # card data — is_seeded distinguishes shipped starter rows from user entries.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS card_variants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        issuer TEXT NOT NULL,
+        network TEXT NOT NULL DEFAULT 'Visa',
+        card_tier TEXT DEFAULT 'Premium',
+        joining_fee REAL DEFAULT 0.0,
+        annual_fee REAL DEFAULT 0.0,
+        fee_waiver_spend REAL DEFAULT 0.0,
+        base_points REAL DEFAULT 1.0,
+        base_spend REAL DEFAULT 100.0,
+        point_value REAL DEFAULT 0.25,
+        lounge_visits_domestic INTEGER DEFAULT 0,
+        lounge_visits_international INTEGER DEFAULT 0,
+        eligibility_notes TEXT,
+        category_rules_json TEXT DEFAULT '[]',
+        milestone_rules_json TEXT DEFAULT '[]',
+        redemption_partners_json TEXT DEFAULT '[]',
+        pros_json TEXT DEFAULT '[]',
+        cons_json TEXT DEFAULT '[]',
+        is_seeded INTEGER NOT NULL DEFAULT 0,
+        source_notes TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(name, issuer)
+    )
+    """)
+
     # Insurance details (satellite table: 1:1 with assets, carries the policy_type sub-type)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS insurance_details (
@@ -907,6 +944,181 @@ def init_db():
         cursor.execute("DELETE FROM financial_rules WHERE rule_key = 'no_villa_equity'")
     except Exception as e:
         print("[Migration Warning] no_villa_equity rule removal error:", e)
+
+    # Card Library starter catalogue. Indicative terms only, not fetched from any live
+    # source — verify current offers with the issuer before applying. UNIQUE(name, issuer)
+    # on card_variants makes this INSERT OR IGNORE idempotent across repeated init_db() runs.
+    source_note = "Indicative terms, verify current offer with issuer before applying — Artha does not fetch live card data."
+    default_card_variants = [
+        {
+            "name": "HDFC Infinia (Metal)", "issuer": "HDFC Bank", "network": "Visa", "card_tier": "Super-Premium",
+            "joining_fee": 12500.0, "annual_fee": 12500.0, "fee_waiver_spend": 1000000.0,
+            "base_points": 5.0, "base_spend": 150.0, "point_value": 1.0,
+            "lounge_visits_domestic": 99, "lounge_visits_international": 99,
+            "eligibility_notes": "By-invitation or high income/relationship value.",
+            "category_rules_json": json.dumps([
+                {"category": "Travel", "multiplier": 5, "isExcluded": False, "monthlyCapPoints": 15000},
+                {"category": "Dining", "multiplier": 5, "isExcluded": False, "monthlyCapPoints": 5000},
+                {"category": "Fuel", "multiplier": 0, "isExcluded": True},
+                {"category": "Rent", "multiplier": 0, "isExcluded": True},
+                {"category": "Utilities", "multiplier": 1, "isExcluded": False},
+            ]),
+            "milestone_rules_json": "[]",
+            "redemption_partners_json": json.dumps([
+                {"partnerName": "Club Vistara (1:1)", "transferRatio": 1.0},
+                {"partnerName": "KrisFlyer Singapore (1:1)", "transferRatio": 1.0},
+            ]),
+            "pros_json": json.dumps(["Uncapped lounge access", "Strong travel transfer partners", "High base reward rate"]),
+            "cons_json": json.dumps(["High joining/annual fee", "Invite-only for most applicants"]),
+        },
+        {
+            "name": "Axis Magnus", "issuer": "Axis Bank", "network": "Visa", "card_tier": "Super-Premium",
+            "joining_fee": 12500.0, "annual_fee": 12500.0, "fee_waiver_spend": 2500000.0,
+            "base_points": 12.0, "base_spend": 200.0, "point_value": 0.40,
+            "lounge_visits_domestic": 8, "lounge_visits_international": 8,
+            "eligibility_notes": "High income bracket typically required.",
+            "category_rules_json": json.dumps([
+                {"category": "Travel", "multiplier": 5, "isExcluded": False, "monthlyCapPoints": 20000},
+                {"category": "Fuel", "multiplier": 0, "isExcluded": True},
+                {"category": "Rent", "multiplier": 0, "isExcluded": True},
+                {"category": "Insurance", "multiplier": 0, "isExcluded": True},
+                {"category": "Utilities", "multiplier": 0, "isExcluded": True},
+            ]),
+            "milestone_rules_json": json.dumps([{"spendThreshold": 150000, "bonusPointsRate": 35, "pointsPerSpend": 200}]),
+            "redemption_partners_json": json.dumps([
+                {"partnerName": "Singapore Airlines (5:2)", "transferRatio": 0.4},
+                {"partnerName": "ITC Club (5:2)", "transferRatio": 0.4},
+            ]),
+            "pros_json": json.dumps(["Step-up milestone rewards", "Good lounge access", "Strong travel partners"]),
+            "cons_json": json.dumps(["High annual fee", "Several category exclusions"]),
+        },
+        {
+            "name": "SBI Card ELITE", "issuer": "SBI", "network": "Mastercard", "card_tier": "Premium",
+            "joining_fee": 4999.0, "annual_fee": 4999.0, "fee_waiver_spend": 1000000.0,
+            "base_points": 2.0, "base_spend": 100.0, "point_value": 0.25,
+            "lounge_visits_domestic": 8, "lounge_visits_international": 6,
+            "eligibility_notes": "Mid-to-high income bracket.",
+            "category_rules_json": json.dumps([
+                {"category": "Dining", "multiplier": 5, "isExcluded": False},
+                {"category": "Fuel", "multiplier": 0, "isExcluded": True},
+            ]),
+            "milestone_rules_json": "[]",
+            "redemption_partners_json": "[]",
+            "pros_json": json.dumps(["Movie voucher milestones", "Reasonable fee for the tier"]),
+            "cons_json": json.dumps(["Lower base reward rate than Super-Premium peers"]),
+        },
+        {
+            "name": "HDFC Regalia Gold", "issuer": "HDFC Bank", "network": "Visa", "card_tier": "Mid",
+            "joining_fee": 2500.0, "annual_fee": 2500.0, "fee_waiver_spend": 400000.0,
+            "base_points": 4.0, "base_spend": 150.0, "point_value": 0.50,
+            "lounge_visits_domestic": 8, "lounge_visits_international": 6,
+            "eligibility_notes": "Salaried/self-employed, moderate income.",
+            "category_rules_json": json.dumps([
+                {"category": "Dining", "multiplier": 4, "isExcluded": False},
+                {"category": "Groceries", "multiplier": 4, "isExcluded": False},
+            ]),
+            "milestone_rules_json": "[]",
+            "redemption_partners_json": "[]",
+            "pros_json": json.dumps(["Accessible fee waiver threshold", "Solid dining/groceries rate"]),
+            "cons_json": json.dumps(["Lounge access lower than Super-Premium tier"]),
+        },
+        {
+            "name": "ICICI Amazon Pay", "issuer": "ICICI Bank", "network": "Visa", "card_tier": "Entry",
+            "joining_fee": 0.0, "annual_fee": 0.0, "fee_waiver_spend": 0.0,
+            "base_points": 1.0, "base_spend": 100.0, "point_value": 1.0,
+            "lounge_visits_domestic": 0, "lounge_visits_international": 0,
+            "eligibility_notes": "Amazon Prime membership required for the top-tier cashback rate.",
+            "category_rules_json": json.dumps([
+                {"category": "Amazon", "multiplier": 5, "isExcluded": False},
+                {"category": "Bill Payments", "multiplier": 2, "isExcluded": False},
+                {"category": "Others", "multiplier": 1, "isExcluded": False},
+            ]),
+            "milestone_rules_json": "[]",
+            "redemption_partners_json": "[]",
+            "pros_json": json.dumps(["Lifetime free", "Direct cashback, no point conversion"]),
+            "cons_json": json.dumps(["No lounge access", "Best rate tied to Amazon spend"]),
+        },
+        {
+            "name": "Amex Membership Rewards (Gold Card)", "issuer": "American Express", "network": "Amex", "card_tier": "Mid",
+            "joining_fee": 1000.0, "annual_fee": 4500.0, "fee_waiver_spend": 190000.0,
+            "base_points": 1.0, "base_spend": 50.0, "point_value": 0.50,
+            "lounge_visits_domestic": 0, "lounge_visits_international": 0,
+            "eligibility_notes": "Amex acceptance is narrower than Visa/Mastercard in India.",
+            "category_rules_json": "[]",
+            "milestone_rules_json": json.dumps([{"spendThreshold": 190000, "bonusPointsRate": 1, "pointsPerSpend": 50}]),
+            "redemption_partners_json": json.dumps([{"partnerName": "British Airways (1:1)", "transferRatio": 1.0}]),
+            "pros_json": json.dumps(["Strong airline transfer partners", "Milestone bonus points"]),
+            "cons_json": json.dumps(["Limited merchant acceptance", "No lounge access"]),
+        },
+        {
+            "name": "SBI Cashback Card", "issuer": "SBI", "network": "Visa", "card_tier": "Entry",
+            "joining_fee": 999.0, "annual_fee": 999.0, "fee_waiver_spend": 200000.0,
+            "base_points": 1.0, "base_spend": 100.0, "point_value": 1.0,
+            "lounge_visits_domestic": 0, "lounge_visits_international": 0,
+            "eligibility_notes": "Broad eligibility, entry-level income accepted.",
+            "category_rules_json": json.dumps([
+                {"category": "Online Spends", "multiplier": 5, "isExcluded": False},
+                {"category": "Offline Spends", "multiplier": 1, "isExcluded": False},
+            ]),
+            "milestone_rules_json": "[]",
+            "redemption_partners_json": "[]",
+            "pros_json": json.dumps(["Flat cashback, no redemption complexity", "Accessible fee waiver"]),
+            "cons_json": json.dumps(["No lounge access", "Lower rate on offline spends"]),
+        },
+        {
+            "name": "Axis Ace", "issuer": "Axis Bank", "network": "Visa", "card_tier": "Entry",
+            "joining_fee": 499.0, "annual_fee": 499.0, "fee_waiver_spend": 200000.0,
+            "base_points": 1.5, "base_spend": 100.0, "point_value": 1.0,
+            "lounge_visits_domestic": 0, "lounge_visits_international": 0,
+            "eligibility_notes": "Entry-level income accepted.",
+            "category_rules_json": json.dumps([
+                {"category": "Bill Payments (Google Pay)", "multiplier": 5, "isExcluded": False},
+                {"category": "Others", "multiplier": 1.5, "isExcluded": False},
+            ]),
+            "milestone_rules_json": "[]",
+            "redemption_partners_json": "[]",
+            "pros_json": json.dumps(["Low fee", "Strong bill-payment cashback"]),
+            "cons_json": json.dumps(["No lounge access", "Best rate requires a specific payment app"]),
+        },
+        {
+            "name": "HSBC Premier Metal", "issuer": "HSBC", "network": "Mastercard", "card_tier": "Premium",
+            "joining_fee": 0.0, "annual_fee": 20000.0, "fee_waiver_spend": 0.0,
+            "base_points": 3.0, "base_spend": 100.0, "point_value": 0.25,
+            "lounge_visits_domestic": 12, "lounge_visits_international": 12,
+            "eligibility_notes": "Requires HSBC Premier relationship (minimum relationship balance) — fee waiver is relationship-based, not spend-based.",
+            "category_rules_json": "[]",
+            "milestone_rules_json": "[]",
+            "redemption_partners_json": "[]",
+            "pros_json": json.dumps(["Strong lounge access", "Premium banking relationship perks"]),
+            "cons_json": json.dumps(["High annual fee if relationship balance not maintained", "Fewer category multipliers"]),
+        },
+        {
+            "name": "IDFC FIRST Wealth", "issuer": "IDFC FIRST Bank", "network": "Visa", "card_tier": "Mid",
+            "joining_fee": 0.0, "annual_fee": 0.0, "fee_waiver_spend": 0.0,
+            "base_points": 3.0, "base_spend": 100.0, "point_value": 0.25,
+            "lounge_visits_domestic": 8, "lounge_visits_international": 8,
+            "eligibility_notes": "Lifetime free, moderate income bracket.",
+            "category_rules_json": json.dumps([{"category": "Select Categories", "multiplier": 10, "isExcluded": False}]),
+            "milestone_rules_json": "[]",
+            "redemption_partners_json": "[]",
+            "pros_json": json.dumps(["Lifetime free card", "Good lounge access for a no-fee card"]),
+            "cons_json": json.dumps(["Higher category multiplier limited to select spends"]),
+        },
+    ]
+    for v in default_card_variants:
+        cursor.execute("""
+        INSERT OR IGNORE INTO card_variants
+        (name, issuer, network, card_tier, joining_fee, annual_fee, fee_waiver_spend,
+         base_points, base_spend, point_value, lounge_visits_domestic, lounge_visits_international,
+         eligibility_notes, category_rules_json, milestone_rules_json, redemption_partners_json,
+         pros_json, cons_json, is_seeded, source_notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+        """, (
+            v["name"], v["issuer"], v["network"], v["card_tier"], v["joining_fee"], v["annual_fee"], v["fee_waiver_spend"],
+            v["base_points"], v["base_spend"], v["point_value"], v["lounge_visits_domestic"], v["lounge_visits_international"],
+            v["eligibility_notes"], v["category_rules_json"], v["milestone_rules_json"], v["redemption_partners_json"],
+            v["pros_json"], v["cons_json"], source_note
+        ))
 
     conn.commit()
 
