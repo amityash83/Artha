@@ -257,6 +257,45 @@ def init_db():
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_holding_lots_asset ON holding_lots(asset_id)")
 
+    # Property rental ledger (satellite table: 1:many with assets, for Property monthly rent/expenses)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS property_rental_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+        month TEXT NOT NULL,
+        rent_amount REAL NOT NULL DEFAULT 0.0,
+        expenses_amount REAL NOT NULL DEFAULT 0.0,
+        notes TEXT,
+        UNIQUE(asset_id, month)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_property_rental_ledger_asset ON property_rental_ledger(asset_id)")
+
+    # Insurance claims (satellite table: 1:many with assets, individual claim events)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS insurance_claims (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+        claim_date TEXT NOT NULL,
+        claim_amount REAL NOT NULL DEFAULT 0.0,
+        status TEXT DEFAULT 'Filed',
+        description TEXT
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_insurance_claims_asset ON insurance_claims(asset_id)")
+
+    # Insurance premium payments (satellite table: 1:many with assets, individual payment history)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS insurance_premium_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+        payment_date TEXT NOT NULL,
+        amount REAL NOT NULL DEFAULT 0.0,
+        notes TEXT
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_insurance_premium_payments_asset ON insurance_premium_payments(asset_id)")
+
     # Income
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS income (
@@ -1161,6 +1200,36 @@ def init_db():
             print("[Migration] Legacy assets goal_mapping synced successfully.")
     except Exception as e:
         print("[Migration Warning] goal_holdings sync failed:", e)
+
+    # K. Backfill property_rental_ledger from existing Property assets' metadata_json
+    # (one synthetic current-month entry each). insurance_claims/insurance_premium_payments
+    # get no backfill — there's no reconstructable per-event history behind the existing
+    # claims_made/claims_amount lifetime counters, so fabricating placeholder rows would
+    # create false history; those tables simply start empty.
+    try:
+        cursor.execute("""
+            SELECT a.id, a.metadata_json FROM assets a
+            JOIN categories c ON a.category_id = c.id
+            WHERE c.name = 'Property'
+            AND a.id NOT IN (SELECT DISTINCT asset_id FROM property_rental_ledger)
+        """)
+        prop_rows = cursor.fetchall()
+        for row in prop_rows:
+            meta = json.loads(row['metadata_json']) if row['metadata_json'] else {}
+            cursor.execute("""
+                INSERT OR IGNORE INTO property_rental_ledger (asset_id, month, rent_amount, expenses_amount, notes)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                row['id'],
+                datetime.now().strftime('%Y-%m'),
+                meta.get('rental_income', 0.0) or 0.0,
+                meta.get('maintenance_expenses', 0.0) or 0.0,
+                'Auto-migrated from legacy rental_income/maintenance_expenses'
+            ))
+        if prop_rows:
+            print(f"[Migration] Backfilled property_rental_ledger for {len(prop_rows)} propert(y/ies).")
+    except Exception as e:
+        print("[Migration Warning] property_rental_ledger backfill error:", e)
 
     conn.commit()
     conn.close()

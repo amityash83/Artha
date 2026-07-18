@@ -10,6 +10,7 @@ import { EntityGrid } from './components/EntityGrid';
 import { Snapshot } from './components/Snapshot';
 import { Simulations } from './components/Simulations';
 import { Reports } from './components/Reports';
+import { Settings } from './components/Settings';
 import { EmiCalculator } from './components/EmiCalculator';
 import { FinancialCalendar } from './components/FinancialCalendar';
 import { LoanOptimizer } from './components/LoanOptimizer';
@@ -300,12 +301,21 @@ const App: React.FC = () => {
               </div>
             </li>
             <li>
-              <div 
+              <div
                 className={`sidebar-item ${activeTab === 'reports' ? 'active' : ''}`}
                 onClick={() => handleNavigate('reports')}
               >
                 <FileText size={16} />
-                Integrations &amp; Backups
+                Reports
+              </div>
+            </li>
+            <li>
+              <div
+                className={`sidebar-item ${activeTab === 'settings' ? 'active' : ''}`}
+                onClick={() => handleNavigate('settings')}
+              >
+                <Sliders size={16} />
+                Settings
               </div>
             </li>
           </ul>
@@ -401,7 +411,10 @@ const App: React.FC = () => {
           <EmiCalculator showToast={showToast} />
         )}
         {activeTab === 'reports' && (
-          <Reports data={data} onRefresh={fetchFinanceData} showToast={showToast} />
+          <Reports data={data} />
+        )}
+        {activeTab === 'settings' && (
+          <Settings onRefresh={fetchFinanceData} showToast={showToast} />
         )}
       </main>
 

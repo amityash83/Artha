@@ -56,6 +56,32 @@ export interface HoldingLot {
   notes?: string;
 }
 
+export interface RentalLedgerEntry {
+  id?: number;
+  asset_id?: number;
+  month: string; // 'YYYY-MM'
+  rent_amount: number;
+  expenses_amount: number;
+  notes?: string;
+}
+
+export interface InsuranceClaim {
+  id?: number;
+  asset_id?: number;
+  claim_date: string;
+  claim_amount: number;
+  status?: string;
+  description?: string;
+}
+
+export interface InsurancePremiumPayment {
+  id?: number;
+  asset_id?: number;
+  payment_date: string;
+  amount: number;
+  notes?: string;
+}
+
 export interface CreditCardDetails {
   liability_id?: number;
   credit_limit: number;
@@ -82,6 +108,10 @@ export interface Asset {
   metadata_json?: string;
   insurance_details?: InsuranceDetails;
   holding_lots?: HoldingLot[];
+  xirr?: number; // Computed server-side from holding_lots + current_value (Stock/Mutual Fund only)
+  rental_ledger?: RentalLedgerEntry[];
+  insurance_claims?: InsuranceClaim[];
+  premium_payments?: InsurancePremiumPayment[];
   [key: string]: any; // Allows holding dynamic deserialized parameters
 }
 

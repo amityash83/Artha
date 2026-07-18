@@ -56,8 +56,8 @@ const COMMON_COLUMNS: Record<string, Column[]> = {
 };
 
 const CATEGORY_COLUMNS: Record<string, Column[]> = {
-  'Stock': [{ label: 'Ticker', key: 'ticker' }, { label: 'Quantity', key: 'quantity', alignRight: true }],
-  'Mutual Fund': [{ label: 'Scheme Code', key: 'ticker' }, { label: 'Units', key: 'quantity', alignRight: true }],
+  'Stock': [{ label: 'Ticker', key: 'ticker' }, { label: 'Quantity', key: 'quantity', alignRight: true }, { label: 'XIRR', key: 'xirr', alignRight: true, suffix: '%' }],
+  'Mutual Fund': [{ label: 'Scheme Code', key: 'ticker' }, { label: 'Units', key: 'quantity', alignRight: true }, { label: 'XIRR', key: 'xirr', alignRight: true, suffix: '%' }],
   'Insurance': [{ label: 'Policy Type', key: 'policy_type' }, { label: 'Premium', key: 'premium', alignRight: true }],
   'Property': [{ label: 'Rental Income', key: 'rental_income', alignRight: true }],
   'Home Loan': [
@@ -165,6 +165,71 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
           vehicle_registration: formData.vehicle_registration || '',
         }),
       });
+
+      const existingClaims = await fetch(`${API_BASE_URL}/api/assets/${entityId}/insurance-claims`).then((r) => r.json());
+      const existingClaimIds = new Set(existingClaims.map((c: any) => c.id));
+      const submittedClaimIds = new Set((formData.insurance_claims || []).filter((c: any) => c.id).map((c: any) => c.id));
+      for (const claim of formData.insurance_claims || []) {
+        const body = JSON.stringify({
+          claim_date: claim.claim_date,
+          claim_amount: claim.claim_amount,
+          status: claim.status || 'Filed',
+          description: claim.description || '',
+        });
+        if (claim.id) {
+          await fetch(`${API_BASE_URL}/api/insurance-claims/${claim.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body });
+        } else {
+          await fetch(`${API_BASE_URL}/api/assets/${entityId}/insurance-claims`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+        }
+      }
+      for (const existingId of existingClaimIds) {
+        if (!submittedClaimIds.has(existingId)) {
+          await fetch(`${API_BASE_URL}/api/insurance-claims/${existingId}`, { method: 'DELETE' });
+        }
+      }
+
+      const existingPayments = await fetch(`${API_BASE_URL}/api/assets/${entityId}/premium-payments`).then((r) => r.json());
+      const existingPaymentIds = new Set(existingPayments.map((p: any) => p.id));
+      const submittedPaymentIds = new Set((formData.premium_payments || []).filter((p: any) => p.id).map((p: any) => p.id));
+      for (const payment of formData.premium_payments || []) {
+        const body = JSON.stringify({
+          payment_date: payment.payment_date,
+          amount: payment.amount,
+          notes: payment.notes || '',
+        });
+        if (payment.id) {
+          await fetch(`${API_BASE_URL}/api/premium-payments/${payment.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body });
+        } else {
+          await fetch(`${API_BASE_URL}/api/assets/${entityId}/premium-payments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+        }
+      }
+      for (const existingId of existingPaymentIds) {
+        if (!submittedPaymentIds.has(existingId)) {
+          await fetch(`${API_BASE_URL}/api/premium-payments/${existingId}`, { method: 'DELETE' });
+        }
+      }
+    } else if (entityType === 'assets' && categoryName === 'Property') {
+      const existingEntries = await fetch(`${API_BASE_URL}/api/assets/${entityId}/rental-entries`).then((r) => r.json());
+      const existingEntryIds = new Set(existingEntries.map((e: any) => e.id));
+      const submittedEntryIds = new Set((formData.rental_ledger || []).filter((e: any) => e.id).map((e: any) => e.id));
+      for (const entry of formData.rental_ledger || []) {
+        const body = JSON.stringify({
+          month: entry.month,
+          rent_amount: entry.rent_amount,
+          expenses_amount: entry.expenses_amount,
+          notes: entry.notes || '',
+        });
+        if (entry.id) {
+          await fetch(`${API_BASE_URL}/api/rental-entries/${entry.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body });
+        } else {
+          await fetch(`${API_BASE_URL}/api/assets/${entityId}/rental-entries`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+        }
+      }
+      for (const existingId of existingEntryIds) {
+        if (!submittedEntryIds.has(existingId)) {
+          await fetch(`${API_BASE_URL}/api/rental-entries/${existingId}`, { method: 'DELETE' });
+        }
+      }
     } else if (entityType === 'assets' && (categoryName === 'Stock' || categoryName === 'Mutual Fund')) {
       const existingLots = await fetch(`${API_BASE_URL}/api/assets/${entityId}/holdings`).then((r) => r.json());
       const existingIds = new Set(existingLots.map((l: any) => l.id));
@@ -233,7 +298,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
       }
 
       const categoryName = categories.find((c) => c.id === formData.category_id)?.name;
-      const { holding_lots, funding_constraints, ...primaryPayload } = formData;
+      const { holding_lots, funding_constraints, rental_ledger, insurance_claims, premium_payments, ...primaryPayload } = formData;
 
       const res = await fetch(url, {
         method: isEdit ? 'PUT' : 'POST',

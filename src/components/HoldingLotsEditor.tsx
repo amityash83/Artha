@@ -5,9 +5,10 @@ import { HoldingLot } from '../types';
 interface HoldingLotsEditorProps {
   lots: HoldingLot[];
   onChange: (lots: HoldingLot[]) => void;
+  xirr?: number;
 }
 
-export const HoldingLotsEditor: React.FC<HoldingLotsEditorProps> = ({ lots, onChange }) => {
+export const HoldingLotsEditor: React.FC<HoldingLotsEditorProps> = ({ lots, onChange, xirr }) => {
   const addLot = () => {
     onChange([...lots, { purchase_date: new Date().toISOString().slice(0, 10), quantity: 0, price_per_unit: 0, notes: '' }]);
   };
@@ -86,6 +87,9 @@ export const HoldingLotsEditor: React.FC<HoldingLotsEditorProps> = ({ lots, onCh
       {lots.length > 0 && (
         <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
           Total Quantity: {totalQuantity.toLocaleString('en-IN')} &middot; Avg Cost/Unit: ₹{(totalQuantity > 0 ? totalCost / totalQuantity : 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+          {typeof xirr === 'number' && (
+            <> &middot; XIRR (as of last save): <span style={{ color: xirr >= 0 ? '#10b981' : '#ef4444', fontWeight: 600 }}>{xirr.toFixed(2)}%</span></>
+          )}
         </div>
       )}
     </div>

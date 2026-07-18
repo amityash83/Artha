@@ -225,9 +225,29 @@ def get_init_data():
                 if details_row:
                     d["insurance_details"] = dict(details_row)
                     d.update({k: v for k, v in dict(details_row).items() if k != "asset_id"})
+                cursor.execute("SELECT * FROM insurance_claims WHERE asset_id = ? ORDER BY claim_date", (d["id"],))
+                d["insurance_claims"] = [dict(row) for row in cursor.fetchall()]
+                cursor.execute("SELECT * FROM insurance_premium_payments WHERE asset_id = ? ORDER BY payment_date", (d["id"],))
+                d["premium_payments"] = [dict(row) for row in cursor.fetchall()]
+            if d.get("category_name") == "Property":
+                cursor.execute("SELECT * FROM property_rental_ledger WHERE asset_id = ? ORDER BY month", (d["id"],))
+                ledger = [dict(row) for row in cursor.fetchall()]
+                d["rental_ledger"] = ledger
+                if ledger:
+                    latest = ledger[-1]
+                    d["rental_income"] = latest["rent_amount"]
+                    d["maintenance_expenses"] = latest["expenses_amount"]
             if d.get("category_name") in ("Stock", "Mutual Fund"):
                 cursor.execute("SELECT * FROM holding_lots WHERE asset_id = ? ORDER BY purchase_date", (d["id"],))
-                d["holding_lots"] = [dict(lot) for lot in cursor.fetchall()]
+                lots = [dict(lot) for lot in cursor.fetchall()]
+                d["holding_lots"] = lots
+                if lots:
+                    cash_flows = [
+                        {"date": lot["purchase_date"], "amount": -(lot["quantity"] * lot["price_per_unit"])}
+                        for lot in lots
+                    ]
+                    cash_flows.append({"date": date.today().strftime("%Y-%m-%d"), "amount": d.get("current_value", 0.0)})
+                    d["xirr"] = round(calc.calculate_xirr(cash_flows), 2)
             assets.append(d)
 
         # Liabilities (Home loans, car loans, credit cards)
@@ -903,6 +923,233 @@ def delete_holding(lot_id: int):
         asset_id = row["asset_id"]
         cursor.execute("DELETE FROM holding_lots WHERE id = ?", (lot_id,))
         recompute_holding_aggregates(cursor, asset_id)
+        conn.commit()
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+class RentalLedgerEntrySchema(BaseModel):
+    month: str
+    rent_amount: float = 0.0
+    expenses_amount: float = 0.0
+    notes: Optional[str] = ""
+
+@app.get("/api/assets/{id}/rental-entries")
+def get_rental_entries(id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM property_rental_ledger WHERE asset_id = ? ORDER BY month", (id,))
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+@app.post("/api/assets/{id}/rental-entries")
+def create_rental_entry(id: int, entry: RentalLedgerEntrySchema):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO property_rental_ledger (asset_id, month, rent_amount, expenses_amount, notes) VALUES (?, ?, ?, ?, ?)",
+            (id, entry.month, entry.rent_amount, entry.expenses_amount, entry.notes)
+        )
+        conn.commit()
+        return {"status": "success", "id": cursor.lastrowid}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.put("/api/rental-entries/{entry_id}")
+def update_rental_entry(entry_id: int, entry: RentalLedgerEntrySchema):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT asset_id FROM property_rental_ledger WHERE id = ?", (entry_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Rental entry not found")
+        cursor.execute(
+            "UPDATE property_rental_ledger SET month = ?, rent_amount = ?, expenses_amount = ?, notes = ? WHERE id = ?",
+            (entry.month, entry.rent_amount, entry.expenses_amount, entry.notes, entry_id)
+        )
+        conn.commit()
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.delete("/api/rental-entries/{entry_id}")
+def delete_rental_entry(entry_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT asset_id FROM property_rental_ledger WHERE id = ?", (entry_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Rental entry not found")
+        cursor.execute("DELETE FROM property_rental_ledger WHERE id = ?", (entry_id,))
+        conn.commit()
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+class InsuranceClaimSchema(BaseModel):
+    claim_date: str
+    claim_amount: float = 0.0
+    status: Optional[str] = "Filed"
+    description: Optional[str] = ""
+
+@app.get("/api/assets/{id}/insurance-claims")
+def get_insurance_claims(id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM insurance_claims WHERE asset_id = ? ORDER BY claim_date", (id,))
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+@app.post("/api/assets/{id}/insurance-claims")
+def create_insurance_claim(id: int, claim: InsuranceClaimSchema):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO insurance_claims (asset_id, claim_date, claim_amount, status, description) VALUES (?, ?, ?, ?, ?)",
+            (id, claim.claim_date, claim.claim_amount, claim.status, claim.description)
+        )
+        conn.commit()
+        return {"status": "success", "id": cursor.lastrowid}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.put("/api/insurance-claims/{claim_id}")
+def update_insurance_claim(claim_id: int, claim: InsuranceClaimSchema):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT asset_id FROM insurance_claims WHERE id = ?", (claim_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Insurance claim not found")
+        cursor.execute(
+            "UPDATE insurance_claims SET claim_date = ?, claim_amount = ?, status = ?, description = ? WHERE id = ?",
+            (claim.claim_date, claim.claim_amount, claim.status, claim.description, claim_id)
+        )
+        conn.commit()
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.delete("/api/insurance-claims/{claim_id}")
+def delete_insurance_claim(claim_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT asset_id FROM insurance_claims WHERE id = ?", (claim_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Insurance claim not found")
+        cursor.execute("DELETE FROM insurance_claims WHERE id = ?", (claim_id,))
+        conn.commit()
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+class InsurancePremiumPaymentSchema(BaseModel):
+    payment_date: str
+    amount: float = 0.0
+    notes: Optional[str] = ""
+
+@app.get("/api/assets/{id}/premium-payments")
+def get_premium_payments(id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM insurance_premium_payments WHERE asset_id = ? ORDER BY payment_date", (id,))
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+@app.post("/api/assets/{id}/premium-payments")
+def create_premium_payment(id: int, payment: InsurancePremiumPaymentSchema):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO insurance_premium_payments (asset_id, payment_date, amount, notes) VALUES (?, ?, ?, ?)",
+            (id, payment.payment_date, payment.amount, payment.notes)
+        )
+        conn.commit()
+        return {"status": "success", "id": cursor.lastrowid}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.put("/api/premium-payments/{payment_id}")
+def update_premium_payment(payment_id: int, payment: InsurancePremiumPaymentSchema):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT asset_id FROM insurance_premium_payments WHERE id = ?", (payment_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Premium payment not found")
+        cursor.execute(
+            "UPDATE insurance_premium_payments SET payment_date = ?, amount = ?, notes = ? WHERE id = ?",
+            (payment.payment_date, payment.amount, payment.notes, payment_id)
+        )
+        conn.commit()
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.delete("/api/premium-payments/{payment_id}")
+def delete_premium_payment(payment_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT asset_id FROM insurance_premium_payments WHERE id = ?", (payment_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Premium payment not found")
+        cursor.execute("DELETE FROM insurance_premium_payments WHERE id = ?", (payment_id,))
         conn.commit()
         return {"status": "success"}
     except HTTPException:

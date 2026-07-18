@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Category, Institution, Liability, Goal, Person } from '../types';
 import { HoldingLotsEditor } from './HoldingLotsEditor';
 import { GoalFundingConstraintsEditor } from './GoalFundingConstraintsEditor';
+import { PropertyRentalLedgerEditor } from './PropertyRentalLedgerEditor';
+import { InsuranceClaimsEditor } from './InsuranceClaimsEditor';
+import { InsurancePremiumPaymentsEditor } from './InsurancePremiumPaymentsEditor';
 import { API_BASE_URL } from '../config';
 
 interface DynamicFormProps {
@@ -44,6 +47,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
   const [fields, setFields] = useState<Record<string, string>>({});
   const [holdingLots, setHoldingLots] = useState<any[]>([]);
   const [fundingConstraints, setFundingConstraints] = useState<any[]>([]);
+  const [rentalLedger, setRentalLedger] = useState<any[]>([]);
+  const [insuranceClaims, setInsuranceClaims] = useState<any[]>([]);
+  const [premiumPayments, setPremiumPayments] = useState<any[]>([]);
 
   // The effective category tracks the in-form Asset Class selector when present,
   // so switching category re-derives the specialized field set below.
@@ -205,6 +211,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
 
     setFormData(defaultData);
     setHoldingLots(initialData?.holding_lots ? [...initialData.holding_lots] : []);
+    setRentalLedger(initialData?.rental_ledger ? [...initialData.rental_ledger] : []);
+    setInsuranceClaims(initialData?.insurance_claims ? [...initialData.insurance_claims] : []);
+    setPremiumPayments(initialData?.premium_payments ? [...initialData.premium_payments] : []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entityType, category, institutions, initialData]);
 
@@ -254,6 +263,13 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
     const payload = { ...formData };
     if (isHolding) {
       payload.holding_lots = holdingLots;
+    }
+    if (isProperty) {
+      payload.rental_ledger = rentalLedger;
+    }
+    if (isInsurance) {
+      payload.insurance_claims = insuranceClaims;
+      payload.premium_payments = premiumPayments;
     }
     if (entityType === 'goals') {
       payload.funding_constraints = fundingConstraints;
@@ -546,7 +562,18 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         })}
 
         {isHolding && (
-          <HoldingLotsEditor lots={holdingLots} onChange={setHoldingLots} />
+          <HoldingLotsEditor lots={holdingLots} onChange={setHoldingLots} xirr={initialData?.xirr} />
+        )}
+
+        {isProperty && (
+          <PropertyRentalLedgerEditor entries={rentalLedger} onChange={setRentalLedger} />
+        )}
+
+        {isInsurance && (
+          <>
+            <InsuranceClaimsEditor claims={insuranceClaims} onChange={setInsuranceClaims} />
+            <InsurancePremiumPaymentsEditor payments={premiumPayments} onChange={setPremiumPayments} />
+          </>
         )}
 
         {entityType === 'goals' && categories && (
