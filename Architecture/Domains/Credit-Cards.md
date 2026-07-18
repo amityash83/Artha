@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Credit Cards gives the user a single place to track owned cards as revolving-credit liabilities and to actively optimize how they use them — not just log a balance, but simulate reward yield across category-based multipliers, milestone step-ups, and mileage-transfer redemptions, plus track lounge access and fee-waiver progress. Per the legacy design note preserved from `architecture/Artha_Credit_Card_Architecture_v1.md`, the intent is decision support ("should I keep paying this card, is my utilization healthy, which card should I swipe for this purchase"), not transaction-level accounting — Artha is a Financial Intelligence Layer on top of the user's data, not a bookkeeping tool. Unlike the rest of this document set, Credit Cards today already has a substantial, shipped reward-optimization surface, not just balance tracking.
+Credit Cards gives the user a single place to track owned cards as revolving-credit liabilities and to actively optimize how they use them — not just log a balance, but simulate reward yield across category-based multipliers, milestone step-ups, and mileage-transfer redemptions, plus track lounge access and fee-waiver progress. Per the legacy design note preserved from `Architecture/Legacy/Artha_Credit_Card_Architecture_v1.md`, the intent is decision support ("should I keep paying this card, is my utilization healthy, which card should I swipe for this purchase"), not transaction-level accounting — Artha is a Financial Intelligence Layer on top of the user's data, not a bookkeeping tool. Unlike the rest of this document set, Credit Cards today already has a substantial, shipped reward-optimization surface, not just balance tracking.
 
 ## Scope
 
@@ -138,7 +138,7 @@ No dedicated Credit Card export/report exists today. There is no Excel/PDF expor
 
 ## Future Enhancements
 
-Pulled from `architecture/Artha_Credit_Card_Architecture_v1.md`'s forward-looking sections, plus one internal-consistency item surfaced while documenting this domain. **None of the following are built**; each needs an explicit product decision, and per that doc's guidance, should extend the existing generic tables rather than introduce a parallel domain module or repository layer:
+Pulled from `Architecture/Legacy/Artha_Credit_Card_Architecture_v1.md`'s forward-looking sections, plus one internal-consistency item surfaced while documenting this domain. **None of the following are built**; each needs an explicit product decision, and per that doc's guidance, should extend the existing generic tables rather than introduce a parallel domain module or repository layer:
 
 - **Reconcile the two persistence paths.** The most concrete near-term fix: either retire the `credit_card_details` satellite table and the generic-tab editing path in favor of `CreditCards.tsx`'s richer `metadata_json` model, or extend `credit_card_details` with the reward-engine columns and make `CreditCards.tsx` write through the satellite route instead of raw `metadata_json`. Today a user can edit a card in one screen and have it look unchanged (or get overwritten) in the other — this needs a decision, not just documentation.
 - **Wire the reward engine to real transactions.** `category_rules_json`/`milestone_rules_json`/`redemption_partners_json` already model a genuine reward system; the missing piece is accruing `reward_points` and `current_statement_spend` automatically from posted `transactions` rows instead of manual entry.

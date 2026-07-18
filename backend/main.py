@@ -20,7 +20,7 @@ from backend.decision_engine import generate_recommendations, generate_credit_ca
 # entirely — zero-config desktop startup is unaffected. This is deliberately
 # NOT a multi-user login system: one operator-set secret, checked on every
 # request, no sessions/passwords/accounts. See
-# Artha_Architecture_Blueprint_v1/11-Security-Architecture.md for the full
+# Architecture/11-Security-Architecture.md for the full
 # threat model and what this does/doesn't protect against (no rate limiting,
 # no TLS — a reverse proxy should terminate TLS if this ever crosses a network).
 API_SECRET = os.environ.get("ARTHA_API_SECRET", "").strip()
@@ -2024,7 +2024,7 @@ def update_rule(rule: RuleSchema):
 # opaque display text, never parsed as instructions or written back to any
 # table. Off by default (ai_settings.provider = 'none') — no outbound network
 # call happens anywhere in the app until a user explicitly configures a
-# provider in Settings. See Artha_Architecture_Blueprint_v1/07-AI-Architecture.md.
+# provider in Settings. See Architecture/07-AI-Architecture.md.
 
 class AISettingsSchema(BaseModel):
     provider: str = "none"

@@ -14,7 +14,7 @@ capability.
 None — no code, no schema, no UI exists for taxation anywhere in the
 current codebase (confirmed via repo-wide search). If built, the
 originally-envisioned scope (per `Artha.md` and the legacy
-`architecture/` docs) was: Old vs. New regime comparison, estimated tax
+`Architecture/Legacy/` docs) was: Old vs. New regime comparison, estimated tax
 computation, deductions tracking, capital gains, employer TDS, refund
 tracking.
 

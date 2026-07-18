@@ -80,7 +80,7 @@ built versus aspirational.
   The shipped shape is deliberately flat — one `backend/main.py` for
   routes, `db.py` for schema, `calculations.py` for pure math,
   `decision_engine.py` for recommendation rules. This has been proposed
-  and explicitly rejected once already (see `architecture/` legacy docs'
+  and explicitly rejected once already (see `Architecture/Legacy/`'s
   reconciliation notes) as unnecessary complexity for a single-user app.
 - Before documenting or building against a table/route/component, check
   it actually exists and is wired up — this codebase has had schema
@@ -124,8 +124,8 @@ No AI/LLM feature is implemented today. If one is built:
   asset/liability shape — this was a scoped exception, not a reversal of
   the metadata-driven principle. See `05-Database-Architecture.md`.
 - **Two prior architecture proposals reconciled, not adopted verbatim**:
-  `architecture/Artha_Credit_Card_Architecture_v1.md` and
-  `architecture/Artha_Financial_Data_Model_and_System_Architecture_v1.md`
+  `Architecture/Legacy/Artha_Credit_Card_Architecture_v1.md` and
+  `Architecture/Legacy/Artha_Financial_Data_Model_and_System_Architecture_v1.md`
   proposed a DDD/repository layering and a dozen+ new per-domain
   reference tables. Their genuinely useful product/roadmap ideas were
   folded into `Domains/*.md`; their architectural proposals that

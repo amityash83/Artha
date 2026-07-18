@@ -3,7 +3,7 @@
 # to avoid colliding with another project already using 8000/8080 on this machine.
 #
 # Optional hardening for exposing this stack beyond localhost (see
-# Artha_Architecture_Blueprint_v1/11-Security-Architecture.md): set ARTHA_API_SECRET
+# Architecture/11-Security-Architecture.md): set ARTHA_API_SECRET
 # to a long random string before running `docker compose up --build`. Both the
 # backend (runtime env var) and frontend (BUILD-time Vite define) need the same
 # value — the frontend bakes it into its static JS bundle at build time, so
