@@ -25,6 +25,9 @@ data/
 *.log
 backend_log.txt
 
+# start.sh/stop.sh runtime pid files and logs
+.run/
+
 # Python Cache & Compiled Files
 __pycache__/
 *.pyc
