@@ -364,6 +364,21 @@ export interface Recommendation {
   status: 'success' | 'warning' | 'danger' | 'info';
   action_type: 'prepay' | 'invest' | 'save' | 'info';
   suggested_amount: number;
+  rule_key: string | null;
+}
+
+export interface KnowledgeArticle {
+  id: number;
+  slug: string;
+  title: string;
+  topic: string;
+  summary: string;
+  body: string;
+  related_rule_key: string | null;
+  tags: string[];
+  see_also: string[];
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Snapshot {
@@ -414,6 +429,7 @@ export interface InitData {
   people: Person[];
   tax_profiles: TaxProfile[];
   card_variants: CardVariant[];
+  knowledge_articles: KnowledgeArticle[];
   recommendations: Recommendation[];
   cash_flows: MonthlyCashFlow[];
 }

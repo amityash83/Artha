@@ -67,7 +67,8 @@ def generate_recommendations(conn) -> list:
             "message": f"Emergency Fund is below rule limit of ₹{min_emergency_target:,.0f} by ₹{gap:,.0f}. Stop equity investing and redirect savings here.",
             "status": "danger",
             "action_type": "save",
-            "suggested_amount": gap
+            "suggested_amount": gap,
+            "rule_key": "min_emergency_fund"
         })
     elif curr_emergency < targ_emergency:
         gap = targ_emergency - curr_emergency
@@ -77,7 +78,8 @@ def generate_recommendations(conn) -> list:
             "message": f"Emergency Fund is currently ₹{curr_emergency:,.0f}. You are ₹{gap:,.0f} away from your target of ₹{targ_emergency:,.0f}.",
             "status": "warning",
             "action_type": "save",
-            "suggested_amount": gap
+            "suggested_amount": gap,
+            "rule_key": "min_emergency_fund"
         })
     else:
         recs.append({
@@ -86,7 +88,8 @@ def generate_recommendations(conn) -> list:
             "message": f"Emergency Fund is fully funded at ₹{curr_emergency:,.0f}.",
             "status": "success",
             "action_type": "info",
-            "suggested_amount": 0.0
+            "suggested_amount": 0.0,
+            "rule_key": "min_emergency_fund"
         })
 
     # Check 2: Insurance Reserve Rule
@@ -106,7 +109,8 @@ def generate_recommendations(conn) -> list:
             "message": f"Insurance reserve is at ₹{curr_ins:,.0f}, below your rule target of ₹{ins_reserve_target:,.0f}. Top up by ₹{gap:,.0f}.",
             "status": "danger",
             "action_type": "save",
-            "suggested_amount": gap
+            "suggested_amount": gap,
+            "rule_key": "insurance_reserve_target"
         })
     else:
         recs.append({
@@ -115,7 +119,8 @@ def generate_recommendations(conn) -> list:
             "message": "Insurance reserve matches or exceeds target rules.",
             "status": "success",
             "action_type": "info",
-            "suggested_amount": 0.0
+            "suggested_amount": 0.0,
+            "rule_key": "insurance_reserve_target"
         })
 
     # Check 3: Loan Prepayment Recommendations
@@ -131,7 +136,8 @@ def generate_recommendations(conn) -> list:
                     "message": f"Your {loan['name']} loan (Lender: {loan['lender'] or 'N/A'}) has an ROI of {loan['roi']}%. Since you have surplus liquidity of ₹{free_liquid:,.0f}, prepaying ₹{prepay_val:,.0f} is highly recommended.",
                     "status": "warning",
                     "action_type": "prepay",
-                    "suggested_amount": prepay_val
+                    "suggested_amount": prepay_val,
+                    "rule_key": "high_interest_roi_threshold"
                 })
             else:
                 recs.append({
@@ -140,7 +146,8 @@ def generate_recommendations(conn) -> list:
                     "message": f"You have an active loan {loan['name']} at {loan['roi']}% ROI. Once your emergency fund is stable, focus your monthly cash surplus on prepaying this.",
                     "status": "info",
                     "action_type": "info",
-                    "suggested_amount": 0.0
+                    "suggested_amount": 0.0,
+                    "rule_key": "high_interest_roi_threshold"
                 })
 
     # Check 4: Debt-Free Liquidity Target (if no active loans)
@@ -153,7 +160,8 @@ def generate_recommendations(conn) -> list:
                 "message": f"You are debt-free! The rule recommends maintaining ₹{debt_free_liquidity_target:,.0f} liquidity. You need ₹{gap:,.0f} more.",
                 "status": "warning",
                 "action_type": "save",
-                "suggested_amount": gap
+                "suggested_amount": gap,
+                "rule_key": "debt_free_liquidity_target"
             })
         else:
             recs.append({
@@ -162,7 +170,8 @@ def generate_recommendations(conn) -> list:
                 "message": f"Debt-free and holding ₹{total_liquid:,.0f} in liquid funds. You are in a premium financial position.",
                 "status": "success",
                 "action_type": "info",
-                "suggested_amount": 0.0
+                "suggested_amount": 0.0,
+                "rule_key": "debt_free_liquidity_target"
             })
 
     # Check 5: Goal specific warnings (e.g. Villa Fund)
@@ -176,7 +185,8 @@ def generate_recommendations(conn) -> list:
                 "message": f"Villa fund is short by ₹{gap:,.0f}. Expected completion: {villa_goal['expected_completion'] or 'N/A'}.",
                 "status": "warning",
                 "action_type": "save",
-                "suggested_amount": gap
+                "suggested_amount": gap,
+                "rule_key": None
             })
             
     # Check 5b: Goal funding constraints — flag any goal funded (via goal_holdings)
@@ -199,7 +209,8 @@ def generate_recommendations(conn) -> list:
             "message": f"'{v['goal_name']}' excludes funding from {v['category_name']}, but is currently linked to '{v['asset_name']}' ({v['category_name']}). Reassign this holding or remove the funding constraint.",
             "status": "warning",
             "action_type": "info",
-            "suggested_amount": 0.0
+            "suggested_amount": 0.0,
+            "rule_key": None
         })
 
     # Check 6: Insurance premium reminders (within 30 days) from insurance_details
@@ -226,7 +237,8 @@ def generate_recommendations(conn) -> list:
                         "message": f"Premium of ₹{premium:,.0f} is due in {days_left} days ({ren_date_str}).",
                         "status": "danger",
                         "action_type": "info",
-                        "suggested_amount": premium
+                        "suggested_amount": premium,
+                        "rule_key": "insurance_renewal_alert_days"
                     })
             except Exception:
                 continue

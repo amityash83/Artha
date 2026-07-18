@@ -3,6 +3,7 @@ import { Plus, Trash2, AlertTriangle } from 'lucide-react';
 import { InitData, TaxProfile, TaxDeduction, CapitalGainsRealization, TaxEstimate } from '../types';
 import { API_BASE_URL } from '../config';
 import { TaxDeductionsEditor } from './TaxDeductionsEditor';
+import { InfoTooltip } from './InfoTooltip';
 
 interface TaxationProps {
   data: InitData;
@@ -349,7 +350,10 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px',
                   }}>
                     <div>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Recommended Regime</span>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        Recommended Regime
+                        <InfoTooltip articles={data.knowledge_articles} slug="old-vs-new-tax-regime" />
+                      </span>
                       <h2 style={{ fontSize: '22px', fontWeight: 700, margin: '4px 0 0 0', color: '#10b981' }}>{estimate.recommended_regime} Regime</h2>
                     </div>
                     <div style={{ textAlign: 'right' }}>
@@ -394,7 +398,10 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
                       <span>Taxable Income (Old): <strong style={{ color: '#e2e8f0' }}>{formatCurrency(estimate.taxable_income_old)}</strong></span>
                       <span>Taxable Income (New): <strong style={{ color: '#e2e8f0' }}>{formatCurrency(estimate.taxable_income_new)}</strong></span>
                     </div>
-                    <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc', margin: '18px 0 10px 0' }}>Capital Gains (Unrealized Estimate)</h4>
+                    <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc', margin: '18px 0 10px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      Capital Gains (Unrealized Estimate)
+                      <InfoTooltip articles={data.knowledge_articles} slug="ltcg-vs-stcg" />
+                    </h4>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', fontSize: '12px', color: 'var(--text-secondary)' }}>
                       <span>STCG: <strong style={{ color: '#e2e8f0' }}>{formatCurrency(estimate.capital_gains.stcg)}</strong></span>
                       <span>LTCG: <strong style={{ color: '#e2e8f0' }}>{formatCurrency(estimate.capital_gains.ltcg)}</strong></span>

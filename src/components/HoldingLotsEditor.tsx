@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import { HoldingLot } from '../types';
+import { HoldingLot, KnowledgeArticle } from '../types';
+import { InfoTooltip } from './InfoTooltip';
+import { API_BASE_URL } from '../config';
 
 interface HoldingLotsEditorProps {
   lots: HoldingLot[];
@@ -9,6 +11,16 @@ interface HoldingLotsEditorProps {
 }
 
 export const HoldingLotsEditor: React.FC<HoldingLotsEditorProps> = ({ lots, onChange, xirr }) => {
+  // Self-fetched (same pattern as DocumentsEditor.tsx) rather than prop-drilled through
+  // EntityGrid -> DynamicForm, since neither currently carries InitData/knowledge_articles.
+  const [knowledgeArticles, setKnowledgeArticles] = useState<KnowledgeArticle[]>([]);
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/api/knowledge-articles`)
+      .then((r) => r.json())
+      .then(setKnowledgeArticles)
+      .catch(() => setKnowledgeArticles([]));
+  }, []);
+
   const addLot = () => {
     onChange([...lots, { purchase_date: new Date().toISOString().slice(0, 10), quantity: 0, price_per_unit: 0, notes: '' }]);
   };
@@ -88,7 +100,10 @@ export const HoldingLotsEditor: React.FC<HoldingLotsEditorProps> = ({ lots, onCh
         <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
           Total Quantity: {totalQuantity.toLocaleString('en-IN')} &middot; Avg Cost/Unit: ₹{(totalQuantity > 0 ? totalCost / totalQuantity : 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
           {typeof xirr === 'number' && (
-            <> &middot; XIRR (as of last save): <span style={{ color: xirr >= 0 ? '#10b981' : '#ef4444', fontWeight: 600 }}>{xirr.toFixed(2)}%</span></>
+            <>
+              {' '}&middot; XIRR (as of last save): <span style={{ color: xirr >= 0 ? '#10b981' : '#ef4444', fontWeight: 600 }}>{xirr.toFixed(2)}%</span>
+              <InfoTooltip articles={knowledgeArticles} slug="xirr-explained" />
+            </>
           )}
         </div>
       )}

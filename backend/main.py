@@ -361,6 +361,9 @@ def get_init_data():
         cursor.execute("SELECT * FROM card_variants ORDER BY is_seeded DESC, name ASC")
         card_variants = [dict(row) for row in cursor.fetchall()]
 
+        cursor.execute("SELECT * FROM knowledge_articles ORDER BY topic ASC, title ASC")
+        knowledge_articles = [_shape_knowledge_row(row) for row in cursor.fetchall()]
+
         # Monthly Cash Flows logs
         cursor.execute("SELECT * FROM monthly_cash_flows ORDER BY month DESC")
         cash_flows = [dict(row) for row in cursor.fetchall()]
@@ -417,6 +420,7 @@ def get_init_data():
             "people": people,
             "tax_profiles": tax_profiles,
             "card_variants": card_variants,
+            "knowledge_articles": knowledge_articles,
             "recommendations": recommendations,
             "cash_flows": cash_flows
         }
@@ -972,6 +976,64 @@ def delete_card_variant(id: int):
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+# --- Knowledge Base (read-only reference content, no CRUD) ---
+def _shape_knowledge_row(row) -> dict:
+    d = dict(row)
+    try:
+        d["tags"] = json.loads(d.pop("tags_json") or "[]")
+    except Exception:
+        d["tags"] = []
+    try:
+        d["see_also"] = json.loads(d.pop("see_also_json") or "[]")
+    except Exception:
+        d["see_also"] = []
+    return d
+
+@app.get("/api/knowledge-articles")
+def list_knowledge_articles(topic: Optional[str] = None, tag: Optional[str] = None):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM knowledge_articles ORDER BY topic ASC, title ASC")
+        articles = [_shape_knowledge_row(row) for row in cursor.fetchall()]
+        if topic:
+            articles = [a for a in articles if a["topic"] == topic]
+        if tag:
+            articles = [a for a in articles if tag in a["tags"]]
+        return articles
+    finally:
+        conn.close()
+
+@app.get("/api/knowledge-articles/by-rule/{rule_key}")
+def get_knowledge_article_by_rule(rule_key: str):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM knowledge_articles WHERE related_rule_key = ?", (rule_key,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="No article linked to this rule")
+        return _shape_knowledge_row(row)
+    except HTTPException:
+        raise
+    finally:
+        conn.close()
+
+@app.get("/api/knowledge-articles/{slug}")
+def get_knowledge_article(slug: str):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM knowledge_articles WHERE slug = ?", (slug,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Article not found")
+        return _shape_knowledge_row(row)
+    except HTTPException:
+        raise
     finally:
         conn.close()
 

@@ -265,6 +265,28 @@ def init_db():
     )
     """)
 
+    # Knowledge Base: read-only reference content (plain-language explainers of
+    # financial concepts and financial_rules entries), seeded once and never
+    # user-editable — no CRUD routes exist for this table, unlike card_variants
+    # above. related_rule_key is a soft-reference to financial_rules.rule_key
+    # (which IS a real UNIQUE column) with no declared FK, matching this
+    # codebase's general no-FK-on-reference-tables convention.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS knowledge_articles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        slug TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        topic TEXT NOT NULL DEFAULT 'General',
+        summary TEXT NOT NULL,
+        body TEXT NOT NULL,
+        related_rule_key TEXT,
+        tags_json TEXT NOT NULL DEFAULT '[]',
+        see_also_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+    """)
+
     # Insurance details (satellite table: 1:1 with assets, carries the policy_type sub-type)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS insurance_details (
@@ -1118,6 +1140,174 @@ def init_db():
             v["base_points"], v["base_spend"], v["point_value"], v["lounge_visits_domestic"], v["lounge_visits_international"],
             v["eligibility_notes"], v["category_rules_json"], v["milestone_rules_json"], v["redemption_partners_json"],
             v["pros_json"], v["cons_json"], source_note
+        ))
+
+    # Knowledge Base starter content. Plain-language explainers, not tax/legal advice —
+    # numeric thresholds live in financial_rules/calculations.py; these articles explain
+    # the underlying concept. related_rule_key softly links an article to a financial_rules
+    # row for Settings' info-icon hints; articles without a natural single rule (general
+    # literacy concepts) leave it null.
+    default_knowledge_articles = [
+        {
+            "slug": "emergency-fund-sizing", "title": "Why an Emergency Fund Target", "topic": "Financial Rules",
+            "related_rule_key": "min_emergency_fund",
+            "summary": "An emergency fund is a cash buffer sized to cover months of expenses so a job loss or crisis never forces you to sell investments or take on debt.",
+            "body": (
+                "An emergency fund is money set aside specifically to cover unavoidable expenses during a period of "
+                "lost or disrupted income — a job loss, medical event, or urgent repair — without needing to sell "
+                "investments, break a fixed deposit early, or take on high-interest debt at the worst possible moment.\n\n"
+                "The size of the fund matters more than where it sits. Too small, and a genuine emergency still forces "
+                "you into debt or a forced sale at a bad time. Too large, and you are holding cash that could be earning "
+                "inflation-beating returns elsewhere — emergency funds are typically kept in low-return, highly liquid "
+                "instruments (savings accounts, liquid mutual funds) by design, so oversizing it has a real opportunity cost.\n\n"
+                "Artha's rule treats this as a hard floor: recommendations will flag any plan that dips below it, and "
+                "treat further investing as lower-priority than rebuilding this buffer first. The target itself is a "
+                "judgment call based on your expense stability and job security — adjust it in Settings if your "
+                "circumstances differ from the shipped default."
+            ),
+            "tags": ["emergency-fund", "liquidity"], "see_also": ["debt-free-liquidity-target", "prepayment-liquidity-buffer"],
+        },
+        {
+            "slug": "insurance-reserve-target", "title": "What an Insurance Reserve Covers", "topic": "Financial Rules",
+            "related_rule_key": "insurance_reserve_target",
+            "summary": "A dedicated insurance reserve keeps premium payments and claim gaps from competing with your other savings goals.",
+            "body": "[2-4 paragraph plain-language explainer: what it means, why it matters, one common misconception or tradeoff. No numeric formulas duplicating calculations.py — this is conceptual, not computational.]",
+            "tags": ["insurance"], "see_also": ["insurance-renewal-alerts"],
+        },
+        {
+            "slug": "debt-free-liquidity-target", "title": "Liquidity Targets After Becoming Debt-Free", "topic": "Financial Rules",
+            "related_rule_key": "debt_free_liquidity_target",
+            "summary": "Once loans are paid off, holding a higher liquidity buffer protects the freed-up cash flow from being over-committed too quickly.",
+            "body": "[2-4 paragraph plain-language explainer: what it means, why it matters, one common misconception or tradeoff. No numeric formulas duplicating calculations.py — this is conceptual, not computational.]",
+            "tags": ["liquidity", "debt"], "see_also": ["emergency-fund-sizing"],
+        },
+        {
+            "slug": "loan-prepayment-roi-threshold", "title": "The ROI Threshold for Prepaying a Loan", "topic": "Financial Rules",
+            "related_rule_key": "high_interest_roi_threshold",
+            "summary": "Prepaying a loan is a guaranteed return equal to its interest rate — so it usually beats investing when the loan's ROI is above what you could safely earn elsewhere.",
+            "body": "[2-4 paragraph plain-language explainer: what it means, why it matters, one common misconception or tradeoff. No numeric formulas duplicating calculations.py — this is conceptual, not computational.]",
+            "tags": ["loans", "prepayment"], "see_also": ["prepayment-liquidity-buffer", "emi-amortization-basics"],
+        },
+        {
+            "slug": "prepayment-liquidity-buffer", "title": "Why Prepayments Need a Liquidity Buffer", "topic": "Financial Rules",
+            "related_rule_key": "prepayment_min_liquid_buffer",
+            "summary": "Prepaying a loan is irreversible, so a minimum liquid buffer above your emergency fund prevents a prepayment from leaving you cash-poor.",
+            "body": "[2-4 paragraph plain-language explainer: what it means, why it matters, one common misconception or tradeoff. No numeric formulas duplicating calculations.py — this is conceptual, not computational.]",
+            "tags": ["loans", "prepayment", "liquidity"], "see_also": ["loan-prepayment-roi-threshold"],
+        },
+        {
+            "slug": "insurance-renewal-alerts", "title": "Insurance Renewal Alert Windows", "topic": "Financial Rules",
+            "related_rule_key": "insurance_renewal_alert_days",
+            "summary": "A renewal alert window gives you enough lead time to arrange premium payment before a policy lapses and coverage gaps open up.",
+            "body": "[2-4 paragraph plain-language explainer: what it means, why it matters, one common misconception or tradeoff. No numeric formulas duplicating calculations.py — this is conceptual, not computational.]",
+            "tags": ["insurance"], "see_also": ["insurance-reserve-target"],
+        },
+        {
+            "slug": "target-savings-rate", "title": "What Savings Rate Should You Target", "topic": "Financial Rules",
+            "related_rule_key": "target_savings_rate",
+            "summary": "Savings rate — the share of income you save rather than spend — is a single number that predicts long-term financial security better than income alone.",
+            "body": "[2-4 paragraph plain-language explainer: what it means, why it matters, one common misconception or tradeoff. No numeric formulas duplicating calculations.py — this is conceptual, not computational.]",
+            "tags": ["cash-flow", "savings"], "see_also": [],
+        },
+        {
+            "slug": "section-80c-explained", "title": "Section 80C Deductions Explained", "topic": "Tax Concepts",
+            "related_rule_key": "section_80c_limit",
+            "summary": "Section 80C lets you deduct combined investments like PPF, ELSS, and life insurance premiums up to an annual cap, lowering taxable income under the old regime.",
+            "body": "[2-4 paragraph plain-language explainer: what it means, why it matters, one common misconception or tradeoff. No numeric formulas duplicating calculations.py — this is conceptual, not computational.]",
+            "tags": ["tax", "deductions"], "see_also": ["section-80d-explained", "old-vs-new-tax-regime"],
+        },
+        {
+            "slug": "section-80d-explained", "title": "Section 80D: Health Insurance Deductions", "topic": "Tax Concepts",
+            "related_rule_key": "section_80d_self_limit",
+            "summary": "Section 80D gives separate deduction caps for health insurance premiums on yourself/family and on parents, with higher limits for senior citizens.",
+            "body": "[2-4 paragraph plain-language explainer: what it means, why it matters, one common misconception or tradeoff. No numeric formulas duplicating calculations.py — this is conceptual, not computational.]",
+            "tags": ["tax", "deductions", "insurance"], "see_also": ["section-80c-explained"],
+        },
+        {
+            "slug": "standard-deduction-explained", "title": "The Standard Deduction for Salaried Income", "topic": "Tax Concepts",
+            "related_rule_key": "standard_deduction_salaried",
+            "summary": "The standard deduction is a flat, no-proof-required deduction against salary income available in both the old and new tax regimes.",
+            "body": "[2-4 paragraph plain-language explainer: what it means, why it matters, one common misconception or tradeoff. No numeric formulas duplicating calculations.py — this is conceptual, not computational.]",
+            "tags": ["tax", "deductions"], "see_also": ["old-vs-new-tax-regime"],
+        },
+        {
+            "slug": "section-87a-rebate-explained", "title": "Section 87A Rebate: Zero Tax Up To a Threshold", "topic": "Tax Concepts",
+            "related_rule_key": "section_87a_rebate_limit_new",
+            "summary": "Section 87A fully rebates tax if your taxable income falls under a threshold that differs between the old and new regimes.",
+            "body": "[2-4 paragraph plain-language explainer: what it means, why it matters, one common misconception or tradeoff. No numeric formulas duplicating calculations.py — this is conceptual, not computational.]",
+            "tags": ["tax", "rebate"], "see_also": ["old-vs-new-tax-regime"],
+        },
+        {
+            "slug": "old-vs-new-tax-regime", "title": "Old vs New Tax Regime, Conceptually", "topic": "Tax Concepts",
+            "related_rule_key": None,
+            "summary": "The old regime trades a lower deduction set for higher effective rates below certain incomes; the new regime offers lower slab rates but forfeits most exemptions — which one wins depends on how much you actually claim, not just income level.",
+            "body": "[2-4 paragraph plain-language explainer: what it means, why it matters, one common misconception or tradeoff. No numeric formulas duplicating calculations.py — this is conceptual, not computational.]",
+            "tags": ["tax", "regime"], "see_also": ["section-80c-explained", "standard-deduction-explained", "section-87a-rebate-explained"],
+        },
+        {
+            "slug": "ltcg-vs-stcg", "title": "LTCG vs STCG: Why Holding Period Changes Your Tax", "topic": "Tax Concepts",
+            "related_rule_key": "equity_ltcg_exemption",
+            "summary": "Capital gains are taxed differently depending on how long you held the asset before selling — long-term gains get a lower rate and an annual exemption, short-term gains don't.",
+            "body": (
+                "Capital gains tax in India depends heavily on how long you held an asset before selling it, not just "
+                "how much profit you made. Sell an equity share or equity mutual fund within 12 months and the gain is "
+                "Short-Term Capital Gains (STCG), taxed at a flat rate. Hold it longer and the gain becomes Long-Term "
+                "Capital Gains (LTCG), taxed at a lower flat rate — and only above an annual exempt amount, meaning a "
+                "modest amount of long-term gains every year is tax-free entirely.\n\n"
+                "This asymmetry is deliberate policy: it rewards patient, long-horizon investing over frequent trading. "
+                "It also means the same rupee amount of gain can have a meaningfully different tax bill purely based on "
+                "timing — selling one day before versus one day after the 12-month mark can change which rate and which "
+                "exemption apply.\n\n"
+                "Artha's Taxation screen calculates your actual STCG/LTCG split and tax from your realized sales; this "
+                "article only explains the concept. The exact current thresholds and rates are configurable under "
+                "Settings > Financial Rules, since tax law changes with each Finance Act."
+            ),
+            "tags": ["tax", "capital-gains", "investments"], "see_also": ["xirr-explained"],
+        },
+        {
+            "slug": "hra-exemption-explained", "title": "How HRA Exemption Is Calculated", "topic": "Tax Concepts",
+            "related_rule_key": "hra_metro_percentage",
+            "summary": "HRA exemption is the smallest of three amounts — actual HRA received, rent paid minus 10% of salary, and a metro/non-metro percentage of salary.",
+            "body": "[2-4 paragraph plain-language explainer: what it means, why it matters, one common misconception or tradeoff. No numeric formulas duplicating calculations.py — this is conceptual, not computational.]",
+            "tags": ["tax", "hra"], "see_also": ["old-vs-new-tax-regime"],
+        },
+        {
+            "slug": "xirr-explained", "title": "XIRR: Measuring Returns on Irregular Investments", "topic": "Investment Basics",
+            "related_rule_key": None,
+            "summary": "XIRR (Extended Internal Rate of Return) is the annualized return of an investment that had multiple cash flows at different dates and amounts, unlike CAGR which assumes one lump sum.",
+            "body": (
+                "Most return metrics assume a single lump sum invested once and withdrawn once — CAGR, for instance. "
+                "But real portfolios rarely work that way: you add a SIP installment every month, top up a mutual fund "
+                "occasionally, or withdraw partial amounts. XIRR (Extended Internal Rate of Return) handles exactly "
+                "this — it finds the single annualized rate of return that would make all of your actual cash flows, "
+                "in and out, on their actual dates, net to zero.\n\n"
+                "This is why two investments with the same \"current value\" can have very different XIRRs: an "
+                "investment that grew steadily from a large initial lump sum shows a lower XIRR than one that grew the "
+                "same amount from small, more recent contributions, because the second one had less time for its money "
+                "to compound.\n\n"
+                "A common misreading is comparing XIRR directly to a fixed deposit rate as if they were the same kind "
+                "of number — they're both annualized percentages, but XIRR is backward-looking and portfolio-specific, "
+                "not a guaranteed forward rate. Use it to judge how a specific holding has performed given your actual "
+                "contribution pattern, not as a promise of future returns."
+            ),
+            "tags": ["investments", "returns"], "see_also": ["ltcg-vs-stcg"],
+        },
+        {
+            "slug": "emi-amortization-basics", "title": "EMI and Amortization Basics", "topic": "Credit & Loans",
+            "related_rule_key": None,
+            "summary": "Every EMI is split into an interest portion and a principal portion, and that split shifts toward principal over the loan's life — which is why early prepayments save more interest than later ones.",
+            "body": "[2-4 paragraph plain-language explainer: what it means, why it matters, one common misconception or tradeoff. No numeric formulas duplicating calculations.py — this is conceptual, not computational.]",
+            "tags": ["loans", "emi"], "see_also": ["loan-prepayment-roi-threshold"],
+        },
+    ]
+    for a in default_knowledge_articles:
+        cursor.execute("""
+        INSERT OR IGNORE INTO knowledge_articles
+        (slug, title, topic, summary, body, related_rule_key, tags_json, see_also_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            a["slug"], a["title"], a["topic"], a["summary"], a["body"], a["related_rule_key"],
+            json.dumps(a["tags"]), json.dumps(a["see_also"])
         ))
 
     conn.commit()

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, Database, Plus, Trash2, Edit2, Check, X } from 'lucide-react';
 import { API_BASE_URL } from '../config';
+import { InfoTooltip } from './InfoTooltip';
+import { KnowledgeArticle } from '../types';
 
 interface SettingsProps {
   onRefresh: () => void;
@@ -32,6 +34,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
 
   // Rules, Categories, Institutions, People metadata states
   const [rules, setRules] = useState<any[]>([]);
+  const [knowledgeArticles, setKnowledgeArticles] = useState<KnowledgeArticle[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [institutions, setInstitutions] = useState<any[]>([]);
   const [people, setPeople] = useState<any[]>([]);
@@ -67,6 +70,10 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
     fetchCategoriesList();
     fetchInstitutionsList();
     fetchPeopleList();
+    fetch(`${API_BASE_URL}/api/knowledge-articles`)
+      .then((res) => res.json())
+      .then(setKnowledgeArticles)
+      .catch(() => setKnowledgeArticles([]));
   }, []);
 
   const fetchRulesList = () => {
@@ -802,7 +809,10 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
               <div key={rule.rule_key} className="glass-panel" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', background: 'rgba(255,255,255,0.01)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div>
-                    <strong style={{ fontSize: '13px', color: '#fff' }}>{rule.rule_name}</strong>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                      <strong style={{ fontSize: '13px', color: '#fff' }}>{rule.rule_name}</strong>
+                      <InfoTooltip articles={knowledgeArticles} ruleKey={rule.rule_key} />
+                    </span>
                     <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>{rule.description}</p>
                   </div>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-secondary)', cursor: 'pointer' }}>
