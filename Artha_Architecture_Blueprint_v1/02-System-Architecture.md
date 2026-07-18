@@ -66,11 +66,21 @@ documentation," not "an isolated subsystem."
 Two independent deployment paths exist, sharing the same
 `backend/`/`src/` source:
 
-1. **Desktop (primary, Windows-focused)**: PyInstaller bundles the
-   FastAPI backend into `main.exe`; `electron-builder` packages the
-   Electron shell + built React app + that exe into a single portable
-   `.exe`. No installation step; the SQLite file lives next to the exe
-   (or in `%AppData%` if unpacked). See `08-Technology-Architecture.md`.
+1. **Desktop (primary, cross-platform: Windows/macOS/Linux)**: PyInstaller
+   bundles the FastAPI backend into a native binary (`main.exe` on
+   Windows, extensionless `main` on macOS/Linux — PyInstaller doesn't
+   cross-compile, so each platform's binary must actually be built on
+   that OS); `electron-builder` packages the Electron shell + built
+   React app + that binary into a portable Windows `.exe`, an unsigned
+   macOS `.dmg`/`.zip`, or a Linux `.AppImage`. No installation step on
+   any platform; the database directory resolution differs slightly by
+   OS (Windows portable mode can keep the DB next to the `.exe` via
+   `PORTABLE_EXECUTABLE_DIR`; macOS/Linux always use the OS-standard
+   per-user app-data directory, since there's no equivalent "portable
+   executable" concept for `.app`/`.AppImage` bundles). See
+   `08-Technology-Architecture.md`. The macOS build ships unsigned (no
+   Developer ID/notarization credential available) — end users see a
+   Gatekeeper warning on first launch.
 2. **Web/Docker (secondary, added later)**: `backend/Dockerfile` runs
    the FastAPI backend standalone (bound to `0.0.0.0`, not `127.0.0.1`);
    `frontend.Dockerfile` builds the React app and serves it via Nginx.

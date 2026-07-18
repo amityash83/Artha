@@ -7,6 +7,8 @@ env/
 # Production Bundles & Packager Outputs
 dist/
 dist-portable/
+dist-portable-mac/
+dist-portable-linux/
 build-out/
 out/
 backend/dist/

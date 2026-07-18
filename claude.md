@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Artha is a privacy-first, offline-first personal finance desktop app (a "Financial Intelligence Layer" on top of raw account data, not an accounting tool). It's a single portable Windows executable: React/Electron frontend + a Python FastAPI backend + local SQLite database, no mandatory cloud or install step (a secondary Docker/web deployment also exists — see `docker-compose.yml`). See [Artha.md](Artha.md) for the full product vision/spec and [hardcoded_vs_dynamic.md](hardcoded_vs_dynamic.md) for which business rules are DB-configurable vs. hardcoded (note: that file itself predates several schema changes — cross-check against `Artha_Architecture_Blueprint_v1/06-Business-Rules-Engine.md` if something looks off).
+Artha is a privacy-first, offline-first personal finance desktop app (a "Financial Intelligence Layer" on top of raw account data, not an accounting tool). It's a cross-platform portable desktop app — React/Electron frontend + a Python FastAPI backend + local SQLite database, no mandatory cloud or install step — packaged as a Windows portable exe, an unsigned macOS dmg/zip, and a Linux AppImage (a secondary Docker/web deployment also exists — see `docker-compose.yml`). See [Artha.md](Artha.md) for the full product vision/spec and [hardcoded_vs_dynamic.md](hardcoded_vs_dynamic.md) for which business rules are DB-configurable vs. hardcoded (note: that file itself predates several schema changes — cross-check against `Artha_Architecture_Blueprint_v1/06-Business-Rules-Engine.md` if something looks off).
 
 For anything beyond this quick-reference — full schema inventory, per-domain data model/API/business-rule breakdowns, known bugs and dead code, and what's shipped vs. pure roadmap — see `Artha_Architecture_Blueprint_v1/`, the authoritative architecture documentation set. This file stays intentionally short; that folder is where the depth lives.
 
@@ -13,13 +13,13 @@ For anything beyond this quick-reference — full schema inventory, per-domain d
 ```bash
 # One-time setup
 python -m venv venv
-venv\Scripts\activate               # Windows; this project targets Windows for packaging
+venv\Scripts\activate               # Windows; use `source venv/bin/activate` on macOS/Linux
 pip install -r backend/requirements.txt
 pip install pyinstaller
 npm install
 
 # Local development (Vite + FastAPI reload + Electron shell, concurrently)
-npm start
+npm start                           # Windows; on macOS see start.sh/stop.sh instead (dev-mode only, not packaging)
 
 # Frontend only
 npm run dev:frontend                # vite, http://localhost:5173
@@ -27,23 +27,26 @@ tsc && vite build                   # npm run build:frontend — typecheck + bui
 
 # Backend only (reload server)
 npm run dev:backend                 # uvicorn backend.main:app --reload on 127.0.0.1:8000
-venv\Scripts\python run.py          # manual sanity-check run, prints startup tracebacks directly
+venv\Scripts\python run.py          # manual sanity-check run, prints startup tracebacks directly (venv/bin/python on macOS/Linux)
 
-# Production packaging (PyInstaller backend + electron-builder portable NSIS exe)
-npm run package:portable            # -> dist-portable/Artha <version>.exe
-# equivalent to running build:frontend, build:backend, then:
-npx electron-builder --win portable
+# Production packaging (PyInstaller backend + electron-builder), per platform:
+npm run package:portable            # Windows -> dist-portable/Artha <version>.exe
+npm run package:mac                 # macOS   -> dist-portable-mac/Artha-<version>{.dmg,.zip} (x64 + arm64, UNSIGNED — see caveat below)
+npm run package:linux               # Linux   -> dist-portable-linux/Artha-<version>.AppImage
+# each npm script chains build:frontend + a platform-appropriate build:backend variant, then electron-builder
 ```
 
 There is no test suite or lint script configured in `package.json` — `tsc` (via `build:frontend`) is the only automated check, and it enforces `strict`, `noUnusedLocals`, `noUnusedParameters`. Verify backend changes by running `npm run dev:backend` and hitting endpoints directly, or via the Electron app (`npm start`).
 
-CI (`.github/workflows/build-and-publish.yml`) runs on `windows-latest` only: builds the portable exe on every push to `main` and on PRs, and publishes it as a GitHub Release when a `v*` tag is pushed.
+CI (`.github/workflows/build-and-publish.yml`) builds a 3-OS matrix (`windows-latest`/`macos-latest`/`ubuntu-latest`) on every push to `main` and on PRs, and publishes all three artifacts as a GitHub Release when a `v*` tag is pushed. **The Windows leg is unchanged from before and known-working; the macOS/Linux legs were added in this change and have not yet been confirmed green by an actual CI run** — PyInstaller doesn't cross-compile (must run on the target OS), so this could only be written and locally partially smoke-tested (macOS `package:mac` was confirmed to produce correct `.dmg`/`.zip` artifacts locally), not verified end-to-end in Actions from this environment. Treat mac/linux CI as provisional until the first matrix run completes.
+
+**macOS build is intentionally unsigned**: no Apple Developer ID certificate or notarization credential exists in this repo (`build.mac.identity: null` in `package.json` explicitly opts out of signing so electron-builder doesn't fail looking for one). End users will see Gatekeeper's "unidentified developer" warning and must right-click → Open, or run `xattr -cr` on the `.app`, to launch it. No custom app icon is configured for any of the three platforms (pre-existing gap, not introduced here) — all ship with electron-builder's default Electron icon; generating `.ico`/`.icns`/Linux icon assets from `artha-logo.png` is a separate follow-up.
 
 ## Architecture
 
 ```
 Electron (electron/main.js)
-  ├─ spawns Python backend as a sidecar subprocess (venv python in dev, PyInstaller-built main.exe in prod)
+  ├─ spawns Python backend as a sidecar subprocess (venv python in dev, PyInstaller-built binary in prod — main.exe on Windows, extensionless main on macOS/Linux; electron/main.js branches on process.platform)
   ├─ dev: loads http://localhost:5173 (Vite)  |  prod: loads dist/index.html
   └─ IPC: native save/open dialogs for picking a SQLite db file
 

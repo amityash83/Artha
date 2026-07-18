@@ -67,17 +67,43 @@ network.
 
 ## Packaging — Two Deployment Paths
 
-**1. Desktop (primary, Windows-focused):**
+**1. Desktop (primary, cross-platform: Windows/macOS/Linux):**
 - `npm run build:frontend` (`tsc && vite build`) → static assets in `dist/`.
-- `npm run build:backend` → PyInstaller bundles `backend/` + `run.py`
-  into `backend/dist/main/main.exe` (onedir, console mode).
-- `electron-builder --win portable` → bundles the Electron shell +
-  `dist/` + the PyInstaller output into a single portable `.exe`
-  (`dist-portable/Artha <version>.exe`). No installer, no install step.
-- `npm run package:portable` runs all three steps in sequence.
-- CI (`.github/workflows/build-and-publish.yml`) builds this on every
-  push to `main` on `windows-latest`, and publishes it as a GitHub
-  Release on a `v*` tag push.
+- `npm run build:backend` (Windows) / `build:backend:posix` (macOS/Linux)
+  → PyInstaller bundles `backend/` + `run.py` into
+  `backend/dist/main/main.exe` (Windows) or `backend/dist/main/main`
+  (macOS/Linux, no extension), onedir/console mode. PyInstaller does not
+  cross-compile — each OS's binary must be built by running PyInstaller
+  on that OS, which is why this needs three separate CI legs (below),
+  not just three electron-builder config blocks.
+- `electron-builder --win portable` / `--mac` / `--linux AppImage` →
+  bundles the Electron shell + `dist/` + the PyInstaller output into:
+  Windows `dist-portable/Artha <version>.exe` (no installer); macOS
+  `dist-portable-mac/Artha-<version>{-arch}.{dmg,zip}` (x64 + arm64,
+  **unsigned** — `build.mac.identity: null` in `package.json` explicitly
+  disables code signing since no Developer ID certificate exists in
+  this repo; end users see a Gatekeeper "unidentified developer"
+  warning and must right-click → Open or `xattr -cr` the `.app`); Linux
+  `dist-portable-linux/Artha-<version>.AppImage` (single portable
+  binary, no `deb`/`rpm` in this pass).
+- `npm run package:portable` / `package:mac` / `package:linux` each run
+  the frontend build + the platform-appropriate backend build + the
+  matching electron-builder invocation in sequence.
+- CI (`.github/workflows/build-and-publish.yml`) builds a 3-OS matrix
+  (`windows-latest`/`macos-latest`/`ubuntu-latest`) on every push to
+  `main` and on PRs, and publishes all three artifacts as a GitHub
+  Release on a `v*` tag push. The Windows leg's commands are unchanged
+  from before this matrix existed (byte-for-byte, to avoid regression
+  risk on the one platform that already worked). **The macOS/Linux legs
+  are new and have not yet been confirmed to produce a green CI run** —
+  local verification on this project's dev machine confirmed
+  `package:mac` produces correct, correctly-bundled `.dmg`/`.zip`
+  artifacts (both architectures), but GitHub's hosted `macos-latest`/
+  `ubuntu-latest` runner images have not actually been exercised.
+  Treat as provisional until the first real matrix run completes.
+- No custom app icon is configured on any of the three platforms
+  (pre-existing gap on Windows, not newly introduced) — all three ship
+  with electron-builder's default Electron icon.
 
 **2. Web/Docker (secondary):**
 - `backend/Dockerfile`: Python slim image, installs

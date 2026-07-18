@@ -12,28 +12,36 @@ const FRONTEND_PORT = process.env.ARTHA_FRONTEND_PORT || '5173';
 
 function startBackend() {
   const isDev = !app.isPackaged;
+  const isWin = process.platform === 'win32';
   let pythonBin = 'python';
 
   if (isDev) {
-    // Windows venv Python binary path
-    pythonBin = path.join(__dirname, '..', 'venv', 'Scripts', 'python.exe');
+    // venv layout differs by OS: Windows uses Scripts/python.exe, macOS/Linux use bin/python
+    pythonBin = isWin
+      ? path.join(__dirname, '..', 'venv', 'Scripts', 'python.exe')
+      : path.join(__dirname, '..', 'venv', 'bin', 'python');
   } else {
-    // If packaged, run the compiled backend binary (or local executable)
-    pythonBin = path.join(process.resourcesPath, 'backend', 'dist', 'main', 'main.exe');
+    // If packaged, run the compiled backend binary. PyInstaller's --onedir output names
+    // the binary main.exe on Windows and a plain extensionless "main" on macOS/Linux.
+    const backendBinName = isWin ? 'main.exe' : 'main';
+    pythonBin = path.join(process.resourcesPath, 'backend', 'dist', 'main', backendBinName);
   }
 
   // Resolve Database directory for portability
   let dbDir = '';
   if (isDev) {
     dbDir = path.join(__dirname, '..', 'data');
+  } else if (isWin) {
+    // Windows portable target: electron-builder sets PORTABLE_EXECUTABLE_DIR so the DB
+    // can live next to the .exe (e.g., on a USB drive). Fall back to userData if absent.
+    dbDir = process.env.PORTABLE_EXECUTABLE_DIR
+      ? path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'data')
+      : path.join(app.getPath('userData'), 'data');
   } else {
-    if (process.env.PORTABLE_EXECUTABLE_DIR) {
-      // Save database next to the portable .exe (e.g., on a USB drive)
-      dbDir = path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'data');
-    } else {
-      // Fallback to appdata
-      dbDir = path.join(app.getPath('userData'), 'data');
-    }
+    // macOS/Linux have no "portable executable" concept in electron-builder (dmg/zip/
+    // AppImage aren't extracted next to a writable sidecar directory the same way) —
+    // always use the OS-standard per-user app data directory.
+    dbDir = path.join(app.getPath('userData'), 'data');
   }
 
   const fs = require('fs');
@@ -214,7 +222,9 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   if (pyProc) {
     console.log('Terminating FastAPI server...');
-    // Kill the python subprocess tree on Windows
+    // taskkill is Windows-only; on macOS/Linux the exec() call below fails immediately
+    // (no such binary), which is expected — the err-callback SIGKILL fallback is the
+    // actual macOS/Linux shutdown path. Already cross-platform-correct, no branch needed.
     const { exec } = require('child_process');
     exec(`taskkill /pid ${pyProc.pid} /t /f`, (err) => {
       if (err) {
