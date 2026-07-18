@@ -101,9 +101,18 @@ function startBackend() {
 }
 
 function createWindow() {
+  const isDev = !app.isPackaged;
+  // Window icon (Linux/Windows taskbar — macOS uses the app bundle icon set via
+  // electron-builder's build.mac.icon instead, not this option). Same PNG Vite
+  // copies from public/ into dist/ at build time.
+  const windowIcon = isDev
+    ? path.join(__dirname, '..', 'public', 'favicon.png')
+    : path.join(__dirname, '..', 'dist', 'favicon.png');
+
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
+    icon: windowIcon,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
@@ -114,7 +123,6 @@ function createWindow() {
     show: false // Show only after content is loaded to avoid white flash
   });
 
-  const isDev = !app.isPackaged;
   if (isDev) {
     mainWindow.loadURL(`http://localhost:${FRONTEND_PORT}`);
     // Open DevTools in dev mode

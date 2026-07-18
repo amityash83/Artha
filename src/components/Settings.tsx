@@ -3,6 +3,9 @@ import { Upload, Database, Plus, Trash2, Edit2, Check, X } from 'lucide-react';
 import { API_BASE_URL } from '../config';
 import { InfoTooltip } from './InfoTooltip';
 import { KnowledgeArticle } from '../types';
+import { ArthaMark } from './branding/ArthaMark';
+import { useBranding } from './branding/useBranding';
+import { ACCENT_PRESETS, MARK_VARIANTS, MARK_LABELS, MARK_DESCRIPTIONS } from './branding/presets';
 
 interface SettingsProps {
   onRefresh: () => void;
@@ -10,6 +13,7 @@ interface SettingsProps {
 }
 
 export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
+  const { variant: brandVariant, accentId: brandAccentId, accentColor: brandAccent, setVariant: setBrandVariant, setAccentId: setBrandAccentId } = useBranding();
   const [backupsList, setBackupsList] = useState<string[]>([]);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
@@ -71,7 +75,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
 
   const [ruleSaveStatus, setRuleSaveStatus] = useState<Record<string, string>>({});
   const [metaStatus, setMetaStatus] = useState<string | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'database' | 'rules' | 'categories' | 'import' | 'ai'>('database');
+  const [activeSubTab, setActiveSubTab] = useState<'database' | 'rules' | 'categories' | 'import' | 'ai' | 'branding'>('database');
 
   useEffect(() => {
     fetchBackups();
@@ -691,6 +695,13 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
           style={{ padding: '8px 16px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '13px' }}
         >
           AI Assistant
+        </button>
+        <button
+          onClick={() => setActiveSubTab('branding')}
+          className={`sidebar-item ${activeSubTab === 'branding' ? 'active' : ''}`}
+          style={{ padding: '8px 16px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '13px' }}
+        >
+          Branding
         </button>
       </div>
 
@@ -1616,6 +1627,69 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
                 </button>
               )}
               {aiStatus && <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{aiStatus}</span>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeSubTab === 'branding' && (
+        <div className="glass-panel" style={{ padding: '24px', maxWidth: '640px' }}>
+          <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '6px' }}>Branding</h3>
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '24px', lineHeight: '1.4' }}>
+            Choose the mark and accent color shown in the sidebar. This only changes what you see
+            inside this app — it doesn't affect the browser tab favicon or the packaged app icon,
+            since those are fixed at build time, not something a running page can swap.
+          </p>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            <div>
+              <label style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'block', marginBottom: '10px' }}>Mark</label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px' }}>
+                {MARK_VARIANTS.map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setBrandVariant(v)}
+                    className="glass-card"
+                    style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px',
+                      padding: '16px 12px', cursor: 'pointer', textAlign: 'center',
+                      border: brandVariant === v ? `1px solid ${brandAccent}` : '1px solid var(--border-glass)',
+                      background: brandVariant === v ? 'rgba(139,92,246,0.06)' : undefined,
+                    }}
+                  >
+                    <ArthaMark variant={v} color={brandVariant === v ? brandAccent : 'var(--text-secondary)'} size={36} />
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#f8fafc' }}>{MARK_LABELS[v]}</span>
+                    <span style={{ fontSize: '10.5px', color: 'var(--text-muted)', lineHeight: 1.4 }}>{MARK_DESCRIPTIONS[v]}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'block', marginBottom: '10px' }}>Accent Color</label>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                {ACCENT_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => setBrandAccentId(preset.id)}
+                    title={preset.name}
+                    style={{
+                      width: '36px', height: '36px', borderRadius: '50%', cursor: 'pointer',
+                      background: preset.accent,
+                      border: brandAccentId === preset.id ? '2px solid #f8fafc' : '2px solid transparent',
+                      boxShadow: brandAccentId === preset.id ? '0 0 0 2px rgba(255,255,255,0.15)' : 'none',
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '16px', borderTop: '1px solid var(--border-glass)' }}>
+              <ArthaMark variant={brandVariant} color={brandAccent} size={22} />
+              <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '18px', color: '#f8fafc' }}>Artha</span>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>— sidebar preview</span>
             </div>
           </div>
         </div>

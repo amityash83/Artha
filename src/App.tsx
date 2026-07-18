@@ -20,9 +20,12 @@ import { BudgetPlanner } from './components/BudgetPlanner';
 import { CreditCards } from './components/CreditCards';
 import { Taxation } from './components/Taxation';
 import { AskArtha } from './components/AskArtha';
+import { ArthaMark } from './components/branding/ArthaMark';
+import { useBranding } from './components/branding/useBranding';
 import { API_BASE_URL } from './config';
 
 const App: React.FC = () => {
+  const { variant: brandVariant, accentColor: brandAccent } = useBranding();
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [loading, setLoading] = useState<boolean>(true);
   const [statusMessage, setStatusMessage] = useState<string>('Initializing Financial OS...');
@@ -164,7 +167,7 @@ const App: React.FC = () => {
       {/* Sidebar Navigation */}
       <aside className="sidebar">
         <div className="logo-container">
-          <Compass size={22} style={{ color: '#a78bfa' }} />
+          <ArthaMark variant={brandVariant} color={brandAccent} size={22} />
           <span className="logo-text">Artha</span>
         </div>
 
