@@ -192,7 +192,10 @@ def init_db():
     )
     """)
 
-    # Credit Card details (satellite table: 1:1 with liabilities, for revolving credit)
+    # Credit Card details (satellite table: 1:1 with liabilities, for revolving credit).
+    # Also the single source of truth for the CreditCards.tsx reward-optimization engine
+    # (category multipliers, milestones, redemption partners, lounge tracking) — these
+    # used to live only in liabilities.metadata_json; see migration block "J" below.
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS credit_card_details (
         liability_id INTEGER PRIMARY KEY REFERENCES liabilities(id) ON DELETE CASCADE,
@@ -202,7 +205,23 @@ def init_db():
         due_date INTEGER,
         annual_fee REAL DEFAULT 0.0,
         reward_points REAL DEFAULT 0.0,
-        point_value REAL DEFAULT 0.25
+        point_value REAL DEFAULT 0.25,
+        renewal_date TEXT,
+        network TEXT DEFAULT 'Visa',
+        lounge_visits_limit REAL DEFAULT 0.0,
+        lounge_visits_used REAL DEFAULT 0.0,
+        lounge_int_limit REAL DEFAULT 0.0,
+        lounge_int_used REAL DEFAULT 0.0,
+        milestone_spend_target REAL DEFAULT 0.0,
+        milestone_spend_current REAL DEFAULT 0.0,
+        milestone_reward_desc TEXT,
+        remarks TEXT,
+        base_points REAL DEFAULT 1.0,
+        base_spend REAL DEFAULT 100.0,
+        current_statement_spend REAL DEFAULT 0.0,
+        category_rules_json TEXT DEFAULT '[]',
+        milestone_rules_json TEXT DEFAULT '[]',
+        redemption_partners_json TEXT DEFAULT '[]'
     )
     """)
 
@@ -309,6 +328,17 @@ def init_db():
         asset_id INTEGER NOT NULL REFERENCES assets(id),
         allocation_weight REAL NOT NULL DEFAULT 1.0,
         PRIMARY KEY(goal_id, asset_id)
+    )
+    """)
+
+    # goal_funding_constraints: generalizes the old hardcoded "no_villa_equity" rule
+    # into a real, per-goal, DB-configurable "this goal must never be funded from
+    # assets in this category" constraint, enforced in decision_engine.py.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS goal_funding_constraints (
+        goal_id INTEGER NOT NULL REFERENCES goals(id),
+        excluded_category_id INTEGER NOT NULL REFERENCES categories(id),
+        PRIMARY KEY(goal_id, excluded_category_id)
     )
     """)
 
@@ -596,7 +626,6 @@ def init_db():
         ("min_emergency_fund", "Minimum Emergency Fund", "Never reduce Emergency Fund below this value", 1500000.0, "Emergency Fund", 1),
         ("insurance_reserve_target", "Insurance Reserve Target", "Insurance Reserve should remain at this value", 300000.0, "Insurance", 1),
         ("debt_free_liquidity_target", "Debt-Free Liquidity Target", "Maintain this liquidity after becoming debt-free", 3000000.0, "Liquidity", 1),
-        ("no_villa_equity", "No Villa Funds in Equity", "Do not invest Villa funds into equity markets (0 = false, 1 = true)", 1.0, "Goals", 1),
         ("high_interest_roi_threshold", "High Interest ROI Threshold (%)", "Loan ROI above this value will be flagged for prepayments", 7.5, "Loans", 1),
         ("prepayment_min_liquid_buffer", "Prepayment Min Liquid Buffer", "Minimum liquid buffer above emergency fund required to recommend prepayments", 50000.0, "Loans", 1),
         ("insurance_renewal_alert_days", "Insurance Renewal Alert Days", "Trigger premium warnings this many days before the policy renewal date", 30.0, "Insurance", 1),
@@ -609,17 +638,30 @@ def init_db():
         VALUES (?, ?, ?, ?, ?, ?)
         """, (rule_key, rule_name, desc, val, cat, enabled))
 
+    # Remove the old hardcoded no_villa_equity rule for existing installs — superseded
+    # by the generic goal_funding_constraints table (see below). Naturally idempotent:
+    # a second run deletes zero rows.
+    try:
+        cursor.execute("DELETE FROM financial_rules WHERE rule_key = 'no_villa_equity'")
+    except Exception as e:
+        print("[Migration Warning] no_villa_equity rule removal error:", e)
+
     conn.commit()
 
     # 4. RUN AUTOMATED LEGACY DATA MIGRATION
     # Check if legacy tables exist. If they do, migrate them to new metadata structure.
     try:
-        # A. Migrate Accounts
+        # A. Migrate Accounts (only the truly ancient free-text-`institution` shape —
+        # guarded on 'institution' specifically, not just 'metadata_json' missing, since
+        # the current normalized accounts shape (institution_id/owner_id/status/currency)
+        # also has no metadata_json column and would otherwise be wrongly re-matched and
+        # destructively reverted to this migration's old intermediate shape on every
+        # startup — this was happening until this guard was tightened.)
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='accounts_old'")
         if not cursor.fetchone():
             cursor.execute("PRAGMA table_info('accounts')")
             columns = [col['name'] for col in cursor.fetchall()]
-            if columns and 'metadata_json' not in columns:
+            if columns and 'institution' in columns and 'metadata_json' not in columns:
                 cursor.execute("ALTER TABLE accounts RENAME TO accounts_old")
                 cursor.execute("""
                 CREATE TABLE accounts (
@@ -941,6 +983,86 @@ def init_db():
             print(f"[Migration] Backfilled credit_card_details for {len(cc_rows)} credit card(s).")
     except Exception as e:
         print("[Migration Warning] credit_card_details backfill error:", e)
+
+    # J. Add credit_card_details columns for the reward-optimization engine (previously
+    # only in liabilities.metadata_json via CreditCards.tsx — see Credit-Cards.md), then
+    # backfill from metadata_json. Guarded on 'network IS NULL' so it only runs once per
+    # card even though the columns themselves get a non-NULL default going forward.
+    try:
+        cursor.execute("PRAGMA table_info('credit_card_details')")
+        ccd_cols = [col['name'] for col in cursor.fetchall()]
+        new_ccd_columns = [
+            ("renewal_date", "TEXT"),
+            ("network", "TEXT DEFAULT 'Visa'"),
+            ("lounge_visits_limit", "REAL DEFAULT 0.0"),
+            ("lounge_visits_used", "REAL DEFAULT 0.0"),
+            ("lounge_int_limit", "REAL DEFAULT 0.0"),
+            ("lounge_int_used", "REAL DEFAULT 0.0"),
+            ("milestone_spend_target", "REAL DEFAULT 0.0"),
+            ("milestone_spend_current", "REAL DEFAULT 0.0"),
+            ("milestone_reward_desc", "TEXT"),
+            ("remarks", "TEXT"),
+            ("base_points", "REAL DEFAULT 1.0"),
+            ("base_spend", "REAL DEFAULT 100.0"),
+            ("current_statement_spend", "REAL DEFAULT 0.0"),
+            ("category_rules_json", "TEXT DEFAULT '[]'"),
+            ("milestone_rules_json", "TEXT DEFAULT '[]'"),
+            ("redemption_partners_json", "TEXT DEFAULT '[]'"),
+        ]
+        for col_name, col_type in new_ccd_columns:
+            if col_name not in ccd_cols:
+                cursor.execute(f"ALTER TABLE credit_card_details ADD COLUMN {col_name} {col_type}")
+        print("[Migration] Ensured credit_card_details reward-engine columns exist.")
+    except Exception as e:
+        print("[Migration Warning] credit_card_details reward-engine column migration error:", e)
+
+    try:
+        cursor.execute("""
+            SELECT l.id, l.metadata_json FROM liabilities l
+            JOIN categories c ON l.category_id = c.id
+            JOIN credit_card_details ccd ON ccd.liability_id = l.id
+            WHERE c.name = 'Credit Card'
+            AND ccd.category_rules_json = '[]' AND ccd.milestone_rules_json = '[]'
+            AND ccd.redemption_partners_json = '[]'
+        """)
+        cc_reward_rows = cursor.fetchall()
+        for row in cc_reward_rows:
+            meta = json.loads(row['metadata_json']) if row['metadata_json'] else {}
+            # Nothing to migrate for this card — skip so re-running init_db() doesn't
+            # keep matching already-migrated (still-all-empty) cards on every startup.
+            if not any(k in meta for k in ('category_rules_json', 'milestone_rules_json', 'redemption_partners_json', 'network', 'renewal_date')):
+                continue
+            cursor.execute("""
+                UPDATE credit_card_details SET
+                    renewal_date = ?, network = ?, lounge_visits_limit = ?, lounge_visits_used = ?,
+                    lounge_int_limit = ?, lounge_int_used = ?, milestone_spend_target = ?,
+                    milestone_spend_current = ?, milestone_reward_desc = ?, remarks = ?,
+                    base_points = ?, base_spend = ?, current_statement_spend = ?,
+                    category_rules_json = ?, milestone_rules_json = ?, redemption_partners_json = ?
+                WHERE liability_id = ?
+            """, (
+                meta.get('renewal_date'),
+                meta.get('network', 'Visa'),
+                meta.get('lounge_visits_limit', 0.0),
+                meta.get('lounge_visits_used', 0.0),
+                meta.get('lounge_int_limit', 0.0),
+                meta.get('lounge_int_used', 0.0),
+                meta.get('milestone_spend_target', 0.0),
+                meta.get('milestone_spend_current', 0.0),
+                meta.get('milestone_reward_desc'),
+                meta.get('remarks'),
+                meta.get('base_points', 1.0),
+                meta.get('base_spend', 100.0),
+                meta.get('current_statement_spend', 0.0),
+                meta.get('category_rules_json', '[]'),
+                meta.get('milestone_rules_json', '[]'),
+                meta.get('redemption_partners_json', '[]'),
+                row['id'],
+            ))
+        if cc_reward_rows:
+            print(f"[Migration] Backfilled credit_card_details reward-engine fields for {len(cc_reward_rows)} credit card(s).")
+    except Exception as e:
+        print("[Migration Warning] credit_card_details reward-engine backfill error:", e)
 
     # G. Backfill insurance_details from existing Insurance assets' metadata_json
     try:

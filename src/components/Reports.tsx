@@ -585,10 +585,13 @@ export const Reports: React.FC<ReportsProps> = ({ data, onRefresh, showToast }) 
   };
 
   const exportInsuranceCSV = () => {
-    let csv = `Asset Name,Policy Number,Coverage,Premium,Frequency,Nominee,Renewal Date\n`;
+    let csv = `Asset Name,Policy Type,Policy Number,Coverage,Premium,Frequency,Renewal Date\n`;
     const insurance = (data.assets || []).filter((a: any) => a.category_name === 'Insurance');
     insurance.forEach((ins: any) => {
-      csv += `"${ins.name}","${ins.policy_number || ''}",${ins.coverage || 0},${ins.premium || 0},"${ins.frequency || ''}","${ins.nominee || ''}","${ins.renewal_date || ''}"\n`;
+      const coverage = ins.policy_type === 'Health' ? (ins.sum_insured || 0)
+        : ins.policy_type === 'Vehicle' ? (ins.idv || 0)
+        : (ins.sum_assured || 0);
+      csv += `"${ins.name}","${ins.policy_type || ''}","${ins.policy_number || ''}",${coverage},${ins.premium || 0},"${ins.frequency || ''}","${ins.renewal_date || ''}"\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv' });

@@ -13,17 +13,22 @@ export interface Institution {
   contact_info?: string;
 }
 
+export interface Person {
+  id: number;
+  name: string;
+  role: 'Primary Owner' | 'Spouse' | 'Dependent';
+}
+
 export interface Account {
   id: number;
   name: string;
   institution_id: number;
   institution_name?: string;
-  current_balance: number;
+  owner_id: number;
+  owner_name?: string;
+  current_balance: number; // derived server-side from transactions; read-only
   currency: string;
   status: string;
-  owner?: string;
-  tags?: string;
-  metadata_json?: string;
 }
 
 export interface InsuranceDetails {
@@ -203,6 +208,7 @@ export interface InitData {
   rules: FinancialRule[];
   categories: Category[];
   institutions: Institution[];
+  people: Person[];
   recommendations: Recommendation[];
   cash_flows: MonthlyCashFlow[];
 }

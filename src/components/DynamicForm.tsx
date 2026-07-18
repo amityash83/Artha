@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Category, Institution, Liability, Goal } from '../types';
+import { Category, Institution, Liability, Goal, Person } from '../types';
 import { HoldingLotsEditor } from './HoldingLotsEditor';
+import { GoalFundingConstraintsEditor } from './GoalFundingConstraintsEditor';
+import { API_BASE_URL } from '../config';
 
 interface DynamicFormProps {
   entityType: 'accounts' | 'assets' | 'liabilities' | 'income' | 'expenses' | 'goals';
   category?: Category;
   categories?: Category[];
   institutions: Institution[];
+  people?: Person[];
   goals?: Goal[];
   initialData?: any;
   liabilities?: Liability[];
@@ -29,6 +32,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
   category,
   categories,
   institutions,
+  people = [],
   goals,
   initialData,
   liabilities = [],
@@ -39,6 +43,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
   const [formData, setFormData] = useState<any>({});
   const [fields, setFields] = useState<Record<string, string>>({});
   const [holdingLots, setHoldingLots] = useState<any[]>([]);
+  const [fundingConstraints, setFundingConstraints] = useState<any[]>([]);
 
   // The effective category tracks the in-form Asset Class selector when present,
   // so switching category re-derives the specialized field set below.
@@ -59,11 +64,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
 
     if (entityType === 'accounts') {
       standardFields['institution_id'] = 'institution_select';
-      standardFields['current_balance'] = 'number';
+      standardFields['owner_id'] = 'person_select';
       standardFields['currency'] = 'text';
       standardFields['status'] = 'select_status';
-      standardFields['owner'] = 'text';
-      standardFields['tags'] = 'text';
     } else if (entityType === 'assets') {
       standardFields['category_id'] = 'category_select';
       if (isInsurance) {
@@ -173,6 +176,8 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         defaultData[k] = 0;
       } else if (type === 'institution_select') {
         defaultData[k] = institutions[0]?.id || '';
+      } else if (type === 'person_select') {
+        defaultData[k] = people[0]?.id || '';
       } else if (type === 'category_select') {
         defaultData[k] = initialData?.category_id || category?.id || '';
       } else if (type === 'select_status') {
@@ -202,6 +207,19 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
     setHoldingLots(initialData?.holding_lots ? [...initialData.holding_lots] : []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entityType, category, institutions, initialData]);
+
+  // Goal funding constraints live behind their own routes (not bundled into
+  // initialData), so an editing goal needs a separate fetch to load them.
+  useEffect(() => {
+    if (entityType === 'goals' && initialData?.id) {
+      fetch(`${API_BASE_URL}/api/goals/${initialData.id}/funding-constraints`)
+        .then((r) => r.json())
+        .then((data) => setFundingConstraints(data))
+        .catch(() => setFundingConstraints([]));
+    } else {
+      setFundingConstraints([]);
+    }
+  }, [entityType, initialData]);
 
   // Re-derive the field set when the in-form Asset Class selection changes
   useEffect(() => {
@@ -236,6 +254,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
     const payload = { ...formData };
     if (isHolding) {
       payload.holding_lots = holdingLots;
+    }
+    if (entityType === 'goals') {
+      payload.funding_constraints = fundingConstraints;
     }
     onSubmit(payload);
   };
@@ -274,6 +295,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       annual_fee: 'Annual Fee',
       policy_type: 'Policy Type',
       policy_number: 'Policy Number',
+      owner_id: 'Owner',
     };
     if (knownLabels[key]) return knownLabels[key];
 
@@ -345,6 +367,27 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
                   {[...institutions].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })).map((inst) => (
                     <option key={inst.id} value={inst.id}>
                       {inst.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            );
+          }
+
+          if (type === 'person_select') {
+            return (
+              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
+                <select
+                  className="form-control"
+                  value={formData[k] || ''}
+                  onChange={(e) => handleChange(k, parseInt(e.target.value))}
+                  required
+                >
+                  <option value="">Select Owner</option>
+                  {people.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.role})
                     </option>
                   ))}
                 </select>
@@ -504,6 +547,14 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
 
         {isHolding && (
           <HoldingLotsEditor lots={holdingLots} onChange={setHoldingLots} />
+        )}
+
+        {entityType === 'goals' && categories && (
+          <GoalFundingConstraintsEditor
+            categories={categories}
+            constraints={fundingConstraints}
+            onChange={setFundingConstraints}
+          />
         )}
       </div>
 

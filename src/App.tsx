@@ -337,13 +337,14 @@ const App: React.FC = () => {
           <BudgetPlanner data={data} onRefresh={fetchFinanceData} showToast={showToast} />
         )}
         {activeTab === 'accounts' && (
-          <EntityGrid 
-            entityType="accounts" 
-            entities={data.accounts} 
-            categories={data.categories} 
-            institutions={data.institutions} 
+          <EntityGrid
+            entityType="accounts"
+            entities={data.accounts}
+            categories={data.categories}
+            institutions={data.institutions}
+            people={data.people}
             goals={data.goals}
-            onRefresh={fetchFinanceData} 
+            onRefresh={fetchFinanceData}
             showToast={showToast}
           />
         )}

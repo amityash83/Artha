@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Category, Institution, Asset, Liability, Goal } from '../types';
+import { Category, Institution, Asset, Liability, Goal, Person } from '../types';
 import { DynamicForm } from './DynamicForm';
 import { Plus, Edit2, Trash2, Search } from 'lucide-react';
 import { API_BASE_URL } from '../config';
@@ -9,6 +9,7 @@ interface EntityGridProps {
   entities: any[];
   categories: Category[];
   institutions: Institution[];
+  people?: Person[];
   goals?: Goal[];
   liabilities?: Liability[];
   properties?: Asset[];
@@ -28,7 +29,7 @@ const COMMON_COLUMNS: Record<string, Column[]> = {
     { label: 'Name', key: 'name' },
     { label: 'Institution', key: 'institution_name' },
     { label: 'Balance', key: 'current_balance', alignRight: true },
-    { label: 'Owner', key: 'owner' },
+    { label: 'Owner', key: 'owner_name' },
     { label: 'Status', key: 'status' },
   ],
   assets: [
@@ -82,6 +83,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
   entities,
   categories,
   institutions,
+  people = [],
   goals,
   liabilities = [],
   properties = [],
@@ -124,6 +126,26 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
   };
 
   const dispatchSatelliteData = async (entityId: number, categoryName: string | undefined, formData: any) => {
+    if (entityType === 'goals') {
+      const existing = await fetch(`${API_BASE_URL}/api/goals/${entityId}/funding-constraints`).then((r) => r.json());
+      const existingIds = new Set(existing.map((c: any) => c.excluded_category_id));
+      const submittedIds = new Set((formData.funding_constraints || []).map((c: any) => c.excluded_category_id));
+
+      for (const categoryId of submittedIds) {
+        if (!existingIds.has(categoryId)) {
+          await fetch(`${API_BASE_URL}/api/goals/${entityId}/funding-constraints`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ excluded_category_id: categoryId }),
+          });
+        }
+      }
+      for (const categoryId of existingIds) {
+        if (!submittedIds.has(categoryId)) {
+          await fetch(`${API_BASE_URL}/api/goals/${entityId}/funding-constraints/${categoryId}`, { method: 'DELETE' });
+        }
+      }
+    }
     if (entityType === 'assets' && categoryName === 'Insurance') {
       await fetch(`${API_BASE_URL}/api/assets/${entityId}/insurance-details`, {
         method: 'PUT',
@@ -182,19 +204,16 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
       });
     }
 
-    // Property <-> Home Loan bidirectional link
+    // Property -> Home Loan link: liabilities.linked_asset_id is the single source of
+    // truth for this relationship (assets has no linked_liability_id column), so this is
+    // only ever written from the Property side. When editing from the Home Loan side,
+    // formData.linked_asset_id is already part of the primary liability save above —
+    // no second write is needed or valid here.
     if (entityType === 'assets' && categoryName === 'Property' && formData.linked_liability_id) {
       await fetch(`${API_BASE_URL}/api/entities/liabilities/${formData.linked_liability_id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ linked_asset_id: entityId }),
-      });
-    }
-    if (entityType === 'liabilities' && categoryName === 'Home Loan' && formData.linked_asset_id) {
-      await fetch(`${API_BASE_URL}/api/entities/assets/${formData.linked_asset_id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ linked_liability_id: entityId }),
       });
     }
   };
@@ -214,7 +233,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
       }
 
       const categoryName = categories.find((c) => c.id === formData.category_id)?.name;
-      const { holding_lots, ...primaryPayload } = formData;
+      const { holding_lots, funding_constraints, ...primaryPayload } = formData;
 
       const res = await fetch(url, {
         method: isEdit ? 'PUT' : 'POST',
@@ -453,6 +472,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
               category={activeCategory || typeCategories[0]}
               categories={categories}
               institutions={institutions}
+              people={people}
               goals={goals}
               initialData={editingEntity}
               liabilities={liabilities}

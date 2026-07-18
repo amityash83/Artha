@@ -171,20 +171,22 @@ def get_init_data():
     try:
         # Accounts (derived balances computed on the fly)
         cursor.execute("""
-            SELECT 
-                a.*, 
+            SELECT
+                a.*,
                 i.name as institution_name,
+                p.name as owner_name,
                 (
-                    SELECT COALESCE(SUM(t.amount), 0.0) 
-                    FROM transactions t 
+                    SELECT COALESCE(SUM(t.amount), 0.0)
+                    FROM transactions t
                     WHERE t.dest_ref_type = 'Account' AND t.dest_ref_id = a.id
                 ) - (
-                    SELECT COALESCE(SUM(t.amount), 0.0) 
-                    FROM transactions t 
+                    SELECT COALESCE(SUM(t.amount), 0.0)
+                    FROM transactions t
                     WHERE t.source_ref_type = 'Account' AND t.source_ref_id = a.id
                 ) AS current_balance
             FROM accounts a
             LEFT JOIN institutions i ON a.institution_id = i.id
+            LEFT JOIN people p ON a.owner_id = p.id
         """)
         accounts = []
         for row in cursor.fetchall():
@@ -322,6 +324,9 @@ def get_init_data():
         cursor.execute("SELECT * FROM institutions ORDER BY name ASC")
         institutions = [dict(row) for row in cursor.fetchall()]
 
+        cursor.execute("SELECT * FROM people ORDER BY name ASC")
+        people = [dict(row) for row in cursor.fetchall()]
+
         # Monthly Cash Flows logs
         cursor.execute("SELECT * FROM monthly_cash_flows ORDER BY month DESC")
         cash_flows = [dict(row) for row in cursor.fetchall()]
@@ -375,6 +380,7 @@ def get_init_data():
             "rules": rules,
             "categories": categories,
             "institutions": institutions,
+            "people": people,
             "recommendations": recommendations,
             "cash_flows": cash_flows
         }
@@ -708,6 +714,22 @@ class CreditCardDetailsSchema(BaseModel):
     annual_fee: float = 0.0
     reward_points: float = 0.0
     point_value: float = 0.25
+    renewal_date: Optional[str] = None
+    network: str = "Visa"
+    lounge_visits_limit: float = 0.0
+    lounge_visits_used: float = 0.0
+    lounge_int_limit: float = 0.0
+    lounge_int_used: float = 0.0
+    milestone_spend_target: float = 0.0
+    milestone_spend_current: float = 0.0
+    milestone_reward_desc: Optional[str] = None
+    remarks: Optional[str] = None
+    base_points: float = 1.0
+    base_spend: float = 100.0
+    current_statement_spend: float = 0.0
+    category_rules_json: str = "[]"
+    milestone_rules_json: str = "[]"
+    redemption_partners_json: str = "[]"
 
 @app.get("/api/liabilities/{id}/credit-card-details")
 def get_credit_card_details(id: int):
@@ -891,9 +913,61 @@ def delete_holding(lot_id: int):
     finally:
         conn.close()
 
+@app.get("/api/goals/{id}/funding-constraints")
+def get_goal_funding_constraints(id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT gfc.excluded_category_id, c.name as category_name
+            FROM goal_funding_constraints gfc
+            JOIN categories c ON c.id = gfc.excluded_category_id
+            WHERE gfc.goal_id = ?
+        """, (id,))
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+class GoalFundingConstraintSchema(BaseModel):
+    excluded_category_id: int
+
+@app.post("/api/goals/{id}/funding-constraints")
+def create_goal_funding_constraint(id: int, constraint: GoalFundingConstraintSchema):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT OR IGNORE INTO goal_funding_constraints (goal_id, excluded_category_id) VALUES (?, ?)",
+            (id, constraint.excluded_category_id)
+        )
+        conn.commit()
+        return {"status": "success"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.delete("/api/goals/{id}/funding-constraints/{category_id}")
+def delete_goal_funding_constraint(id: int, category_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "DELETE FROM goal_funding_constraints WHERE goal_id = ? AND excluded_category_id = ?",
+            (id, category_id)
+        )
+        conn.commit()
+        return {"status": "success"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
 @app.delete("/api/metadata/{meta_type}/{id}")
 def delete_metadata(meta_type: str, id: int):
-    if meta_type not in ["categories", "institutions", "financial_rules"]:
+    if meta_type not in ["categories", "institutions", "financial_rules", "people"]:
         raise HTTPException(status_code=400, detail="Invalid metadata type")
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -910,13 +984,15 @@ def delete_metadata(meta_type: str, id: int):
 # --- Metadata Configuration REST API ---
 @app.get("/api/metadata/{meta_type}")
 def get_metadata(meta_type: str):
-    if meta_type not in ["categories", "institutions", "financial_rules"]:
+    if meta_type not in ["categories", "institutions", "financial_rules", "people"]:
         raise HTTPException(status_code=400, detail="Invalid metadata type")
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
         if meta_type == "institutions":
             cursor.execute("SELECT * FROM institutions ORDER BY name ASC")
+        elif meta_type == "people":
+            cursor.execute("SELECT * FROM people ORDER BY name ASC")
         else:
             cursor.execute(f"SELECT * FROM {meta_type}")
         rows = cursor.fetchall()
@@ -935,7 +1011,7 @@ def get_metadata(meta_type: str):
 
 @app.post("/api/metadata/{meta_type}")
 def create_metadata(meta_type: str, payload: dict):
-    if meta_type not in ["categories", "institutions", "financial_rules"]:
+    if meta_type not in ["categories", "institutions", "financial_rules", "people"]:
         raise HTTPException(status_code=400, detail="Invalid metadata type")
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -956,7 +1032,7 @@ def create_metadata(meta_type: str, payload: dict):
 
 @app.put("/api/metadata/{meta_type}/{id}")
 def update_metadata(meta_type: str, id: int, payload: dict):
-    if meta_type not in ["categories", "institutions"]:
+    if meta_type not in ["categories", "institutions", "people"]:
         raise HTTPException(status_code=400, detail="Invalid metadata type for update")
     conn = get_db_connection()
     cursor = conn.cursor()

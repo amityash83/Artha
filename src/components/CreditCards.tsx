@@ -200,40 +200,41 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
     setLenderId(card.lender_institution_id?.toString() || '');
     setOutstanding(card.outstanding || 0);
 
-    const meta = card.metadata_json ? (typeof card.metadata_json === 'string' ? JSON.parse(card.metadata_json) : card.metadata_json) : {};
-    setCreditLimit(meta.credit_limit || 100000);
-    setStatementDate(meta.statement_date || 15);
-    setDueDate(meta.due_date || 5);
-    setAnnualFee(meta.annual_fee || 0);
-    setRenewalDate(meta.renewal_date || '');
-    setRewardPoints(meta.reward_points || 0);
-    setPointValue(meta.point_value || 0.25);
-    setNetwork(meta.network || 'Visa');
-    setLoungeVisitsLimit(meta.lounge_visits_limit || 4);
-    setLoungeVisitsUsed(meta.lounge_visits_used || 0);
-    setLoungeIntLimit(meta.lounge_int_limit || 0);
-    setLoungeIntUsed(meta.lounge_int_used || 0);
-    setMilestoneTarget(meta.milestone_spend_target || 0);
-    setMilestoneCurrent(meta.milestone_spend_current || 0);
-    setMilestoneDesc(meta.milestone_reward_desc || '');
-    setRemarks(meta.remarks || '');
+    // credit_card_details columns are flattened directly onto the liability object
+    // by /api/init — read them straight off `card`, not from metadata_json.
+    setCreditLimit(card.credit_limit || 100000);
+    setStatementDate(card.statement_date || 15);
+    setDueDate(card.due_date || 5);
+    setAnnualFee(card.annual_fee || 0);
+    setRenewalDate(card.renewal_date || '');
+    setRewardPoints(card.reward_points || 0);
+    setPointValue(card.point_value || 0.25);
+    setNetwork(card.network || 'Visa');
+    setLoungeVisitsLimit(card.lounge_visits_limit || 4);
+    setLoungeVisitsUsed(card.lounge_visits_used || 0);
+    setLoungeIntLimit(card.lounge_int_limit || 0);
+    setLoungeIntUsed(card.lounge_int_used || 0);
+    setMilestoneTarget(card.milestone_spend_target || 0);
+    setMilestoneCurrent(card.milestone_spend_current || 0);
+    setMilestoneDesc(card.milestone_reward_desc || '');
+    setRemarks(card.remarks || '');
 
     // Advanced Rewards structures
-    setBasePoints(meta.base_points || 1);
-    setBaseSpend(meta.base_spend || 100);
-    setCurrentStatementSpend(meta.current_statement_spend || 0);
-    
+    setBasePoints(card.base_points || 1);
+    setBaseSpend(card.base_spend || 100);
+    setCurrentStatementSpend(card.current_statement_spend || 0);
+
     // Parse category multipliers, milestones and partners from database JSON strings
     try {
-      setCategoryRules(meta.category_rules_json ? JSON.parse(meta.category_rules_json) : []);
+      setCategoryRules(card.category_rules_json ? JSON.parse(card.category_rules_json) : []);
     } catch { setCategoryRules([]); }
-    
+
     try {
-      setMilestoneRules(meta.milestone_rules_json ? JSON.parse(meta.milestone_rules_json) : []);
+      setMilestoneRules(card.milestone_rules_json ? JSON.parse(card.milestone_rules_json) : []);
     } catch { setMilestoneRules([]); }
 
     try {
-      setRedemptionPartners(meta.redemption_partners_json ? JSON.parse(meta.redemption_partners_json) : []);
+      setRedemptionPartners(card.redemption_partners_json ? JSON.parse(card.redemption_partners_json) : []);
     } catch { setRedemptionPartners([]); }
 
     setActiveModalTab('general');
@@ -295,8 +296,26 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
       return;
     }
 
-    const metadataPayload = {
+    // Base liability fields go through the generic entity route; the reward-engine
+    // config (credit limit, statement/due dates, milestones, category multipliers,
+    // redemption partners, lounge tracking) is the single source of truth in
+    // credit_card_details, written via its own satellite route below — not bundled
+    // into liabilities.metadata_json anymore.
+    const payload = {
+      name,
+      category_id: creditCardCategoryId,
+      lender_institution_id: Number(lenderId),
+      interest_rate: 0.0,
+      emi: 0.0,
+      outstanding: Number(outstanding),
+      tenure_months: 0,
+      compounding: 'Monthly',
+      tax_benefit: 'None',
+    };
+
+    const creditCardDetailsPayload = {
       credit_limit: Number(creditLimit),
+      statement_balance: editingCard?.statement_balance || 0,
       statement_date: Number(statementDate),
       due_date: Number(dueDate),
       annual_fee: Number(annualFee),
@@ -317,24 +336,11 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
       current_statement_spend: Number(currentStatementSpend),
       category_rules_json: JSON.stringify(categoryRules),
       milestone_rules_json: JSON.stringify(milestoneRules),
-      redemption_partners_json: JSON.stringify(redemptionPartners)
-    };
-
-    const payload = {
-      name,
-      category_id: creditCardCategoryId,
-      lender_institution_id: Number(lenderId),
-      interest_rate: 0.0,
-      emi: 0.0,
-      outstanding: Number(outstanding),
-      tenure_months: 0,
-      compounding: 'Monthly',
-      tax_benefit: 'None',
-      metadata_json: JSON.stringify(metadataPayload)
+      redemption_partners_json: JSON.stringify(redemptionPartners),
     };
 
     const isEdit = !!editingCard;
-    const url = isEdit 
+    const url = isEdit
       ? `${API_BASE_URL}/api/entities/liabilities/${editingCard.id}`
       : `${API_BASE_URL}/api/entities/liabilities`;
 
@@ -345,6 +351,12 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
         body: JSON.stringify(payload)
       });
       if (res.ok) {
+        const liabilityId = isEdit ? editingCard.id : (await res.json()).id;
+        await fetch(`${API_BASE_URL}/api/liabilities/${liabilityId}/credit-card-details`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(creditCardDetailsPayload),
+        });
         setModalOpen(false);
         onRefresh();
         if (showToast) showToast(isEdit ? "Card configuration saved" : "Credit Card registered", "success");
@@ -397,7 +409,9 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
 
     creditCards.forEach((c: any) => {
       totalOutstanding += c.outstanding || 0;
-      const meta = c.metadata_json ? (typeof c.metadata_json === 'string' ? JSON.parse(c.metadata_json) : c.metadata_json) : {};
+      // credit_card_details columns are flattened directly onto the liability object
+      // by /api/init — no metadata_json parsing needed.
+      const meta = c;
       totalLimit += Number(meta.credit_limit || 0);
       
       const pts = Number(meta.reward_points || 0);
@@ -421,7 +435,9 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
     if (calcAmount <= 0) return [];
 
     return creditCards.map((c: any) => {
-      const meta = c.metadata_json ? (typeof c.metadata_json === 'string' ? JSON.parse(c.metadata_json) : c.metadata_json) : {};
+      // credit_card_details columns are flattened directly onto the liability object
+      // by /api/init — no metadata_json parsing needed.
+      const meta = c;
       
       const basePts = Number(meta.base_points || 1);
       const baseSpendAmt = Number(meta.base_spend || 100);
@@ -662,7 +678,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px' }}>
               {creditCards.map((card: any, idx) => {
-                const meta = card.metadata_json ? (typeof card.metadata_json === 'string' ? JSON.parse(card.metadata_json) : card.metadata_json) : {};
+                const meta = card;
                 const limit = Number(meta.credit_limit || 0);
                 const fee = Number(meta.annual_fee || 0);
                 const pts = Number(meta.reward_points || 0);
@@ -847,7 +863,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
             <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text-primary)' }}>Fee Waivers &amp; Milestones</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               {creditCards.map((card: any) => {
-                const meta = card.metadata_json ? (typeof card.metadata_json === 'string' ? JSON.parse(card.metadata_json) : card.metadata_json) : {};
+                const meta = card;
                 const target = Number(meta.milestone_spend_target || 0);
                 const current = Number(meta.milestone_spend_current || 0);
                 const renewalStr = meta.renewal_date || '';
@@ -906,7 +922,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
             <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text-primary)' }}>Lounge Access Trackers</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               {creditCards.map((card: any) => {
-                const meta = card.metadata_json ? (typeof card.metadata_json === 'string' ? JSON.parse(card.metadata_json) : card.metadata_json) : {};
+                const meta = card;
                 const domLimit = Number(meta.lounge_visits_limit || 0);
                 const domUsed = Number(meta.lounge_visits_used || 0);
                 const intLimit = Number(meta.lounge_int_limit || 0);

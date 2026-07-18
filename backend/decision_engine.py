@@ -179,6 +179,29 @@ def generate_recommendations(conn) -> list:
                 "suggested_amount": gap
             })
             
+    # Check 5b: Goal funding constraints — flag any goal funded (via goal_holdings)
+    # from an asset category the goal explicitly excludes (goal_funding_constraints).
+    # This replaces the old hardcoded, unenforced "no_villa_equity" rule with a
+    # generic, per-goal, DB-configurable constraint.
+    cursor.execute("""
+        SELECT g.name as goal_name, cat.name as category_name, a.name as asset_name
+        FROM goal_funding_constraints gfc
+        JOIN goals g ON g.id = gfc.goal_id
+        JOIN goal_holdings gh ON gh.goal_id = gfc.goal_id
+        JOIN assets a ON a.id = gh.asset_id AND a.category_id = gfc.excluded_category_id
+        JOIN categories cat ON cat.id = gfc.excluded_category_id
+    """)
+    violations = cursor.fetchall()
+    for v in violations:
+        recs.append({
+            "category": "Goal Funding",
+            "title": f"Funding Rule Violated: {v['goal_name']}",
+            "message": f"'{v['goal_name']}' excludes funding from {v['category_name']}, but is currently linked to '{v['asset_name']}' ({v['category_name']}). Reassign this holding or remove the funding constraint.",
+            "status": "warning",
+            "action_type": "info",
+            "suggested_amount": 0.0
+        })
+
     # Check 6: Insurance premium reminders (within 30 days) from insurance_details
     cursor.execute("""
         SELECT inst.name as company, ins.renewal_date, ins.premium
