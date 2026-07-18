@@ -364,6 +364,10 @@ def get_init_data():
         cursor.execute("SELECT * FROM knowledge_articles ORDER BY topic ASC, title ASC")
         knowledge_articles = [_shape_knowledge_row(row) for row in cursor.fetchall()]
 
+        cursor.execute("SELECT provider FROM ai_settings WHERE id = 1")
+        ai_row = cursor.fetchone()
+        ai_provider = ai_row["provider"] if ai_row else "none"
+
         # Monthly Cash Flows logs
         cursor.execute("SELECT * FROM monthly_cash_flows ORDER BY month DESC")
         cash_flows = [dict(row) for row in cursor.fetchall()]
@@ -421,6 +425,7 @@ def get_init_data():
             "tax_profiles": tax_profiles,
             "card_variants": card_variants,
             "knowledge_articles": knowledge_articles,
+            "ai_provider": ai_provider,
             "recommendations": recommendations,
             "cash_flows": cash_flows
         }
@@ -1977,6 +1982,134 @@ def update_rule(rule: RuleSchema):
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+# --- AI Assistant ---
+# Explain-only, never calculate: every prompt embeds numbers already computed by
+# calculations.py/decision_engine.py; the model's reply is always returned as
+# opaque display text, never parsed as instructions or written back to any
+# table. Off by default (ai_settings.provider = 'none') — no outbound network
+# call happens anywhere in the app until a user explicitly configures a
+# provider in Settings. See Artha_Architecture_Blueprint_v1/07-AI-Architecture.md.
+
+class AISettingsSchema(BaseModel):
+    provider: str = "none"
+    endpoint: Optional[str] = ""
+    api_key: Optional[str] = ""
+    model: Optional[str] = ""
+    max_tokens: Optional[int] = 500
+
+class AIExplainRequest(BaseModel):
+    rule_key: Optional[str] = None
+    recommendation_index: Optional[int] = None
+    context_note: Optional[str] = ""
+
+class AIAskRequest(BaseModel):
+    question: str
+
+@app.get("/api/ai/settings")
+def get_ai_settings():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM ai_settings WHERE id = 1")
+        row = cursor.fetchone()
+        result = dict(row) if row else {"provider": "none", "max_tokens": 500}
+        result["api_key_set"] = bool(result.get("api_key"))
+        result.pop("api_key", None)
+        return result
+    finally:
+        conn.close()
+
+@app.put("/api/ai/settings")
+def update_ai_settings(settings: AISettingsSchema):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT api_key FROM ai_settings WHERE id = 1")
+        existing = cursor.fetchone()
+        # Blank api_key in the incoming payload means "leave unchanged", so
+        # re-saving provider/model doesn't silently wipe a previously-stored key.
+        api_key = settings.api_key if settings.api_key else (existing["api_key"] if existing else None)
+        cursor.execute("""
+            INSERT INTO ai_settings (id, provider, endpoint, api_key, model, max_tokens, updated_at)
+            VALUES (1, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                provider=excluded.provider, endpoint=excluded.endpoint, api_key=excluded.api_key,
+                model=excluded.model, max_tokens=excluded.max_tokens, updated_at=excluded.updated_at
+        """, (settings.provider, settings.endpoint, api_key, settings.model, settings.max_tokens, datetime.now().isoformat()))
+        conn.commit()
+        return {"status": "success"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.post("/api/ai/test")
+def test_ai_connection():
+    from backend.ai.providers import get_provider, AIProviderError
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM ai_settings WHERE id = 1")
+        row = cursor.fetchone()
+        if not row or row["provider"] == "none":
+            raise HTTPException(status_code=400, detail="No AI provider configured")
+        provider = get_provider(dict(row))
+        reply = provider.complete("You are a connectivity test.", "Reply with the single word OK.", max_tokens=10)
+        return {"status": "success", "reply": reply.strip()}
+    except AIProviderError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except HTTPException:
+        raise
+    finally:
+        conn.close()
+
+@app.post("/api/ai/explain")
+def ai_explain(req: AIExplainRequest):
+    from backend.ai.providers import get_provider, AIProviderError
+    from backend.ai.context import build_explain_context
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM ai_settings WHERE id = 1")
+        row = cursor.fetchone()
+        if not row or row["provider"] == "none":
+            raise HTTPException(status_code=400, detail="AI Assistant is not configured")
+        provider = get_provider(dict(row))
+        system_prompt, user_prompt = build_explain_context(conn, req.rule_key, req.recommendation_index, req.context_note)
+        try:
+            reply = provider.complete(system_prompt, user_prompt, max_tokens=row["max_tokens"] or 500)
+        except AIProviderError as e:
+            raise HTTPException(status_code=502, detail=str(e))
+        return {"explanation": reply}
+    except HTTPException:
+        raise
+    finally:
+        conn.close()
+
+@app.post("/api/ai/ask")
+def ai_ask(req: AIAskRequest):
+    from backend.ai.providers import get_provider, AIProviderError
+    from backend.ai.context import build_ask_context
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM ai_settings WHERE id = 1")
+        row = cursor.fetchone()
+        if not row or row["provider"] == "none":
+            raise HTTPException(status_code=400, detail="AI Assistant is not configured")
+        provider = get_provider(dict(row))
+        system_prompt, user_prompt = build_ask_context(conn, req.question)
+        try:
+            reply = provider.complete(system_prompt, user_prompt, max_tokens=row["max_tokens"] or 500)
+        except AIProviderError as e:
+            raise HTTPException(status_code=502, detail=str(e))
+        return {"answer": reply}
+    except HTTPException:
+        raise
     finally:
         conn.close()
 

@@ -396,6 +396,11 @@ h1, h2, h3, h4, h5 {
   margin-bottom: 24px;
 }
 
+@keyframes artha-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* Charts Wrapper */
 .chart-container {
   position: relative;

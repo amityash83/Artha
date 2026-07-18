@@ -287,6 +287,26 @@ def init_db():
     )
     """)
 
+    # AI Assistant configuration: single-row singleton (enforced by CHECK(id=1)),
+    # per-database (not Electron-level settings.json) since the provider/key
+    # travels with the financial data it's used to discuss. Off by default
+    # (provider='none') — no network call happens anywhere in the app until a
+    # user explicitly configures a provider here. api_key is stored in plain
+    # text, matching this DB's existing no-encryption-at-rest posture for every
+    # other field; the frontend must disclose this explicitly, not silently.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS ai_settings (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        provider TEXT NOT NULL DEFAULT 'none',
+        endpoint TEXT,
+        api_key TEXT,
+        model TEXT,
+        max_tokens INTEGER NOT NULL DEFAULT 500,
+        updated_at TEXT
+    )
+    """)
+    cursor.execute("INSERT OR IGNORE INTO ai_settings (id, provider) VALUES (1, 'none')")
+
     # Insurance details (satellite table: 1:1 with assets, carries the policy_type sub-type)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS insurance_details (

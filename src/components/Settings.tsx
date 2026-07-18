@@ -35,6 +35,16 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
   // Rules, Categories, Institutions, People metadata states
   const [rules, setRules] = useState<any[]>([]);
   const [knowledgeArticles, setKnowledgeArticles] = useState<KnowledgeArticle[]>([]);
+
+  // AI Assistant configuration state
+  const [aiProvider, setAiProvider] = useState<'none' | 'ollama' | 'openai' | 'anthropic'>('none');
+  const [aiEndpoint, setAiEndpoint] = useState('');
+  const [aiApiKey, setAiApiKey] = useState('');
+  const [aiApiKeySet, setAiApiKeySet] = useState(false);
+  const [aiModel, setAiModel] = useState('');
+  const [aiMaxTokens, setAiMaxTokens] = useState(500);
+  const [aiStatus, setAiStatus] = useState<string | null>(null);
+  const [aiTesting, setAiTesting] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
   const [institutions, setInstitutions] = useState<any[]>([]);
   const [people, setPeople] = useState<any[]>([]);
@@ -61,7 +71,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
 
   const [ruleSaveStatus, setRuleSaveStatus] = useState<Record<string, string>>({});
   const [metaStatus, setMetaStatus] = useState<string | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'database' | 'rules' | 'categories' | 'import'>('database');
+  const [activeSubTab, setActiveSubTab] = useState<'database' | 'rules' | 'categories' | 'import' | 'ai'>('database');
 
   useEffect(() => {
     fetchBackups();
@@ -74,7 +84,68 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
       .then((res) => res.json())
       .then(setKnowledgeArticles)
       .catch(() => setKnowledgeArticles([]));
+    fetch(`${API_BASE_URL}/api/ai/settings`)
+      .then((res) => res.json())
+      .then((s) => {
+        setAiProvider(s.provider || 'none');
+        setAiEndpoint(s.endpoint || '');
+        setAiModel(s.model || '');
+        setAiMaxTokens(s.max_tokens || 500);
+        setAiApiKeySet(!!s.api_key_set);
+      })
+      .catch(() => {});
   }, []);
+
+  const handleSaveAiSettings = async () => {
+    setAiStatus('Saving...');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/ai/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: aiProvider,
+          endpoint: aiEndpoint,
+          api_key: aiApiKey, // blank means "leave unchanged" server-side
+          model: aiModel,
+          max_tokens: aiMaxTokens,
+        }),
+      });
+      if (res.ok) {
+        setAiStatus('AI settings saved.');
+        if (aiApiKey) {
+          setAiApiKeySet(true);
+          setAiApiKey('');
+        }
+        onRefresh();
+      } else {
+        setAiStatus('Failed to save AI settings.');
+      }
+    } catch (err) {
+      console.error(err);
+      setAiStatus('Error saving AI settings.');
+    } finally {
+      setTimeout(() => setAiStatus(null), 3000);
+    }
+  };
+
+  const handleTestAiConnection = async () => {
+    setAiTesting(true);
+    setAiStatus('Testing connection...');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/ai/test`, { method: 'POST' });
+      const json = await res.json();
+      if (res.ok) {
+        setAiStatus(`Connected — model replied: "${json.reply}"`);
+      } else {
+        setAiStatus(`Connection failed: ${json.detail || 'unknown error'}`);
+      }
+    } catch (err) {
+      console.error(err);
+      setAiStatus('Connection failed — could not reach the backend.');
+    } finally {
+      setAiTesting(false);
+    }
+  };
 
   const fetchRulesList = () => {
     fetch(`${API_BASE_URL}/api/metadata/financial_rules`)
@@ -613,6 +684,13 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
           style={{ padding: '8px 16px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '13px' }}
         >
           Data Import
+        </button>
+        <button
+          onClick={() => setActiveSubTab('ai')}
+          className={`sidebar-item ${activeSubTab === 'ai' ? 'active' : ''}`}
+          style={{ padding: '8px 16px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '13px' }}
+        >
+          AI Assistant
         </button>
       </div>
 
@@ -1443,6 +1521,97 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
                   {importStatus}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeSubTab === 'ai' && (
+        <div className="glass-panel" style={{ padding: '24px', maxWidth: '560px' }}>
+          <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '6px' }}>AI Assistant</h3>
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '20px', lineHeight: '1.4' }}>
+            Optional. Off by default — no network request of any kind is made unless you configure a provider here.
+            The AI only explains numbers Artha has already calculated; it never computes or overrides anything itself.
+          </p>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Provider</label>
+              <select className="form-control" value={aiProvider} onChange={(e) => setAiProvider(e.target.value as any)}>
+                <option value="none">None (disabled)</option>
+                <option value="ollama">Ollama (local, runs on your machine)</option>
+                <option value="openai">OpenAI-compatible (cloud, API key required)</option>
+                <option value="anthropic">Anthropic (cloud, API key required)</option>
+              </select>
+            </div>
+
+            {aiProvider === 'ollama' && (
+              <>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Ollama Endpoint</label>
+                  <input className="form-control" placeholder="http://localhost:11434" value={aiEndpoint} onChange={(e) => setAiEndpoint(e.target.value)} />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Model</label>
+                  <input className="form-control" placeholder="llama3.1" value={aiModel} onChange={(e) => setAiModel(e.target.value)} />
+                </div>
+              </>
+            )}
+
+            {(aiProvider === 'openai' || aiProvider === 'anthropic') && (
+              <>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>API Key</label>
+                  <input
+                    type="password"
+                    className="form-control"
+                    placeholder={aiApiKeySet ? 'Key saved — leave blank to keep it' : 'Enter API key'}
+                    value={aiApiKey}
+                    onChange={(e) => setAiApiKey(e.target.value)}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Model</label>
+                  <input
+                    className="form-control"
+                    placeholder={aiProvider === 'openai' ? 'gpt-4o-mini' : 'claude-3-5-haiku-20241022'}
+                    value={aiModel}
+                    onChange={(e) => setAiModel(e.target.value)}
+                  />
+                </div>
+                {aiProvider === 'openai' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Custom Base URL (optional, for OpenAI-compatible APIs)</label>
+                    <input className="form-control" placeholder="https://api.openai.com/v1" value={aiEndpoint} onChange={(e) => setAiEndpoint(e.target.value)} />
+                  </div>
+                )}
+                <div style={{
+                  padding: '10px 14px', borderRadius: '10px', fontSize: '11.5px', lineHeight: 1.5,
+                  background: 'rgba(245, 158, 11, 0.06)', border: '1px solid rgba(245, 158, 11, 0.2)', color: 'var(--text-secondary)',
+                }}>
+                  Your API key is stored locally in this app's database, in plain text — the same way all your other
+                  financial data is stored, with no additional encryption. Do not use a key with elevated permissions.
+                </div>
+              </>
+            )}
+
+            {aiProvider !== 'none' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Max Response Length (tokens)</label>
+                <input type="number" className="form-control" value={aiMaxTokens} onChange={(e) => setAiMaxTokens(parseInt(e.target.value) || 500)} />
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <button className="btn btn-primary" style={{ padding: '8px 18px' }} onClick={handleSaveAiSettings}>
+                Save
+              </button>
+              {aiProvider !== 'none' && (
+                <button className="btn btn-secondary" style={{ padding: '8px 18px' }} onClick={handleTestAiConnection} disabled={aiTesting}>
+                  {aiTesting ? 'Testing...' : 'Test Connection'}
+                </button>
+              )}
+              {aiStatus && <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{aiStatus}</span>}
             </div>
           </div>
         </div>

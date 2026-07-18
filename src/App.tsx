@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Landmark, LandmarkIcon, PiggyBank,
   Target, FileText, Database, Compass, Calendar, Calculator, Zap, LineChart, ArrowRightLeft, Sliders,
-  CheckCircle2, AlertCircle, Info, X, CreditCard, Percent
+  CheckCircle2, AlertCircle, Info, X, CreditCard, Percent, Sparkles
 } from 'lucide-react';
 import { InitData } from './types';
 import { Dashboard } from './components/Dashboard';
@@ -19,6 +19,7 @@ import { TransactionsLedger } from './components/TransactionsLedger';
 import { BudgetPlanner } from './components/BudgetPlanner';
 import { CreditCards } from './components/CreditCards';
 import { Taxation } from './components/Taxation';
+import { AskArtha } from './components/AskArtha';
 import { API_BASE_URL } from './config';
 
 const App: React.FC = () => {
@@ -312,6 +313,15 @@ const App: React.FC = () => {
             </li>
             <li>
               <div
+                className={`sidebar-item ${activeTab === 'ask-artha' ? 'active' : ''}`}
+                onClick={() => handleNavigate('ask-artha')}
+              >
+                <Sparkles size={16} style={{ color: 'var(--accent-light)' }} />
+                Ask Artha
+              </div>
+            </li>
+            <li>
+              <div
                 className={`sidebar-item ${activeTab === 'reports' ? 'active' : ''}`}
                 onClick={() => handleNavigate('reports')}
               >
@@ -422,6 +432,9 @@ const App: React.FC = () => {
         )}
         {activeTab === 'taxation' && (
           <Taxation data={data} onRefresh={fetchFinanceData} showToast={showToast} />
+        )}
+        {activeTab === 'ask-artha' && (
+          <AskArtha data={data} showToast={showToast} />
         )}
         {activeTab === 'reports' && (
           <Reports data={data} />

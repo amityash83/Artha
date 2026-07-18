@@ -367,6 +367,15 @@ export interface Recommendation {
   rule_key: string | null;
 }
 
+export interface AISettings {
+  provider: 'none' | 'ollama' | 'openai' | 'anthropic';
+  endpoint?: string;
+  model?: string;
+  max_tokens?: number;
+  api_key_set?: boolean;
+  updated_at?: string;
+}
+
 export interface KnowledgeArticle {
   id: number;
   slug: string;
@@ -430,6 +439,7 @@ export interface InitData {
   tax_profiles: TaxProfile[];
   card_variants: CardVariant[];
   knowledge_articles: KnowledgeArticle[];
+  ai_provider: 'none' | 'ollama' | 'openai' | 'anthropic';
   recommendations: Recommendation[];
   cash_flows: MonthlyCashFlow[];
 }

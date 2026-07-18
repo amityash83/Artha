@@ -11,6 +11,7 @@ import {
 import { InitData, Snapshot } from '../types';
 import { API_BASE_URL } from '../config';
 import { InfoTooltip } from './InfoTooltip';
+import { AIExplainButton } from './AIExplainButton';
 
 ChartJS.register(
   CategoryScale, LinearScale, PointElement, LineElement, 
@@ -454,6 +455,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
                   <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     {rec.title}
                     {rec.rule_key && <InfoTooltip articles={data.knowledge_articles} ruleKey={rec.rule_key} />}
+                    <AIExplainButton
+                      aiConfigured={data.ai_provider !== 'none'}
+                      ruleKey={rec.rule_key || undefined}
+                      recommendationIndex={i}
+                      contextNote={`Dashboard recommendation: ${rec.category}`}
+                    />
                   </h4>
                   <p style={{ fontSize: '11.5px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>{rec.message}</p>
                   
