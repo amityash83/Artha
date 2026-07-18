@@ -296,6 +296,25 @@ def init_db():
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_insurance_premium_payments_asset ON insurance_premium_payments(asset_id)")
 
+    # Documents (generic satellite table: attaches uploaded files to any financial
+    # entity via a polymorphic reference, same pattern as transactions.source_ref_type/
+    # source_ref_id. Files themselves live on disk under <data_dir>/documents/, named
+    # by stored_name to avoid collisions/traversal; only the reference lives here.)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS documents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ref_type TEXT NOT NULL CHECK(ref_type IN ('Account', 'Asset', 'Liability', 'Goal')),
+        ref_id INTEGER NOT NULL,
+        file_name TEXT NOT NULL,
+        stored_name TEXT NOT NULL UNIQUE,
+        mime_type TEXT,
+        size_bytes INTEGER,
+        description TEXT,
+        uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_ref ON documents(ref_type, ref_id)")
+
     # Income
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS income (

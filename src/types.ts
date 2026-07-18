@@ -82,6 +82,19 @@ export interface InsurancePremiumPayment {
   notes?: string;
 }
 
+// Named AttachedDocument (not Document) to avoid colliding with the global DOM Document type.
+export interface AttachedDocument {
+  id: number;
+  ref_type: 'Account' | 'Asset' | 'Liability' | 'Goal';
+  ref_id: number;
+  file_name: string;
+  stored_name: string;
+  mime_type?: string;
+  size_bytes?: number;
+  description?: string;
+  uploaded_at: string;
+}
+
 export interface CreditCardDetails {
   liability_id?: number;
   credit_limit: number;

@@ -2,10 +2,11 @@ import os
 import shutil
 import json
 import math
+import uuid
 from datetime import datetime, date
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -716,8 +717,19 @@ def delete_entity(entity_type: str, id: int):
         if entity_type == "assets":
             cursor.execute("DELETE FROM goal_holdings WHERE asset_id = ?", (id,))
 
+        doc_files_to_remove = []
+        if entity_type in DOCUMENT_REF_TYPE_MAP:
+            ref_type = DOCUMENT_REF_TYPE_MAP[entity_type]
+            cursor.execute("SELECT stored_name FROM documents WHERE ref_type = ? AND ref_id = ?", (ref_type, id))
+            doc_files_to_remove = [row["stored_name"] for row in cursor.fetchall()]
+            cursor.execute("DELETE FROM documents WHERE ref_type = ? AND ref_id = ?", (ref_type, id))
+
         cursor.execute(f"DELETE FROM {entity_type} WHERE id = ?", (id,))
         conn.commit()
+        for stored_name in doc_files_to_remove:
+            file_path = os.path.join(get_documents_dir(), stored_name)
+            if os.path.exists(file_path):
+                os.remove(file_path)
         return {"status": "success"}
     except Exception as e:
         conn.rollback()
@@ -1151,6 +1163,96 @@ def delete_premium_payment(payment_id: int):
             raise HTTPException(status_code=404, detail="Premium payment not found")
         cursor.execute("DELETE FROM insurance_premium_payments WHERE id = ?", (payment_id,))
         conn.commit()
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+# --- Documents Router (generic file attachments on any entity) ---
+DOCUMENT_REF_TYPE_MAP = {"accounts": "Account", "assets": "Asset", "liabilities": "Liability", "goals": "Goal"}
+
+def get_documents_dir():
+    documents_dir = os.path.join(get_db_dir(), "documents")
+    os.makedirs(documents_dir, exist_ok=True)
+    return documents_dir
+
+@app.get("/api/entities/{entity_type}/{entity_id}/documents")
+def list_documents(entity_type: str, entity_id: int):
+    if entity_type not in DOCUMENT_REF_TYPE_MAP:
+        raise HTTPException(status_code=400, detail=f"Invalid entity type: {entity_type}")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT * FROM documents WHERE ref_type = ? AND ref_id = ? ORDER BY uploaded_at DESC",
+            (DOCUMENT_REF_TYPE_MAP[entity_type], entity_id)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+@app.post("/api/entities/{entity_type}/{entity_id}/documents")
+async def upload_document(entity_type: str, entity_id: int, file: UploadFile = File(...), description: str = Form("")):
+    if entity_type not in DOCUMENT_REF_TYPE_MAP:
+        raise HTTPException(status_code=400, detail=f"Invalid entity type: {entity_type}")
+    contents = await file.read()
+    stored_name = f"{uuid.uuid4().hex}{os.path.splitext(file.filename or '')[1]}"
+    dest_path = os.path.join(get_documents_dir(), stored_name)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        with open(dest_path, "wb") as f:
+            f.write(contents)
+        cursor.execute(
+            """INSERT INTO documents (ref_type, ref_id, file_name, stored_name, mime_type, size_bytes, description)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (DOCUMENT_REF_TYPE_MAP[entity_type], entity_id, file.filename, stored_name, file.content_type, len(contents), description)
+        )
+        conn.commit()
+        return {"status": "success", "id": cursor.lastrowid}
+    except Exception as e:
+        conn.rollback()
+        if os.path.exists(dest_path):
+            os.remove(dest_path)
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.get("/api/documents/{document_id}/download")
+def download_document(document_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM documents WHERE id = ?", (document_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Document not found")
+        doc = dict(row)
+        file_path = os.path.join(get_documents_dir(), doc["stored_name"])
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="Document file missing on disk")
+        return FileResponse(file_path, filename=doc["file_name"], media_type=doc["mime_type"] or "application/octet-stream")
+    finally:
+        conn.close()
+
+@app.delete("/api/documents/{document_id}")
+def delete_document(document_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT stored_name FROM documents WHERE id = ?", (document_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Document not found")
+        file_path = os.path.join(get_documents_dir(), row["stored_name"])
+        cursor.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+        conn.commit()
+        if os.path.exists(file_path):
+            os.remove(file_path)
         return {"status": "success"}
     except HTTPException:
         raise

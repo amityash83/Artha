@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Category, Institution, Liability, Goal, Person } from '../types';
 import { HoldingLotsEditor } from './HoldingLotsEditor';
 import { GoalFundingConstraintsEditor } from './GoalFundingConstraintsEditor';
+import { DocumentsEditor } from './DocumentsEditor';
 import { PropertyRentalLedgerEditor } from './PropertyRentalLedgerEditor';
 import { InsuranceClaimsEditor } from './InsuranceClaimsEditor';
 import { InsurancePremiumPaymentsEditor } from './InsurancePremiumPaymentsEditor';
@@ -590,6 +591,15 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
             constraints={fundingConstraints}
             onChange={setFundingConstraints}
           />
+        )}
+
+        {/* Documents apply generically at the entity-type level (not per-category, unlike
+            most other satellite editors) and manage their own upload/download/delete
+            calls directly rather than staging through the JSON satellite-dispatch flow,
+            since file bytes can't travel inside the form's JSON payload. Only shown once
+            the entity actually has an id — an unsaved new entity has nothing to attach to. */}
+        {(entityType === 'accounts' || entityType === 'assets' || entityType === 'liabilities' || entityType === 'goals') && initialData?.id && (
+          <DocumentsEditor entityType={entityType} entityId={initialData.id} />
         )}
       </div>
 
