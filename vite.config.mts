@@ -13,7 +13,11 @@ export default defineConfig({
     // see src/config.ts.
     'import.meta.env.VITE_API_BASE_URL': process.env.VITE_API_BASE_URL
       ? JSON.stringify(process.env.VITE_API_BASE_URL)
-      : JSON.stringify(`http://127.0.0.1:${backendPort}`)
+      : JSON.stringify(`http://127.0.0.1:${backendPort}`),
+    // Docker/web mode only — see src/config.ts's API_SECRET comment. Must be set at
+    // BUILD time (not just container start), since Vite bakes this into the static
+    // bundle; empty string (auth disabled) if unset, matching desktop/dev behavior.
+    'import.meta.env.VITE_API_SECRET': JSON.stringify(process.env.VITE_API_SECRET || '')
   },
   build: {
     outDir: 'dist'

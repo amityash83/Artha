@@ -1,11 +1,12 @@
 import os
+import secrets
 import shutil
 import json
 import math
 import uuid
 from datetime import datetime, date
 from typing import List, Optional
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Header, Depends
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -14,12 +15,44 @@ from backend.db import get_db_connection, init_db, get_db_path, get_db_dir
 import backend.calculations as calc
 from backend.decision_engine import generate_recommendations, generate_credit_card_annual_reviews
 
-app = FastAPI(title="Artha API")
+# Shared-secret auth for the Docker/web deployment path only. Empty/unset (the
+# default, and the only mode desktop/Electron ever uses) disables this check
+# entirely — zero-config desktop startup is unaffected. This is deliberately
+# NOT a multi-user login system: one operator-set secret, checked on every
+# request, no sessions/passwords/accounts. See
+# Artha_Architecture_Blueprint_v1/11-Security-Architecture.md for the full
+# threat model and what this does/doesn't protect against (no rate limiting,
+# no TLS — a reverse proxy should terminate TLS if this ever crosses a network).
+API_SECRET = os.environ.get("ARTHA_API_SECRET", "").strip()
+
+def require_api_secret(x_artha_api_secret: str = Header(default="")):
+    if not API_SECRET:
+        return
+    if not secrets.compare_digest(x_artha_api_secret, API_SECRET):
+        raise HTTPException(status_code=401, detail="Invalid or missing API secret")
+
+app = FastAPI(title="Artha API", dependencies=[Depends(require_api_secret)])
+
+def _parse_allowed_origins() -> list:
+    raw = os.environ.get("ARTHA_ALLOWED_ORIGINS", "").strip()
+    if raw:
+        return [o.strip() for o in raw.split(",") if o.strip()]
+    # Safe default matching today's real desktop/dev usage (Vite dev server
+    # only) — never silently falls back to "*". Docker/web deployments that
+    # need a different browser-facing origin must set ARTHA_ALLOWED_ORIGINS
+    # explicitly. Packaged Electron loads the frontend via file:// and either
+    # sends no Origin header or "null", neither of which needs (or should be)
+    # listed here — CORS is a browser-enforced, not server-enforced, concept
+    # and doesn't apply to that request shape.
+    return [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
 
 # Enable CORS for frontend development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_parse_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

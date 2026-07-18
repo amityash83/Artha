@@ -60,6 +60,27 @@ export const DocumentsEditor: React.FC<DocumentsEditorProps> = ({ entityType, en
     }
   };
 
+  // Fetched as a blob (not a plain <a href>) so the global API-secret header
+  // (see main.tsx) is attached in Docker/web mode — a direct browser link
+  // navigation can't carry a custom header.
+  const handleDownload = async (doc: AttachedDocument) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/documents/${doc.id}/download`);
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = doc.file_name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const inputId = `document-upload-${entityType}-${entityId}`;
 
   return (
@@ -107,15 +128,14 @@ export const DocumentsEditor: React.FC<DocumentsEditorProps> = ({ entityType, en
                 <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{formatSize(doc.size_bytes)}</span>
               </div>
               <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
-                <a
-                  href={`${API_BASE_URL}/api/documents/${doc.id}/download`}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  type="button"
+                  onClick={() => handleDownload(doc)}
                   className="btn btn-secondary"
                   style={{ padding: '6px', minWidth: 'auto', borderRadius: '8px' }}
                 >
                   <Download size={13} style={{ color: 'var(--info)' }} />
-                </a>
+                </button>
                 <button
                   type="button"
                   className="btn btn-secondary"

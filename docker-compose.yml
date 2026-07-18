@@ -1,6 +1,14 @@
 # Host ports are overridable via a .env file or shell env, e.g.:
 #   ARTHA_BACKEND_HOST_PORT=8010 ARTHA_FRONTEND_HOST_PORT=8090 docker compose up
 # to avoid colliding with another project already using 8000/8080 on this machine.
+#
+# Optional hardening for exposing this stack beyond localhost (see
+# Artha_Architecture_Blueprint_v1/11-Security-Architecture.md): set ARTHA_API_SECRET
+# to a long random string before running `docker compose up --build`. Both the
+# backend (runtime env var) and frontend (BUILD-time Vite define) need the same
+# value — the frontend bakes it into its static JS bundle at build time, so
+# changing it later requires a rebuild, not just a restart. Leave unset to keep
+# today's zero-auth behavior (matches desktop mode exactly).
 services:
   backend:
     build:
@@ -8,6 +16,9 @@ services:
       dockerfile: backend/Dockerfile
     ports:
       - "${ARTHA_BACKEND_HOST_PORT:-8000}:8000"
+    environment:
+      - ARTHA_API_SECRET=${ARTHA_API_SECRET:-}
+      - ARTHA_ALLOWED_ORIGINS=${ARTHA_ALLOWED_ORIGINS:-http://localhost:${ARTHA_FRONTEND_HOST_PORT:-8080}}
     volumes:
       - artha_data:/data
 
@@ -19,6 +30,8 @@ services:
         # Browser-facing URL: resolved from the host machine, not container-to-container,
         # since fetch() runs in the user's browser after the page loads.
         VITE_API_BASE_URL: http://localhost:${ARTHA_BACKEND_HOST_PORT:-8000}
+        # Must match the backend's ARTHA_API_SECRET above, baked in at build time.
+        VITE_API_SECRET: ${ARTHA_API_SECRET:-}
     ports:
       - "${ARTHA_FRONTEND_HOST_PORT:-8080}:80"
     depends_on:
