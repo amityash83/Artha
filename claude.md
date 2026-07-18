@@ -8,6 +8,8 @@ Artha is a privacy-first, offline-first personal finance desktop app (a "Financi
 
 For anything beyond this quick-reference — full schema inventory, per-domain data model/API/business-rule breakdowns, known bugs and dead code, and what's shipped vs. pure roadmap — see `Architecture/`, the authoritative architecture documentation set. This file stays intentionally short; that folder is where the depth lives. `Architecture/15-Roadmap.md` tracks phase-by-phase shipped/planned status; `Architecture/16-Session-Log.md` records the *why* behind notable decisions session-by-session, which isn't recoverable from git history or code alone.
 
+`.claude/` holds repo-scoped Claude Code tooling, distinct from this always-loaded file: `.claude/agents/artha-domain-reviewer.md` (a review subagent scoped to this codebase's specific invariants — double-entry ledger, generic entity model, Credit Cards' dual-persistence path — not generic code review) and `.claude/commands/` (`/verify-docker`, `/seed-demo-data`, `/release-checklist` — repeatable multi-step tasks, invoked on demand rather than loaded every session).
+
 ## Commands
 
 ```bash
