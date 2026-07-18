@@ -8,8 +8,17 @@ Phase-wise implementation plan.
 > every `Domains/*.md` and top-level doc into one place. It is a
 > synthesis of documented gaps, not a commitment or a prioritization
 > decision — treat it as a menu, not a plan someone has signed off on.
+>
+> **Status as of 2026-07-18: Phases 0 through 4 are all shipped** (see
+> git history from `ece7b63` through `5476ef3`, plus the Docker CI
+> pipeline added after this doc's last content edit). What follows is
+> kept as historical record of what was planned and delivered, not a
+> forward-looking plan — see `16-Session-Log.md` for a narrative of
+> what was built each session and why. Only genuinely open items are
+> the Backlog entry below (live NAV/price feeds) and whatever a future
+> `Domains/*.md` gap-sweep surfaces next.
 
-## Phase 0 — Fix Before Building New Things
+## Phase 0 — Fix Before Building New Things (SHIPPED)
 
 Bugs and inconsistencies found while writing this documentation that
 arguably deserve attention before new features, since they affect
@@ -51,56 +60,102 @@ Insurance (with sub-types), Goals, Income/Expenses, Budget Planning,
 Financial Calendar, Simulations, Dashboard, Reports/Settings hub,
 backup/restore, MMex import, Docker web-mode deployment.
 
-## Phase 2 — Natural Extensions of Existing Domains
+## Phase 2 — Natural Extensions of Existing Domains (SHIPPED)
 
 - Reconcile Credit Cards' two persistence paths (pick one, migrate the
   other) — see Phase 0, but framed as a feature-completion task rather
   than a pure bug fix once reward-engine data model is decided.
+  **Done in Phase 0.**
 - Per-holding XIRR display in Investments UI (`calculate_xirr()` already
   exists in `calculations.py`, currently dead code — just needs a caller
-  and a UI surface).
+  and a UI surface). **Done** — wired into `/api/init`, `HoldingLotsEditor`,
+  and a new `EntityGrid` column.
 - Live NAV/stock price feed integration for Investments (would change
   `current_value` from user-entered to fetched — a real design decision
-  about data trust, not just a wiring task).
+  about data trust, not just a wiring task). **Still deferred** — see
+  Backlog below; needs a vendor/API-key decision the user hasn't made.
 - Rental income cash-flow ledger for Properties (today it's a single
-  flat `rental_income` field, not a transaction history).
+  flat `rental_income` field, not a transaction history). **Done** —
+  `property_rental_ledger` table + `PropertyRentalLedgerEditor`, with an
+  idempotent backfill from the old flat metadata and a derived-field
+  shim so `CashFlowPlanning.tsx`/`EntityGrid.tsx` kept working unmodified.
 - Insurance claims tracking / premium payment history log (today only a
-  single `renewal_date`, no history).
+  single `renewal_date`, no history). **Done** — `insurance_claims` +
+  `insurance_premium_payments` tables (no backfill; no reconstructable
+  per-event history existed behind the old lifetime counters), matching
+  editor components.
 - A genuine Reports/Analytics surface distinct from the Settings/Data-
   Management hub currently named "Reports" — see
-  `13-Reporting-Architecture.md`.
+  `13-Reporting-Architecture.md`. **Done** — `Reports.tsx` now holds only
+  the ~150 lines of genuine export functionality; the rest moved to a new
+  `Settings.tsx`, with the sidebar labeling each correctly.
 
-## Phase 3 — Larger New Domains (genuinely unbuilt, per `Domains/`)
+All five items above shipped in one commit, `5476ef3`
+("Implement Phase 2: per-holding XIRR, rental/claims history, Reports
+split"). See `16-Session-Log.md` for narrative detail.
 
-- **Taxation**: no schema, no code. See `Domains/Taxation.md`.
-- **Knowledge Base**: no schema, no code. See `Domains/Knowledge.md`.
-- **Documents**: no schema, no code — Artha.md suggests external file
-  storage with SQLite references. See `Domains/Documents.md`.
+## Phase 3 — Larger New Domains (SHIPPED)
+
+- **Taxation**: regime comparison, deductions, capital gains estimate.
+  See `Domains/Taxation.md`.
+- **Knowledge Base**: seeded read-only concept explainers with
+  contextual hints. See `Domains/Knowledge.md`.
+- **Documents**: attach files to any financial entity. See
+  `Domains/Documents.md`.
 - **Financial Profile** (Person/Family/Risk Profile as a first-class
   concept beyond the existing `people` table's owner/role fields): see
   `Domains/Financial-Profile.md`.
-- **Credit Card product library / Compare Cards / Annual Review**: named
-  screens in the legacy `architecture/` doc, never implemented. Would
-  need real reference data (`card_variants` or similar), not the
-  currently-dead `reward_programs` schema cluster (see
+- **Credit Card product library / Compare Cards / Annual Review**: added
+  to the Credit Cards domain, backed by a new `card_variants` reference
+  table (not the dead `reward_programs` cluster — see
   `05-Database-Architecture.md`).
 
-## Phase 4 — Platform-Level
+## Phase 4 — Platform-Level (SHIPPED)
 
 - AI Assistant (explain/compare/summarize over existing calculated data
   — see `07-AI-Architecture.md` for the guardrails any implementation
-  must respect).
+  must respect). **Done** — opt-in, off by default with no
+  `ARTHA_API_SECRET`/provider configured.
 - Security hardening if the web/Docker deployment path is ever exposed
   beyond a trusted private network: authentication, encryption at rest.
-  See `11-Security-Architecture.md`.
+  See `11-Security-Architecture.md`. **Done** — opt-in CORS allowlist +
+  shared-secret auth (`ARTHA_API_SECRET`/`ARTHA_ALLOWED_ORIGINS`), no-op
+  for desktop/Electron.
 - Accessibility pass (zero `aria-*`/`role=` attributes today) and
   responsive layout, if a non-desktop-class use case is ever prioritized.
-  See `09-UI-UX-Architecture.md`.
+  See `09-UI-UX-Architecture.md`. **Done** — modals, nav, labels,
+  focus/motion hardening pass.
 - Cross-platform desktop packaging (Linux, macOS native binary) — see
   `Artha.md`'s long-term vision; today only Windows portable exe +
   Docker/web exist, with a set of Mac-only dev convenience scripts
   (`start.sh`/`stop.sh`) that bypass `npm start`'s Windows-only backend
-  spawn path for local development only, not packaging.
+  spawn path for local development only, not packaging. **Done** —
+  macOS (dmg/zip, unsigned) and Linux (AppImage) added via
+  electron-builder, plus a 3-OS CI matrix
+  (`.github/workflows/build-and-publish.yml`). Mac/Linux CI legs are
+  provisional until the first Actions run confirms them green (see
+  `CLAUDE.md`).
+
+## Phase 5 — Post-Roadmap Additions (not in the original menu above)
+
+Work completed after Phases 0–4 closed out, driven by direct user
+request rather than a pre-existing documented gap:
+
+- **Configurable branding**: 3 selectable logo mark variants + accent
+  color picker (`src/components/branding/`), plus a static build-time
+  app icon/favicon derived from the Vault Mark concept.
+- **Backend pytest suite**: first slice covering `calculations.py`'s
+  pure functions, `init_db()` migration idempotency, and two
+  `TestClient` API smoke tests (`backend/tests/`) — not yet
+  comprehensive, not yet wired into CI.
+- **Docker image CI pipeline** (`.github/workflows/docker-build.yml`):
+  builds and pushes `backend`/`frontend` images to GHCR on push to
+  `main` and `v*` tags. Separate from the desktop-packaging pipeline
+  since it's a different artifact type; the Docker Compose deployment
+  path itself (`backend/Dockerfile`, `frontend.Dockerfile`,
+  `docker-compose.yml`) was already built and verified working in an
+  earlier session — this pipeline just automates building/publishing
+  those images.
 
 ## Explicitly Not Planned
 
