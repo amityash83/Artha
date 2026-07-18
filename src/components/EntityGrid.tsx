@@ -37,13 +37,14 @@ const COMMON_COLUMNS: Record<string, Column[]> = {
     { label: 'Category', key: 'category_name' },
     { label: 'Institution', key: 'institution_name' },
     { label: 'Current Value', key: 'current_value', alignRight: true },
-    { label: 'Owner', key: 'owner' },
+    { label: 'Owner', key: 'owner_name' },
   ],
   liabilities: [
     { label: 'Name', key: 'name' },
     { label: 'Category', key: 'category_name' },
     { label: 'Lender', key: 'lender_name' },
     { label: 'Outstanding Balance', key: 'outstanding', alignRight: true },
+    { label: 'Owner', key: 'owner_name' },
     { label: 'Status', key: 'status' },
   ],
   goals: [

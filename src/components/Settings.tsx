@@ -42,12 +42,14 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
   const [newInstName, setNewInstName] = useState('');
   const [newPersonName, setNewPersonName] = useState('');
   const [newPersonRole, setNewPersonRole] = useState('Primary Owner');
+  const [newPersonRiskTolerance, setNewPersonRiskTolerance] = useState('Moderate');
   const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
   const [editingInstId, setEditingInstId] = useState<number | null>(null);
   const [editingInstName, setEditingInstName] = useState<string>('');
   const [editingPersonId, setEditingPersonId] = useState<number | null>(null);
   const [editingPersonName, setEditingPersonName] = useState<string>('');
   const [editingPersonRole, setEditingPersonRole] = useState<string>('Primary Owner');
+  const [editingPersonRiskTolerance, setEditingPersonRiskTolerance] = useState<string>('Moderate');
   const [deletingCategoryId, setDeletingCategoryId] = useState<number | null>(null);
   const [deletingInstId, setDeletingInstId] = useState<number | null>(null);
   const [deletingPersonId, setDeletingPersonId] = useState<number | null>(null);
@@ -274,12 +276,13 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
       const res = await fetch(`${API_BASE_URL}/api/metadata/people`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newPersonName.trim(), role: newPersonRole })
+        body: JSON.stringify({ name: newPersonName.trim(), role: newPersonRole, risk_tolerance: newPersonRiskTolerance })
       });
       if (res.ok) {
         setMetaStatus("Person added successfully!");
         setNewPersonName('');
         setNewPersonRole('Primary Owner');
+        setNewPersonRiskTolerance('Moderate');
         fetchPeopleList();
         onRefresh();
         setTimeout(() => setMetaStatus(null), 3000);
@@ -292,10 +295,11 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
     }
   };
 
-  const handleEditPerson = (id: number, currentName: string, currentRole: string) => {
+  const handleEditPerson = (id: number, currentName: string, currentRole: string, currentRiskTolerance: string) => {
     setEditingPersonId(id);
     setEditingPersonName(currentName);
     setEditingPersonRole(currentRole);
+    setEditingPersonRiskTolerance(currentRiskTolerance || 'Moderate');
   };
 
   const handleSavePersonEdit = async (id: number) => {
@@ -305,7 +309,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
       const res = await fetch(`${API_BASE_URL}/api/metadata/people/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: editingPersonName.trim(), role: editingPersonRole })
+        body: JSON.stringify({ name: editingPersonName.trim(), role: editingPersonRole, risk_tolerance: editingPersonRiskTolerance })
       });
       if (res.ok) {
         setMetaStatus("Person updated successfully.");
@@ -1110,6 +1114,16 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
                   <option value="Spouse">Spouse</option>
                   <option value="Dependent">Dependent</option>
                 </select>
+                <select
+                  className="form-control"
+                  style={{ padding: '6px 12px', fontSize: '12px', height: '32px', minWidth: '130px' }}
+                  value={newPersonRiskTolerance}
+                  onChange={e => setNewPersonRiskTolerance(e.target.value)}
+                >
+                  <option value="Conservative">Conservative</option>
+                  <option value="Moderate">Moderate</option>
+                  <option value="Aggressive">Aggressive</option>
+                </select>
                 <button type="submit" className="btn btn-primary" style={{ padding: '0 16px', fontSize: '12px', height: '32px' }}>
                   Add
                 </button>
@@ -1140,6 +1154,16 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
                             <option value="Primary Owner">Primary Owner</option>
                             <option value="Spouse">Spouse</option>
                             <option value="Dependent">Dependent</option>
+                          </select>
+                          <select
+                            className="form-control"
+                            style={{ padding: '4px 8px', fontSize: '12px', height: '28px', minWidth: '110px' }}
+                            value={editingPersonRiskTolerance}
+                            onChange={e => setEditingPersonRiskTolerance(e.target.value)}
+                          >
+                            <option value="Conservative">Conservative</option>
+                            <option value="Moderate">Moderate</option>
+                            <option value="Aggressive">Aggressive</option>
                           </select>
                           <button
                             type="button"
@@ -1182,13 +1206,13 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
                         </div>
                       ) : (
                         <>
-                          <span style={{ fontWeight: 500 }}>{person.name} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>({person.role})</span></span>
+                          <span style={{ fontWeight: 500 }}>{person.name} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>({person.role} · {person.risk_tolerance || 'Moderate'})</span></span>
                           <div style={{ display: 'flex', gap: '8px' }}>
                             <button
                               type="button"
                               className="btn btn-secondary"
                               style={{ padding: '4px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px' }}
-                              onClick={() => handleEditPerson(person.id, person.name, person.role)}
+                              onClick={() => handleEditPerson(person.id, person.name, person.role, person.risk_tolerance)}
                             >
                               <Edit2 size={11} style={{ color: 'var(--info)' }} />
                             </button>

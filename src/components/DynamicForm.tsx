@@ -94,20 +94,22 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           standardFields[f] = f === 'vehicle_registration' ? 'text' : 'number';
         });
         standardFields['status'] = 'select_status';
-        standardFields['owner'] = 'text';
+        standardFields['owner_id'] = 'person_select';
       } else if (isHolding) {
         standardFields['institution_id'] = 'institution_select';
         standardFields['acquisition_date'] = 'date';
         standardFields['current_value'] = 'number';
         standardFields['status'] = 'select_status';
-        standardFields['owner'] = 'text';
+        standardFields['owner_id'] = 'person_select';
+        standardFields['risk_level'] = 'select_risk';
       } else {
         standardFields['institution_id'] = 'institution_select';
         standardFields['current_value'] = 'number';
         standardFields['invested_amount'] = 'number';
         standardFields['acquisition_date'] = 'date';
         standardFields['status'] = 'select_status';
-        standardFields['owner'] = 'text';
+        standardFields['owner_id'] = 'person_select';
+        standardFields['risk_level'] = 'select_risk';
         if (isProperty) {
           standardFields['linked_liability_id'] = 'home_loan_select';
         }
@@ -197,6 +199,8 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       } else if (type === 'select_status') {
         defaultData[k] = 'Active';
       } else if (type === 'select_priority') {
+        defaultData[k] = 'Medium';
+      } else if (type === 'select_risk') {
         defaultData[k] = 'Medium';
       } else if (type === 'select_policy_type') {
         defaultData[k] = 'Life';
@@ -532,6 +536,23 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
                   <option value="High">High</option>
                   <option value="Medium">Medium</option>
                   <option value="Low">Low</option>
+                </select>
+              </div>
+            );
+          }
+
+          if (type === 'select_risk') {
+            return (
+              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Risk Level</label>
+                <select
+                  className="form-control"
+                  value={formData[k] || 'Medium'}
+                  onChange={(e) => handleChange(k, e.target.value)}
+                >
+                  <option value="Low">Low</option>
+                  <option value="Medium">Medium</option>
+                  <option value="High">High</option>
                 </select>
               </div>
             );

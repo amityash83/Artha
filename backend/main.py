@@ -207,10 +207,11 @@ def get_init_data():
         
         # Assets (Mutual funds, stocks, gold, EPFO, property, insurance etc.)
         cursor.execute("""
-            SELECT a.*, c.name as category_name, i.name as institution_name
+            SELECT a.*, c.name as category_name, i.name as institution_name, p.name as owner_name
             FROM assets a
             LEFT JOIN categories c ON a.category_id = c.id
             LEFT JOIN institutions i ON a.institution_id = i.id
+            LEFT JOIN people p ON a.owner_id = p.id
         """)
         assets = []
         for r in cursor.fetchall():
@@ -253,10 +254,11 @@ def get_init_data():
 
         # Liabilities (Home loans, car loans, credit cards)
         cursor.execute("""
-            SELECT l.*, c.name as category_name, i.name as lender_name
+            SELECT l.*, c.name as category_name, i.name as lender_name, p.name as owner_name
             FROM liabilities l
             LEFT JOIN categories c ON l.category_id = c.id
             LEFT JOIN institutions i ON l.lender_institution_id = i.id
+            LEFT JOIN people p ON l.owner_id = p.id
         """)
         liabilities_raw = cursor.fetchall()
         liabilities = []
@@ -502,7 +504,10 @@ def create_entity(entity_type: str, payload: dict):
         if entity_type == "accounts":
             payload["owner_id"] = payload.get("owner_id", 1)
             initial_balance = float(payload.pop("current_balance", 0.0))
-            
+
+        if entity_type in ("assets", "liabilities"):
+            payload["owner_id"] = payload.get("owner_id", 1)
+
         if entity_type == "transactions":
             if "source_ref_type" not in payload:
                 acc_id = payload.get("account_id")

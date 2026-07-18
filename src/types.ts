@@ -17,6 +17,7 @@ export interface Person {
   id: number;
   name: string;
   role: 'Primary Owner' | 'Spouse' | 'Dependent';
+  risk_tolerance: 'Conservative' | 'Moderate' | 'Aggressive';
 }
 
 export interface Account {
@@ -113,11 +114,13 @@ export interface Asset {
   category_name?: string;
   institution_id?: number;
   institution_name?: string;
+  owner_id: number;
+  owner_name?: string;
   current_value: number;
   invested_amount?: number;
   acquisition_date?: string;
   status?: string;
-  owner?: string;
+  risk_level?: 'Low' | 'Medium' | 'High';
   metadata_json?: string;
   insurance_details?: InsuranceDetails;
   holding_lots?: HoldingLot[];
@@ -135,12 +138,13 @@ export interface Liability {
   category_name?: string;
   lender_institution_id?: number;
   lender_name?: string;
+  owner_id: number;
+  owner_name?: string;
   outstanding: number;
   interest_rate: number;
   emi: number;
   tenure_months?: number;
   status?: string;
-  owner?: string;
   metadata_json?: string;
   liability_kind?: 'loan' | 'revolving_credit';
   credit_card_details?: CreditCardDetails;

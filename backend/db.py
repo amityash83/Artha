@@ -114,7 +114,8 @@ def init_db():
     CREATE TABLE IF NOT EXISTS people (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
-        role TEXT NOT NULL CHECK(role IN ('Primary Owner', 'Spouse', 'Dependent'))
+        role TEXT NOT NULL CHECK(role IN ('Primary Owner', 'Spouse', 'Dependent')),
+        risk_tolerance TEXT NOT NULL DEFAULT 'Moderate' CHECK(risk_tolerance IN ('Conservative', 'Moderate', 'Aggressive'))
     )
     """)
 
@@ -159,6 +160,7 @@ def init_db():
         name TEXT NOT NULL,
         category_id INTEGER NOT NULL REFERENCES categories(id),
         institution_id INTEGER REFERENCES institutions(id),
+        owner_id INTEGER NOT NULL REFERENCES people(id),
         purchase_date TEXT,
         current_value REAL DEFAULT 0.0,
         quantity REAL DEFAULT 1.0,
@@ -181,6 +183,7 @@ def init_db():
         name TEXT NOT NULL,
         category_id INTEGER NOT NULL REFERENCES categories(id),
         lender_institution_id INTEGER REFERENCES institutions(id),
+        owner_id INTEGER NOT NULL REFERENCES people(id),
         interest_rate REAL DEFAULT 0.0,
         emi REAL DEFAULT 0.0,
         outstanding REAL DEFAULT 0.0,
@@ -498,6 +501,116 @@ def init_db():
     except Exception as e:
         print("[Migration Error] accounts restructuring failed:", e)
 
+    # Add owner_id to assets/liabilities (Financial Profile domain) — same NOT NULL +
+    # temp-table-rebuild idiom as the accounts migration above, since SQLite can't
+    # ALTER TABLE ADD a NOT NULL column with a REFERENCES constraint onto a table that
+    # already has rows. Every existing row backfills to owner_id=1 ('Amit', seeded above).
+    try:
+        cursor.execute("PRAGMA table_info('assets')")
+        asset_cols = [row['name'] for row in cursor.fetchall()]
+        if 'owner_id' not in asset_cols:
+            print("[Migration] Adding owner_id to assets table...")
+            cursor.execute("INSERT OR IGNORE INTO people (id, name, role) VALUES (1, 'Amit', 'Primary Owner')")
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS assets_temp (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                category_id INTEGER NOT NULL REFERENCES categories(id),
+                institution_id INTEGER REFERENCES institutions(id),
+                owner_id INTEGER NOT NULL REFERENCES people(id),
+                purchase_date TEXT,
+                current_value REAL DEFAULT 0.0,
+                quantity REAL DEFAULT 1.0,
+                cost_price REAL DEFAULT 0.0,
+                market_value REAL DEFAULT 0.0,
+                expected_return REAL DEFAULT 0.0,
+                compounding TEXT DEFAULT 'Monthly',
+                liquidity TEXT DEFAULT 'High',
+                tax_category TEXT,
+                risk_level TEXT DEFAULT 'Medium',
+                linked_account_id INTEGER REFERENCES accounts(id),
+                metadata_json TEXT
+            )
+            """)
+            cursor.execute("SELECT * FROM assets")
+            for a in cursor.fetchall():
+                a = dict(a)
+                cursor.execute("""
+                INSERT OR IGNORE INTO assets_temp
+                (id, name, category_id, institution_id, owner_id, purchase_date, current_value, quantity,
+                 cost_price, market_value, expected_return, compounding, liquidity, tax_category, risk_level,
+                 linked_account_id, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    a['id'], a['name'], a['category_id'], a['institution_id'], 1, a['purchase_date'],
+                    a['current_value'], a['quantity'], a['cost_price'], a['market_value'], a['expected_return'],
+                    a['compounding'], a['liquidity'], a['tax_category'], a['risk_level'],
+                    a['linked_account_id'], a['metadata_json']
+                ))
+            cursor.execute("DROP TABLE assets")
+            cursor.execute("ALTER TABLE assets_temp RENAME TO assets")
+            print("[Migration] assets table restructured successfully.")
+    except Exception as e:
+        print("[Migration Error] assets owner_id migration failed:", e)
+
+    try:
+        cursor.execute("PRAGMA table_info('liabilities')")
+        liability_owner_cols = [row['name'] for row in cursor.fetchall()]
+        if 'owner_id' not in liability_owner_cols:
+            print("[Migration] Adding owner_id to liabilities table...")
+            cursor.execute("INSERT OR IGNORE INTO people (id, name, role) VALUES (1, 'Amit', 'Primary Owner')")
+            # liability_kind (added by a later migration block, "E.") may already exist on
+            # this table if init_db() has run before on this database — preserve it if so,
+            # rather than silently dropping it during this rebuild.
+            has_liability_kind = 'liability_kind' in liability_owner_cols
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS liabilities_temp (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                category_id INTEGER NOT NULL REFERENCES categories(id),
+                lender_institution_id INTEGER REFERENCES institutions(id),
+                owner_id INTEGER NOT NULL REFERENCES people(id),
+                interest_rate REAL DEFAULT 0.0,
+                emi REAL DEFAULT 0.0,
+                outstanding REAL DEFAULT 0.0,
+                tenure_months INTEGER DEFAULT 0,
+                compounding TEXT DEFAULT 'Monthly',
+                linked_asset_id INTEGER REFERENCES assets(id),
+                tax_benefit TEXT DEFAULT 'None',
+                metadata_json TEXT,
+                liability_kind TEXT DEFAULT 'loan'
+            )
+            """)
+            cursor.execute("SELECT * FROM liabilities")
+            for l in cursor.fetchall():
+                l = dict(l)
+                cursor.execute("""
+                INSERT OR IGNORE INTO liabilities_temp
+                (id, name, category_id, lender_institution_id, owner_id, interest_rate, emi, outstanding,
+                 tenure_months, compounding, linked_asset_id, tax_benefit, metadata_json, liability_kind)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    l['id'], l['name'], l['category_id'], l['lender_institution_id'], 1, l['interest_rate'],
+                    l['emi'], l['outstanding'], l['tenure_months'], l['compounding'], l['linked_asset_id'],
+                    l['tax_benefit'], l['metadata_json'],
+                    l['liability_kind'] if has_liability_kind else 'loan'
+                ))
+            cursor.execute("DROP TABLE liabilities")
+            cursor.execute("ALTER TABLE liabilities_temp RENAME TO liabilities")
+            print("[Migration] liabilities table restructured successfully.")
+    except Exception as e:
+        print("[Migration Error] liabilities owner_id migration failed:", e)
+
+    # Add risk_tolerance to people (simple additive column, nullable-with-default, no rebuild needed)
+    try:
+        cursor.execute("PRAGMA table_info('people')")
+        people_cols = [row['name'] for row in cursor.fetchall()]
+        if 'risk_tolerance' not in people_cols:
+            cursor.execute("ALTER TABLE people ADD COLUMN risk_tolerance TEXT NOT NULL DEFAULT 'Moderate'")
+            print("[Migration] Added risk_tolerance column to people.")
+    except Exception as e:
+        print("[Migration Warning] people.risk_tolerance column migration error:", e)
+
     try:
         cursor.execute("PRAGMA table_info('transactions')")
         tx_cols = [row['name'] for row in cursor.fetchall()]
@@ -781,12 +894,13 @@ def init_db():
                     cat_id = cursor.lastrowid
 
                 cursor.execute("""
-                INSERT OR IGNORE INTO assets (name, category_id, institution_id, purchase_date, current_value, cost_price, expected_return, metadata_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO assets (name, category_id, institution_id, owner_id, purchase_date, current_value, cost_price, expected_return, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     old_inv['name'],
                     cat_id,
                     None,
+                    1,
                     None,
                     old_inv['current_value'],
                     old_inv['invested_amount'],
@@ -807,11 +921,12 @@ def init_db():
             prop_cat_id = cursor.fetchone()['id']
             for old_prop in old_props:
                 cursor.execute("""
-                INSERT OR IGNORE INTO assets (name, category_id, purchase_date, current_value, cost_price, metadata_json)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO assets (name, category_id, owner_id, purchase_date, current_value, cost_price, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (
                     old_prop['name'],
                     prop_cat_id,
+                    1,
                     None,
                     old_prop['current_value'],
                     old_prop['purchase_price'],
@@ -843,12 +958,13 @@ def init_db():
                     inst_id = cursor.lastrowid
                 
                 cursor.execute("""
-                INSERT OR IGNORE INTO assets (name, category_id, institution_id, current_value, cost_price, expected_return, metadata_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO assets (name, category_id, institution_id, owner_id, current_value, cost_price, expected_return, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     f"{old_ins['insurance_type']} ({old_ins['policy_number']})",
                     ins_cat_id,
                     inst_id,
+                    1,
                     old_ins['surrender_value'] if 'surrender_value' in old_ins.keys() else 0.0,
                     old_ins['premium'],
                     0.0,
@@ -892,12 +1008,13 @@ def init_db():
                     inst_id = cursor.lastrowid
 
                 cursor.execute("""
-                INSERT OR IGNORE INTO liabilities (name, category_id, lender_institution_id, interest_rate, emi, outstanding, tenure_months, compounding, metadata_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO liabilities (name, category_id, lender_institution_id, owner_id, interest_rate, emi, outstanding, tenure_months, compounding, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     old_loan['name'],
                     cat_id,
                     inst_id,
+                    1,
                     old_loan['roi'],
                     old_loan['emi'],
                     old_loan['outstanding'],
@@ -931,12 +1048,13 @@ def init_db():
                     inst_id = cursor.lastrowid
 
                 cursor.execute("""
-                INSERT OR IGNORE INTO liabilities (name, category_id, lender_institution_id, interest_rate, emi, outstanding, metadata_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO liabilities (name, category_id, lender_institution_id, owner_id, interest_rate, emi, outstanding, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     old_cc['name'],
                     cc_cat_id,
                     inst_id,
+                    1,
                     0.0,
                     0.0,
                     old_cc['outstanding'],
