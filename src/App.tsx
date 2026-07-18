@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Landmark, LandmarkIcon, PiggyBank,
   Target, FileText, Database, Compass, Calendar, Calculator, Zap, LineChart, ArrowRightLeft, Sliders,
-  CheckCircle2, AlertCircle, Info, X, CreditCard, Percent, Sparkles
+  CheckCircle2, AlertCircle, Info, X, CreditCard, Percent, Sparkles, HelpCircle
 } from 'lucide-react';
 import { InitData } from './types';
 import { Dashboard } from './components/Dashboard';
@@ -20,6 +20,7 @@ import { BudgetPlanner } from './components/BudgetPlanner';
 import { CreditCards } from './components/CreditCards';
 import { Taxation } from './components/Taxation';
 import { AskArtha } from './components/AskArtha';
+import { Help } from './components/Help';
 import { ArthaMark } from './components/branding/ArthaMark';
 import { useBranding } from './components/branding/useBranding';
 import { API_BASE_URL } from './config';
@@ -359,6 +360,16 @@ const App: React.FC = () => {
                 Settings
               </div>
             </li>
+            <li>
+              <div
+                className={`sidebar-item ${activeTab === 'help' ? 'active' : ''}`}
+                aria-current={activeTab === 'help' ? 'page' : undefined}
+                onClick={() => handleNavigate('help')}
+              >
+                <HelpCircle size={16} />
+                Help
+              </div>
+            </li>
           </ul>
 
           <div style={{ padding: '8px', borderTop: '1px solid var(--border-glass)', marginTop: 'auto' }}>
@@ -462,6 +473,9 @@ const App: React.FC = () => {
         )}
         {activeTab === 'settings' && (
           <Settings onRefresh={fetchFinanceData} showToast={showToast} />
+        )}
+        {activeTab === 'help' && (
+          <Help />
         )}
       </main>
 
