@@ -8,11 +8,23 @@ MMex/your bank statements remain the system of record for day-to-day bookkeeping
 
 ## Screenshots
 
-|                                    |                                          |
-| ---------------------------------- | ---------------------------------------- |
-| ![Dashboard](docs/screenshots/dashboard.png) **Dashboard** — net worth, emergency fund status, leverage risk, and live decision-engine recommendations | ![Assets](docs/screenshots/assets.png) **Assets** — every holding across Mutual Funds, Stocks, EPF, Property, and Insurance in one grid |
-| ![Liabilities](docs/screenshots/liabilities.png) **Liabilities** — loans and credit cards with outstanding balances and lenders | ![Goals](docs/screenshots/goals.png) **Goals** — target vs. current progress, derived live from linked holdings |
-| ![Credit Cards](docs/screenshots/credit-cards.png) **Credit Cards** — reward-yield simulation, milestone tracking, and card comparison | ![Accounts](docs/screenshots/accounts.png) **Accounts** — balances derived live from a double-entry transaction ledger, never hand-edited |
+**Dashboard** — net worth, emergency fund status, leverage risk, and live decision-engine recommendations
+![Dashboard](docs/screenshots/dashboard.png)
+
+**Assets** — every holding across Mutual Funds, Stocks, EPF, Property, and Insurance in one grid
+![Assets](docs/screenshots/assets.png)
+
+**Liabilities** — loans and credit cards with outstanding balances and lenders
+![Liabilities](docs/screenshots/liabilities.png)
+
+**Goals** — target vs. current progress, derived live from linked holdings
+![Goals](docs/screenshots/goals.png)
+
+**Credit Cards** — reward-yield simulation, milestone tracking, and card comparison
+![Credit Cards](docs/screenshots/credit-cards.png)
+
+**Accounts** — balances derived live from a double-entry transaction ledger, never hand-edited
+![Accounts](docs/screenshots/accounts.png)
 
 ---
 
