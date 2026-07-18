@@ -5,6 +5,11 @@ const { spawn } = require('child_process');
 let mainWindow = null;
 let pyProc = null;
 
+// Configurable so multiple environments (or other local projects) can avoid port
+// collisions without editing code — see CLAUDE.md's "Backend port/URL" note.
+const BACKEND_PORT = process.env.ARTHA_BACKEND_PORT || '8000';
+const FRONTEND_PORT = process.env.ARTHA_FRONTEND_PORT || '5173';
+
 function startBackend() {
   const isDev = !app.isPackaged;
   let pythonBin = 'python';
@@ -52,7 +57,7 @@ function startBackend() {
   // Start FastAPI using Uvicorn (dev) or direct standalone executable (packaged)
   let args = [];
   if (isDev) {
-    args = ['-m', 'uvicorn', 'backend.main:app', '--host', '127.0.0.1', '--port', '8000'];
+    args = ['-m', 'uvicorn', 'backend.main:app', '--host', '127.0.0.1', '--port', BACKEND_PORT];
   }
 
   pyProc = spawn(pythonBin, args, {
@@ -103,7 +108,7 @@ function createWindow() {
 
   const isDev = !app.isPackaged;
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.loadURL(`http://localhost:${FRONTEND_PORT}`);
     // Open DevTools in dev mode
     // mainWindow.webContents.openDevTools();
   } else {
@@ -138,7 +143,7 @@ function triggerAutoBackup(trigger, callback) {
     method: 'POST',
     protocol: 'http:',
     hostname: '127.0.0.1',
-    port: 8000,
+    port: BACKEND_PORT,
     path: `/api/backup/auto-run?trigger=${trigger}`
   });
   let called = false;
