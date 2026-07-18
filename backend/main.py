@@ -579,7 +579,7 @@ def create_entity(entity_type: str, payload: dict):
             cursor.execute("""
             INSERT INTO transactions (source_ref_type, source_ref_id, dest_ref_type, dest_ref_id, type, amount, transaction_date, notes)
             VALUES ('None', NULL, 'Account', ?, 'Credit', ?, ?, 'Initial balance registration')
-            """, (entity_id, initial_balance, date.today().isoformat(), 'Initial Balance'))
+            """, (entity_id, initial_balance, date.today().isoformat()))
             
         if entity_type == "transactions":
             adjust_double_entry_balances(

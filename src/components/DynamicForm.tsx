@@ -73,6 +73,13 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       standardFields['owner_id'] = 'person_select';
       standardFields['currency'] = 'text';
       standardFields['status'] = 'select_status';
+      // Opening balance only applies at creation time: the backend turns this into a
+      // one-off "Initial Balance" credit transaction (see create_entity in main.py).
+      // Balance afterwards is always derived from the transactions ledger, so this
+      // field would silently do nothing on an edit — only show it when adding new.
+      if (!initialData) {
+        standardFields['current_balance'] = 'number';
+      }
     } else if (entityType === 'assets') {
       standardFields['category_id'] = 'category_select';
       if (isInsurance) {
@@ -312,6 +319,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       policy_type: 'Policy Type',
       policy_number: 'Policy Number',
       owner_id: 'Owner',
+      current_balance: 'Opening Balance',
     };
     if (knownLabels[key]) return knownLabels[key];
 
