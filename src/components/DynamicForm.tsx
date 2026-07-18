@@ -1,12 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { Category, Institution, Liability, Goal } from '../types';
+import { Category, Institution, Liability, Goal, Person } from '../types';
 import { HoldingLotsEditor } from './HoldingLotsEditor';
+import { GoalFundingConstraintsEditor } from './GoalFundingConstraintsEditor';
+import { DocumentsEditor } from './DocumentsEditor';
+import { PropertyRentalLedgerEditor } from './PropertyRentalLedgerEditor';
+import { InsuranceClaimsEditor } from './InsuranceClaimsEditor';
+import { InsurancePremiumPaymentsEditor } from './InsurancePremiumPaymentsEditor';
+import { API_BASE_URL } from '../config';
 
 interface DynamicFormProps {
   entityType: 'accounts' | 'assets' | 'liabilities' | 'income' | 'expenses' | 'goals';
   category?: Category;
   categories?: Category[];
   institutions: Institution[];
+  people?: Person[];
   goals?: Goal[];
   initialData?: any;
   liabilities?: Liability[];
@@ -29,6 +36,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
   category,
   categories,
   institutions,
+  people = [],
   goals,
   initialData,
   liabilities = [],
@@ -39,6 +47,10 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
   const [formData, setFormData] = useState<any>({});
   const [fields, setFields] = useState<Record<string, string>>({});
   const [holdingLots, setHoldingLots] = useState<any[]>([]);
+  const [fundingConstraints, setFundingConstraints] = useState<any[]>([]);
+  const [rentalLedger, setRentalLedger] = useState<any[]>([]);
+  const [insuranceClaims, setInsuranceClaims] = useState<any[]>([]);
+  const [premiumPayments, setPremiumPayments] = useState<any[]>([]);
 
   // The effective category tracks the in-form Asset Class selector when present,
   // so switching category re-derives the specialized field set below.
@@ -59,11 +71,16 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
 
     if (entityType === 'accounts') {
       standardFields['institution_id'] = 'institution_select';
-      standardFields['current_balance'] = 'number';
+      standardFields['owner_id'] = 'person_select';
       standardFields['currency'] = 'text';
       standardFields['status'] = 'select_status';
-      standardFields['owner'] = 'text';
-      standardFields['tags'] = 'text';
+      // Opening balance only applies at creation time: the backend turns this into a
+      // one-off "Initial Balance" credit transaction (see create_entity in main.py).
+      // Balance afterwards is always derived from the transactions ledger, so this
+      // field would silently do nothing on an edit — only show it when adding new.
+      if (!initialData) {
+        standardFields['current_balance'] = 'number';
+      }
     } else if (entityType === 'assets') {
       standardFields['category_id'] = 'category_select';
       if (isInsurance) {
@@ -77,20 +94,22 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           standardFields[f] = f === 'vehicle_registration' ? 'text' : 'number';
         });
         standardFields['status'] = 'select_status';
-        standardFields['owner'] = 'text';
+        standardFields['owner_id'] = 'person_select';
       } else if (isHolding) {
         standardFields['institution_id'] = 'institution_select';
         standardFields['acquisition_date'] = 'date';
         standardFields['current_value'] = 'number';
         standardFields['status'] = 'select_status';
-        standardFields['owner'] = 'text';
+        standardFields['owner_id'] = 'person_select';
+        standardFields['risk_level'] = 'select_risk';
       } else {
         standardFields['institution_id'] = 'institution_select';
         standardFields['current_value'] = 'number';
         standardFields['invested_amount'] = 'number';
         standardFields['acquisition_date'] = 'date';
         standardFields['status'] = 'select_status';
-        standardFields['owner'] = 'text';
+        standardFields['owner_id'] = 'person_select';
+        standardFields['risk_level'] = 'select_risk';
         if (isProperty) {
           standardFields['linked_liability_id'] = 'home_loan_select';
         }
@@ -173,11 +192,15 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         defaultData[k] = 0;
       } else if (type === 'institution_select') {
         defaultData[k] = institutions[0]?.id || '';
+      } else if (type === 'person_select') {
+        defaultData[k] = people[0]?.id || '';
       } else if (type === 'category_select') {
         defaultData[k] = initialData?.category_id || category?.id || '';
       } else if (type === 'select_status') {
         defaultData[k] = 'Active';
       } else if (type === 'select_priority') {
+        defaultData[k] = 'Medium';
+      } else if (type === 'select_risk') {
         defaultData[k] = 'Medium';
       } else if (type === 'select_policy_type') {
         defaultData[k] = 'Life';
@@ -200,8 +223,24 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
 
     setFormData(defaultData);
     setHoldingLots(initialData?.holding_lots ? [...initialData.holding_lots] : []);
+    setRentalLedger(initialData?.rental_ledger ? [...initialData.rental_ledger] : []);
+    setInsuranceClaims(initialData?.insurance_claims ? [...initialData.insurance_claims] : []);
+    setPremiumPayments(initialData?.premium_payments ? [...initialData.premium_payments] : []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entityType, category, institutions, initialData]);
+
+  // Goal funding constraints live behind their own routes (not bundled into
+  // initialData), so an editing goal needs a separate fetch to load them.
+  useEffect(() => {
+    if (entityType === 'goals' && initialData?.id) {
+      fetch(`${API_BASE_URL}/api/goals/${initialData.id}/funding-constraints`)
+        .then((r) => r.json())
+        .then((data) => setFundingConstraints(data))
+        .catch(() => setFundingConstraints([]));
+    } else {
+      setFundingConstraints([]);
+    }
+  }, [entityType, initialData]);
 
   // Re-derive the field set when the in-form Asset Class selection changes
   useEffect(() => {
@@ -236,6 +275,16 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
     const payload = { ...formData };
     if (isHolding) {
       payload.holding_lots = holdingLots;
+    }
+    if (isProperty) {
+      payload.rental_ledger = rentalLedger;
+    }
+    if (isInsurance) {
+      payload.insurance_claims = insuranceClaims;
+      payload.premium_payments = premiumPayments;
+    }
+    if (entityType === 'goals') {
+      payload.funding_constraints = fundingConstraints;
     }
     onSubmit(payload);
   };
@@ -274,6 +323,8 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       annual_fee: 'Annual Fee',
       policy_type: 'Policy Type',
       policy_number: 'Policy Number',
+      owner_id: 'Owner',
+      current_balance: 'Opening Balance',
     };
     if (knownLabels[key]) return knownLabels[key];
 
@@ -334,8 +385,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           if (type === 'institution_select') {
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
                 <select
+                  id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || ''}
                   onChange={(e) => handleChange(k, parseInt(e.target.value))}
@@ -352,12 +404,35 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
             );
           }
 
+          if (type === 'person_select') {
+            return (
+              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
+                <select
+                  id={`field-${k}`}
+                  className="form-control"
+                  value={formData[k] || ''}
+                  onChange={(e) => handleChange(k, parseInt(e.target.value))}
+                  required
+                >
+                  <option value="">Select Owner</option>
+                  {people.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.role})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            );
+          }
+
           if (type === 'category_select') {
             const assetCategories = categories ? categories.filter((c) => c.entity_type === 'Asset') : [];
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Asset Class (Category)</label>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Asset Class (Category)</label>
                 <select
+                  id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || ''}
                   onChange={(e) => handleChange(k, parseInt(e.target.value))}
@@ -378,8 +453,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
             const activeGoals = goals || [];
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Linked Financial Goal</label>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Linked Financial Goal</label>
                 <select
+                  id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || ''}
                   onChange={(e) => handleChange(k, e.target.value)}
@@ -398,8 +474,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           if (type === 'home_loan_select') {
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
                 <select
+                  id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || ''}
                   onChange={(e) => handleChange(k, e.target.value ? parseInt(e.target.value) : null)}
@@ -418,8 +495,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           if (type === 'property_select') {
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
                 <select
+                  id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || ''}
                   onChange={(e) => handleChange(k, e.target.value ? parseInt(e.target.value) : null)}
@@ -438,8 +516,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           if (type === 'select_status') {
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Status</label>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Status</label>
                 <select
+                  id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || 'Active'}
                   onChange={(e) => handleChange(k, e.target.value)}
@@ -455,8 +534,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           if (type === 'select_priority') {
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Priority</label>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Priority</label>
                 <select
+                  id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || 'Medium'}
                   onChange={(e) => handleChange(k, e.target.value)}
@@ -469,11 +549,30 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
             );
           }
 
+          if (type === 'select_risk') {
+            return (
+              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Risk Level</label>
+                <select
+                  id={`field-${k}`}
+                  className="form-control"
+                  value={formData[k] || 'Medium'}
+                  onChange={(e) => handleChange(k, e.target.value)}
+                >
+                  <option value="Low">Low</option>
+                  <option value="Medium">Medium</option>
+                  <option value="High">High</option>
+                </select>
+              </div>
+            );
+          }
+
           if (type === 'select_policy_type') {
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Policy Type</label>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Policy Type</label>
                 <select
+                  id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || 'Life'}
                   onChange={(e) => handleChange(k, e.target.value)}
@@ -489,8 +588,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
 
           return (
             <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
+              <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
               <input
+                id={`field-${k}`}
                 type={type === 'number' ? 'number' : type === 'date' ? 'date' : 'text'}
                 step={type === 'number' ? 'any' : undefined}
                 className="form-control"
@@ -503,7 +603,35 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         })}
 
         {isHolding && (
-          <HoldingLotsEditor lots={holdingLots} onChange={setHoldingLots} />
+          <HoldingLotsEditor lots={holdingLots} onChange={setHoldingLots} xirr={initialData?.xirr} />
+        )}
+
+        {isProperty && (
+          <PropertyRentalLedgerEditor entries={rentalLedger} onChange={setRentalLedger} />
+        )}
+
+        {isInsurance && (
+          <>
+            <InsuranceClaimsEditor claims={insuranceClaims} onChange={setInsuranceClaims} />
+            <InsurancePremiumPaymentsEditor payments={premiumPayments} onChange={setPremiumPayments} />
+          </>
+        )}
+
+        {entityType === 'goals' && categories && (
+          <GoalFundingConstraintsEditor
+            categories={categories}
+            constraints={fundingConstraints}
+            onChange={setFundingConstraints}
+          />
+        )}
+
+        {/* Documents apply generically at the entity-type level (not per-category, unlike
+            most other satellite editors) and manage their own upload/download/delete
+            calls directly rather than staging through the JSON satellite-dispatch flow,
+            since file bytes can't travel inside the form's JSON payload. Only shown once
+            the entity actually has an id — an unsaved new entity has nothing to attach to. */}
+        {(entityType === 'accounts' || entityType === 'assets' || entityType === 'liabilities' || entityType === 'goals') && initialData?.id && (
+          <DocumentsEditor entityType={entityType} entityId={initialData.id} />
         )}
       </div>
 

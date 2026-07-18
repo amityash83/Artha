@@ -10,5 +10,6 @@ from backend.db import init_db
 if __name__ == "__main__":
     import uvicorn
     init_db()
+    port = int(os.environ.get("ARTHA_BACKEND_PORT", "8000"))
     # Disable reload in production/packaged mode
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=port)

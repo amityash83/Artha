@@ -1,10 +1,14 @@
 import React, { useState, useMemo } from 'react';
-import { 
+import {
   CreditCard as CardIcon, Plus, Edit2, Trash2, ShieldAlert,
   X, Sparkles
 } from 'lucide-react';
 import { InitData } from '../types';
 import { API_BASE_URL } from '../config';
+import { useModalA11y } from '../hooks/useModalA11y';
+import { CardLibraryTab } from './creditcards/CardLibraryTab';
+import { CompareCardsTab } from './creditcards/CompareCardsTab';
+import { AnnualReviewTab } from './creditcards/AnnualReviewTab';
 
 interface CreditCardsProps {
   data: InitData;
@@ -112,11 +116,20 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
     return liabilities.filter((l: any) => l.category_name === 'Credit Card');
   }, [liabilities]);
 
-  const [activeSubTab, setActiveSubTab] = useState<'inventory' | 'milestones' | 'calculator'>('inventory');
+  const [activeSubTab, setActiveSubTab] = useState<
+    'inventory' | 'milestones' | 'calculator' | 'library' | 'compare' | 'annual-review'
+  >('inventory');
+  const [comparePreselect, setComparePreselect] = useState<number | null>(null);
+
+  const handleCompareAlternatives = (liabilityId: number) => {
+    setComparePreselect(liabilityId);
+    setActiveSubTab('compare');
+  };
   
   // Modals & Overlay forms
   const [modalOpen, setModalOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<any | null>(null);
+  const modalRef = useModalA11y(modalOpen, () => setModalOpen(false));
   const [deletingCardId, setDeletingCardId] = useState<number | null>(null);
   
   // Overlay Tab navigation
@@ -194,46 +207,74 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
     if (showToast) showToast(`Preset template applied: ${preset.name}`, "info");
   };
 
+  // Card Library variant picker — the real replacement for the hardcoded PRESETS
+  // array above. PRESETS stays only as a fallback for the rare case card_variants
+  // is empty (e.g. a fresh DB where the seed migration hasn't run for some reason).
+  const applyCardVariant = (variant: any) => {
+    setName(variant.name);
+    const inst = institutions.find(i => i.name.toLowerCase().includes(String(variant.issuer).toLowerCase()));
+    setLenderId(inst ? inst.id.toString() : '');
+    setNetwork(variant.network);
+    setBasePoints(variant.base_points);
+    setBaseSpend(variant.base_spend);
+    setPointValue(variant.point_value);
+    setAnnualFee(variant.annual_fee);
+    setLoungeVisitsLimit(variant.lounge_visits_domestic);
+    setLoungeIntLimit(variant.lounge_visits_international);
+    try {
+      setCategoryRules(variant.category_rules_json ? JSON.parse(variant.category_rules_json) : []);
+    } catch { setCategoryRules([]); }
+    try {
+      setMilestoneRules(variant.milestone_rules_json ? JSON.parse(variant.milestone_rules_json) : []);
+    } catch { setMilestoneRules([]); }
+    try {
+      setRedemptionPartners(variant.redemption_partners_json ? JSON.parse(variant.redemption_partners_json) : []);
+    } catch { setRedemptionPartners([]); }
+    if (variant.eligibility_notes) setRemarks(variant.eligibility_notes);
+    if (showToast) showToast(`Card Library entry applied: ${variant.name}`, "info");
+  };
+
   const handleOpenEdit = (card: any) => {
     setEditingCard(card);
     setName(card.name);
     setLenderId(card.lender_institution_id?.toString() || '');
     setOutstanding(card.outstanding || 0);
 
-    const meta = card.metadata_json ? (typeof card.metadata_json === 'string' ? JSON.parse(card.metadata_json) : card.metadata_json) : {};
-    setCreditLimit(meta.credit_limit || 100000);
-    setStatementDate(meta.statement_date || 15);
-    setDueDate(meta.due_date || 5);
-    setAnnualFee(meta.annual_fee || 0);
-    setRenewalDate(meta.renewal_date || '');
-    setRewardPoints(meta.reward_points || 0);
-    setPointValue(meta.point_value || 0.25);
-    setNetwork(meta.network || 'Visa');
-    setLoungeVisitsLimit(meta.lounge_visits_limit || 4);
-    setLoungeVisitsUsed(meta.lounge_visits_used || 0);
-    setLoungeIntLimit(meta.lounge_int_limit || 0);
-    setLoungeIntUsed(meta.lounge_int_used || 0);
-    setMilestoneTarget(meta.milestone_spend_target || 0);
-    setMilestoneCurrent(meta.milestone_spend_current || 0);
-    setMilestoneDesc(meta.milestone_reward_desc || '');
-    setRemarks(meta.remarks || '');
+    // credit_card_details columns are flattened directly onto the liability object
+    // by /api/init — read them straight off `card`, not from metadata_json.
+    setCreditLimit(card.credit_limit || 100000);
+    setStatementDate(card.statement_date || 15);
+    setDueDate(card.due_date || 5);
+    setAnnualFee(card.annual_fee || 0);
+    setRenewalDate(card.renewal_date || '');
+    setRewardPoints(card.reward_points || 0);
+    setPointValue(card.point_value || 0.25);
+    setNetwork(card.network || 'Visa');
+    setLoungeVisitsLimit(card.lounge_visits_limit || 4);
+    setLoungeVisitsUsed(card.lounge_visits_used || 0);
+    setLoungeIntLimit(card.lounge_int_limit || 0);
+    setLoungeIntUsed(card.lounge_int_used || 0);
+    setMilestoneTarget(card.milestone_spend_target || 0);
+    setMilestoneCurrent(card.milestone_spend_current || 0);
+    setMilestoneDesc(card.milestone_reward_desc || '');
+    setRemarks(card.remarks || '');
 
     // Advanced Rewards structures
-    setBasePoints(meta.base_points || 1);
-    setBaseSpend(meta.base_spend || 100);
-    setCurrentStatementSpend(meta.current_statement_spend || 0);
-    
+    setBasePoints(card.base_points || 1);
+    setBaseSpend(card.base_spend || 100);
+    setCurrentStatementSpend(card.current_statement_spend || 0);
+
     // Parse category multipliers, milestones and partners from database JSON strings
     try {
-      setCategoryRules(meta.category_rules_json ? JSON.parse(meta.category_rules_json) : []);
+      setCategoryRules(card.category_rules_json ? JSON.parse(card.category_rules_json) : []);
     } catch { setCategoryRules([]); }
-    
+
     try {
-      setMilestoneRules(meta.milestone_rules_json ? JSON.parse(meta.milestone_rules_json) : []);
+      setMilestoneRules(card.milestone_rules_json ? JSON.parse(card.milestone_rules_json) : []);
     } catch { setMilestoneRules([]); }
 
     try {
-      setRedemptionPartners(meta.redemption_partners_json ? JSON.parse(meta.redemption_partners_json) : []);
+      setRedemptionPartners(card.redemption_partners_json ? JSON.parse(card.redemption_partners_json) : []);
     } catch { setRedemptionPartners([]); }
 
     setActiveModalTab('general');
@@ -295,8 +336,26 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
       return;
     }
 
-    const metadataPayload = {
+    // Base liability fields go through the generic entity route; the reward-engine
+    // config (credit limit, statement/due dates, milestones, category multipliers,
+    // redemption partners, lounge tracking) is the single source of truth in
+    // credit_card_details, written via its own satellite route below — not bundled
+    // into liabilities.metadata_json anymore.
+    const payload = {
+      name,
+      category_id: creditCardCategoryId,
+      lender_institution_id: Number(lenderId),
+      interest_rate: 0.0,
+      emi: 0.0,
+      outstanding: Number(outstanding),
+      tenure_months: 0,
+      compounding: 'Monthly',
+      tax_benefit: 'None',
+    };
+
+    const creditCardDetailsPayload = {
       credit_limit: Number(creditLimit),
+      statement_balance: editingCard?.statement_balance || 0,
       statement_date: Number(statementDate),
       due_date: Number(dueDate),
       annual_fee: Number(annualFee),
@@ -317,24 +376,11 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
       current_statement_spend: Number(currentStatementSpend),
       category_rules_json: JSON.stringify(categoryRules),
       milestone_rules_json: JSON.stringify(milestoneRules),
-      redemption_partners_json: JSON.stringify(redemptionPartners)
-    };
-
-    const payload = {
-      name,
-      category_id: creditCardCategoryId,
-      lender_institution_id: Number(lenderId),
-      interest_rate: 0.0,
-      emi: 0.0,
-      outstanding: Number(outstanding),
-      tenure_months: 0,
-      compounding: 'Monthly',
-      tax_benefit: 'None',
-      metadata_json: JSON.stringify(metadataPayload)
+      redemption_partners_json: JSON.stringify(redemptionPartners),
     };
 
     const isEdit = !!editingCard;
-    const url = isEdit 
+    const url = isEdit
       ? `${API_BASE_URL}/api/entities/liabilities/${editingCard.id}`
       : `${API_BASE_URL}/api/entities/liabilities`;
 
@@ -345,6 +391,12 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
         body: JSON.stringify(payload)
       });
       if (res.ok) {
+        const liabilityId = isEdit ? editingCard.id : (await res.json()).id;
+        await fetch(`${API_BASE_URL}/api/liabilities/${liabilityId}/credit-card-details`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(creditCardDetailsPayload),
+        });
         setModalOpen(false);
         onRefresh();
         if (showToast) showToast(isEdit ? "Card configuration saved" : "Credit Card registered", "success");
@@ -397,7 +449,9 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
 
     creditCards.forEach((c: any) => {
       totalOutstanding += c.outstanding || 0;
-      const meta = c.metadata_json ? (typeof c.metadata_json === 'string' ? JSON.parse(c.metadata_json) : c.metadata_json) : {};
+      // credit_card_details columns are flattened directly onto the liability object
+      // by /api/init — no metadata_json parsing needed.
+      const meta = c;
       totalLimit += Number(meta.credit_limit || 0);
       
       const pts = Number(meta.reward_points || 0);
@@ -421,7 +475,9 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
     if (calcAmount <= 0) return [];
 
     return creditCards.map((c: any) => {
-      const meta = c.metadata_json ? (typeof c.metadata_json === 'string' ? JSON.parse(c.metadata_json) : c.metadata_json) : {};
+      // credit_card_details columns are flattened directly onto the liability object
+      // by /api/init — no metadata_json parsing needed.
+      const meta = c;
       
       const basePts = Number(meta.base_points || 1);
       const baseSpendAmt = Number(meta.base_spend || 100);
@@ -640,12 +696,33 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
         >
           Waivers &amp; Milestones
         </button>
-        <button 
+        <button
           className={`tab-btn ${activeSubTab === 'calculator' ? 'active' : ''}`}
           onClick={() => setActiveSubTab('calculator')}
           style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === 'calculator' ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === 'calculator' ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
         >
           Smart Rewards Simulator
+        </button>
+        <button
+          className={`tab-btn ${activeSubTab === 'library' ? 'active' : ''}`}
+          onClick={() => setActiveSubTab('library')}
+          style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === 'library' ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === 'library' ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+        >
+          Card Library
+        </button>
+        <button
+          className={`tab-btn ${activeSubTab === 'compare' ? 'active' : ''}`}
+          onClick={() => setActiveSubTab('compare')}
+          style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === 'compare' ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === 'compare' ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+        >
+          Compare Cards
+        </button>
+        <button
+          className={`tab-btn ${activeSubTab === 'annual-review' ? 'active' : ''}`}
+          onClick={() => setActiveSubTab('annual-review')}
+          style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === 'annual-review' ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === 'annual-review' ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+        >
+          Annual Review
         </button>
       </div>
 
@@ -662,7 +739,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px' }}>
               {creditCards.map((card: any, idx) => {
-                const meta = card.metadata_json ? (typeof card.metadata_json === 'string' ? JSON.parse(card.metadata_json) : card.metadata_json) : {};
+                const meta = card;
                 const limit = Number(meta.credit_limit || 0);
                 const fee = Number(meta.annual_fee || 0);
                 const pts = Number(meta.reward_points || 0);
@@ -847,7 +924,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
             <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text-primary)' }}>Fee Waivers &amp; Milestones</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               {creditCards.map((card: any) => {
-                const meta = card.metadata_json ? (typeof card.metadata_json === 'string' ? JSON.parse(card.metadata_json) : card.metadata_json) : {};
+                const meta = card;
                 const target = Number(meta.milestone_spend_target || 0);
                 const current = Number(meta.milestone_spend_current || 0);
                 const renewalStr = meta.renewal_date || '';
@@ -906,7 +983,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
             <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text-primary)' }}>Lounge Access Trackers</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               {creditCards.map((card: any) => {
-                const meta = card.metadata_json ? (typeof card.metadata_json === 'string' ? JSON.parse(card.metadata_json) : card.metadata_json) : {};
+                const meta = card;
                 const domLimit = Number(meta.lounge_visits_limit || 0);
                 const domUsed = Number(meta.lounge_visits_used || 0);
                 const intLimit = Number(meta.lounge_int_limit || 0);
@@ -960,8 +1037,9 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
-                <label className="form-label">Merchant Category</label>
-                <select 
+                <label className="form-label" htmlFor="cc-calc-category">Merchant Category</label>
+                <select
+                  id="cc-calc-category"
                   className="form-input"
                   value={calcCategory}
                   onChange={e => setCalcCategory(e.target.value)}
@@ -978,9 +1056,10 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
               </div>
 
               <div>
-                <label className="form-label">Transaction Amount (INR)</label>
-                <input 
-                  type="number" 
+                <label className="form-label" htmlFor="cc-calc-amount">Transaction Amount (INR)</label>
+                <input
+                  id="cc-calc-amount"
+                  type="number"
                   className="form-input"
                   value={calcAmount}
                   onChange={e => setCalcAmount(Math.max(Number(e.target.value), 0))}
@@ -1063,33 +1142,74 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
         </div>
       )}
 
+      {/* --- CARD LIBRARY --- */}
+      {activeSubTab === 'library' && (
+        <CardLibraryTab cardVariants={data.card_variants || []} onRefresh={onRefresh} showToast={showToast} />
+      )}
+
+      {/* --- COMPARE CARDS --- */}
+      {activeSubTab === 'compare' && (
+        <CompareCardsTab
+          ownedCards={creditCards}
+          cardVariants={data.card_variants || []}
+          showToast={showToast}
+          preselectLiabilityId={comparePreselect}
+        />
+      )}
+
+      {/* --- ANNUAL REVIEW --- */}
+      {activeSubTab === 'annual-review' && (
+        <AnnualReviewTab onCompareAlternatives={handleCompareAlternatives} />
+      )}
+
       {/* --- ADD/EDIT TABBED MODAL OVERLAY --- */}
       {modalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' }}>
-          <div className="glass-panel" style={{ width: '100%', maxWidth: '680px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', position: 'relative' }}>
-            <button 
+          <div
+            className="glass-panel"
+            style={{ width: '100%', maxWidth: '680px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', position: 'relative' }}
+            ref={modalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="card-config-title"
+            tabIndex={-1}
+          >
+            <button
               style={{ position: 'absolute', top: '16px', right: '16px', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
               onClick={() => setModalOpen(false)}
+              aria-label="Close"
             >
               <X size={18} />
             </button>
 
-            <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#fff', marginBottom: '18px' }}>
+            <h3 id="card-config-title" style={{ fontSize: '16px', fontWeight: 600, color: '#fff', marginBottom: '18px' }}>
               {editingCard ? `Configure Card: ${editingCard.name}` : 'Register Credit Card'}
             </h3>
 
-            {/* Presets Row (Only show when adding new card) */}
+            {/* Card Library Quick Fill (Only show when adding new card) */}
             {!editingCard && (
               <div style={{ background: 'rgba(139,92,246,0.04)', border: '1px solid rgba(139,92,246,0.12)', padding: '12px 16px', borderRadius: '10px', marginBottom: '20px' }}>
                 <span style={{ fontSize: '11px', color: '#a78bfa', fontWeight: 600, display: 'block', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  Quick Fill Premium Presets
+                  Quick Fill From Card Library
                 </span>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  {PRESETS.map((p, pIdx) => (
-                    <button 
+                  {(data.card_variants && data.card_variants.length > 0 ? data.card_variants : []).map((v: any) => (
+                    <button
+                      key={v.id}
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ padding: '6px 12px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-glass)' }}
+                      onClick={() => applyCardVariant(v)}
+                    >
+                      <Sparkles size={11} style={{ color: '#fcd34d' }} />
+                      {v.name}
+                    </button>
+                  ))}
+                  {(!data.card_variants || data.card_variants.length === 0) && PRESETS.map((p, pIdx) => (
+                    <button
                       key={pIdx}
-                      type="button" 
-                      className="btn btn-secondary" 
+                      type="button"
+                      className="btn btn-secondary"
                       style={{ padding: '6px 12px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-glass)' }}
                       onClick={() => applyPreset(p)}
                     >
@@ -1130,12 +1250,12 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                     <div>
-                      <label className="form-label">Card Name *</label>
-                      <input type="text" className="form-input" value={name} onChange={e => setName(e.target.value)} required placeholder="e.g. Infinia" />
+                      <label className="form-label" htmlFor="cc-name">Card Name *</label>
+                      <input id="cc-name" type="text" className="form-input" value={name} onChange={e => setName(e.target.value)} required placeholder="e.g. Infinia" />
                     </div>
                     <div>
-                      <label className="form-label">Issuer Bank *</label>
-                      <select className="form-input" value={lenderId} onChange={e => setLenderId(e.target.value)} required>
+                      <label className="form-label" htmlFor="cc-lender">Issuer Bank *</label>
+                      <select id="cc-lender" className="form-input" value={lenderId} onChange={e => setLenderId(e.target.value)} required>
                         <option value="">-- Pick Issuer --</option>
                         {[...institutions].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })).map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
                       </select>
@@ -1144,41 +1264,41 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                     <div>
-                      <label className="form-label">Credit Limit (INR)</label>
-                      <input type="number" className="form-input" value={creditLimit} onChange={e => setCreditLimit(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-credit-limit">Credit Limit (INR)</label>
+                      <input id="cc-credit-limit" type="number" className="form-input" value={creditLimit} onChange={e => setCreditLimit(Number(e.target.value))} />
                     </div>
                     <div>
-                      <label className="form-label">Outstanding Balance (INR)</label>
-                      <input type="number" className="form-input" value={outstanding} onChange={e => setOutstanding(Number(e.target.value))} />
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                    <div>
-                      <label className="form-label">Statement Date (Day of Month)</label>
-                      <input type="number" className="form-input" value={statementDate} onChange={e => setStatementDate(Number(e.target.value))} min={1} max={31} />
-                    </div>
-                    <div>
-                      <label className="form-label">Payment Due Date (Day of Month)</label>
-                      <input type="number" className="form-input" value={dueDate} onChange={e => setDueDate(Number(e.target.value))} min={1} max={31} />
+                      <label className="form-label" htmlFor="cc-outstanding">Outstanding Balance (INR)</label>
+                      <input id="cc-outstanding" type="number" className="form-input" value={outstanding} onChange={e => setOutstanding(Number(e.target.value))} />
                     </div>
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                     <div>
-                      <label className="form-label">Annual Fee (INR)</label>
-                      <input type="number" className="form-input" value={annualFee} onChange={e => setAnnualFee(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-statement-date">Statement Date (Day of Month)</label>
+                      <input id="cc-statement-date" type="number" className="form-input" value={statementDate} onChange={e => setStatementDate(Number(e.target.value))} min={1} max={31} />
                     </div>
                     <div>
-                      <label className="form-label">Renewal Date</label>
-                      <input type="date" className="form-input" value={renewalDate} onChange={e => setRenewalDate(e.target.value)} />
+                      <label className="form-label" htmlFor="cc-due-date">Payment Due Date (Day of Month)</label>
+                      <input id="cc-due-date" type="number" className="form-input" value={dueDate} onChange={e => setDueDate(Number(e.target.value))} min={1} max={31} />
                     </div>
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                     <div>
-                      <label className="form-label">Card Network</label>
-                      <select className="form-input" value={network} onChange={e => setNetwork(e.target.value)}>
+                      <label className="form-label" htmlFor="cc-annual-fee">Annual Fee (INR)</label>
+                      <input id="cc-annual-fee" type="number" className="form-input" value={annualFee} onChange={e => setAnnualFee(Number(e.target.value))} />
+                    </div>
+                    <div>
+                      <label className="form-label" htmlFor="cc-renewal-date">Renewal Date</label>
+                      <input id="cc-renewal-date" type="date" className="form-input" value={renewalDate} onChange={e => setRenewalDate(e.target.value)} />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                    <div>
+                      <label className="form-label" htmlFor="cc-network">Card Network</label>
+                      <select id="cc-network" className="form-input" value={network} onChange={e => setNetwork(e.target.value)}>
                         <option value="Visa">Visa</option>
                         <option value="Mastercard">Mastercard</option>
                         <option value="RuPay">RuPay</option>
@@ -1187,8 +1307,8 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                       </select>
                     </div>
                     <div>
-                      <label className="form-label">Remarks</label>
-                      <input type="text" className="form-input" value={remarks} onChange={e => setRemarks(e.target.value)} />
+                      <label className="form-label" htmlFor="cc-remarks">Remarks</label>
+                      <input id="cc-remarks" type="text" className="form-input" value={remarks} onChange={e => setRemarks(e.target.value)} />
                     </div>
                   </div>
                 </div>
@@ -1199,30 +1319,30 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                     <div>
-                      <label className="form-label">Base Points Earning</label>
-                      <input type="number" className="form-input" value={basePoints} onChange={e => setBasePoints(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-base-points">Base Points Earning</label>
+                      <input id="cc-base-points" type="number" className="form-input" value={basePoints} onChange={e => setBasePoints(Number(e.target.value))} />
                     </div>
                     <div>
-                      <label className="form-label">Per Spend Amount (INR)</label>
-                      <input type="number" className="form-input" value={baseSpend} onChange={e => setBaseSpend(Number(e.target.value))} />
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                    <div>
-                      <label className="form-label">Cash Value per Point (INR)</label>
-                      <input type="number" step="0.01" className="form-input" value={pointValue} onChange={e => setPointValue(Number(e.target.value))} />
-                    </div>
-                    <div>
-                      <label className="form-label">Current Statement Spend (INR)</label>
-                      <input type="number" className="form-input" value={currentStatementSpend} onChange={e => setCurrentStatementSpend(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-base-spend">Per Spend Amount (INR)</label>
+                      <input id="cc-base-spend" type="number" className="form-input" value={baseSpend} onChange={e => setBaseSpend(Number(e.target.value))} />
                     </div>
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                     <div>
-                      <label className="form-label">Current reward points balance</label>
-                      <input type="number" className="form-input" value={rewardPoints} onChange={e => setRewardPoints(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-point-value">Cash Value per Point (INR)</label>
+                      <input id="cc-point-value" type="number" step="0.01" className="form-input" value={pointValue} onChange={e => setPointValue(Number(e.target.value))} />
+                    </div>
+                    <div>
+                      <label className="form-label" htmlFor="cc-current-statement-spend">Current Statement Spend (INR)</label>
+                      <input id="cc-current-statement-spend" type="number" className="form-input" value={currentStatementSpend} onChange={e => setCurrentStatementSpend(Number(e.target.value))} />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                    <div>
+                      <label className="form-label" htmlFor="cc-reward-points">Current reward points balance</label>
+                      <input id="cc-reward-points" type="number" className="form-input" value={rewardPoints} onChange={e => setRewardPoints(Number(e.target.value))} />
                     </div>
                   </div>
                 </div>
@@ -1247,8 +1367,8 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr auto', gap: '10px', alignItems: 'flex-end', background: 'rgba(255,255,255,0.01)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
                     <div>
-                      <label className="form-label" style={{ fontSize: '10px' }}>Category</label>
-                      <select className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newCatName} onChange={e => setNewCatName(e.target.value)}>
+                      <label className="form-label" htmlFor="cc-new-cat-name" style={{ fontSize: '10px' }}>Category</label>
+                      <select id="cc-new-cat-name" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newCatName} onChange={e => setNewCatName(e.target.value)}>
                         <option value="General">General / Retail</option>
                         <option value="Dining">Dining</option>
                         <option value="Travel">Travel</option>
@@ -1261,13 +1381,13 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                     </div>
 
                     <div>
-                      <label className="form-label" style={{ fontSize: '10px' }}>Multiplier</label>
-                      <input type="number" step="0.1" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newCatMultiplier} onChange={e => setNewCatMultiplier(Number(e.target.value))} disabled={newCatExcluded} />
+                      <label className="form-label" htmlFor="cc-new-cat-multiplier" style={{ fontSize: '10px' }}>Multiplier</label>
+                      <input id="cc-new-cat-multiplier" type="number" step="0.1" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newCatMultiplier} onChange={e => setNewCatMultiplier(Number(e.target.value))} disabled={newCatExcluded} />
                     </div>
 
                     <div>
-                      <label className="form-label" style={{ fontSize: '10px' }}>Monthly Points Cap</label>
-                      <input type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newCatCap} onChange={e => setNewCatCap(e.target.value)} placeholder="None" disabled={newCatExcluded} />
+                      <label className="form-label" htmlFor="cc-new-cat-cap" style={{ fontSize: '10px' }}>Monthly Points Cap</label>
+                      <input id="cc-new-cat-cap" type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newCatCap} onChange={e => setNewCatCap(e.target.value)} placeholder="None" disabled={newCatExcluded} />
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', justifyContent: 'center', height: '100%', paddingBottom: '6px' }}>
@@ -1298,18 +1418,18 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr auto', gap: '10px', alignItems: 'flex-end', background: 'rgba(255,255,255,0.01)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
                     <div>
-                      <label className="form-label" style={{ fontSize: '10px' }}>Spend Threshold (INR)</label>
-                      <input type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newMilestoneSpend} onChange={e => setNewMilestoneSpend(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-new-milestone-spend" style={{ fontSize: '10px' }}>Spend Threshold (INR)</label>
+                      <input id="cc-new-milestone-spend" type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newMilestoneSpend} onChange={e => setNewMilestoneSpend(Number(e.target.value))} />
                     </div>
 
                     <div>
-                      <label className="form-label" style={{ fontSize: '10px' }}>Milestone Points Rate</label>
-                      <input type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newMilestoneRate} onChange={e => setNewMilestoneRate(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-new-milestone-rate" style={{ fontSize: '10px' }}>Milestone Points Rate</label>
+                      <input id="cc-new-milestone-rate" type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newMilestoneRate} onChange={e => setNewMilestoneRate(Number(e.target.value))} />
                     </div>
 
                     <div>
-                      <label className="form-label" style={{ fontSize: '10px' }}>Spend block (INR)</label>
-                      <input type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newMilestoneSpendBlock} onChange={e => setNewMilestoneSpendBlock(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-new-milestone-block" style={{ fontSize: '10px' }}>Spend block (INR)</label>
+                      <input id="cc-new-milestone-block" type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newMilestoneSpendBlock} onChange={e => setNewMilestoneSpendBlock(Number(e.target.value))} />
                     </div>
 
                     <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={handleAddMilestoneRule}>Add</button>
@@ -1318,40 +1438,40 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                   {/* Lounge limits fields */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginTop: '20px' }}>
                     <div>
-                      <label className="form-label">Domestic Lounge Access (Visits/yr)</label>
-                      <input type="number" className="form-input" value={loungeVisitsLimit} onChange={e => setLoungeVisitsLimit(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-lounge-visits-limit">Domestic Lounge Access (Visits/yr)</label>
+                      <input id="cc-lounge-visits-limit" type="number" className="form-input" value={loungeVisitsLimit} onChange={e => setLoungeVisitsLimit(Number(e.target.value))} />
                     </div>
                     <div>
-                      <label className="form-label">Domestic Lounges Used</label>
-                      <input type="number" className="form-input" value={loungeVisitsUsed} onChange={e => setLoungeVisitsUsed(Number(e.target.value))} />
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginTop: '10px' }}>
-                    <div>
-                      <label className="form-label">Intl Lounge Access (Visits/yr)</label>
-                      <input type="number" className="form-input" value={loungeIntLimit} onChange={e => setLoungeIntLimit(Number(e.target.value))} />
-                    </div>
-                    <div>
-                      <label className="form-label">Intl Lounges Used</label>
-                      <input type="number" className="form-input" value={loungeIntUsed} onChange={e => setLoungeIntUsed(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-lounge-visits-used">Domestic Lounges Used</label>
+                      <input id="cc-lounge-visits-used" type="number" className="form-input" value={loungeVisitsUsed} onChange={e => setLoungeVisitsUsed(Number(e.target.value))} />
                     </div>
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginTop: '10px' }}>
                     <div>
-                      <label className="form-label">Waiver Spend Target (INR)</label>
-                      <input type="number" className="form-input" value={milestoneTarget} onChange={e => setMilestoneTarget(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-lounge-int-limit">Intl Lounge Access (Visits/yr)</label>
+                      <input id="cc-lounge-int-limit" type="number" className="form-input" value={loungeIntLimit} onChange={e => setLoungeIntLimit(Number(e.target.value))} />
                     </div>
                     <div>
-                      <label className="form-label">Current Waiver Spend (INR)</label>
-                      <input type="number" className="form-input" value={milestoneCurrent} onChange={e => setMilestoneCurrent(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-lounge-int-used">Intl Lounges Used</label>
+                      <input id="cc-lounge-int-used" type="number" className="form-input" value={loungeIntUsed} onChange={e => setLoungeIntUsed(Number(e.target.value))} />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginTop: '10px' }}>
+                    <div>
+                      <label className="form-label" htmlFor="cc-milestone-target">Waiver Spend Target (INR)</label>
+                      <input id="cc-milestone-target" type="number" className="form-input" value={milestoneTarget} onChange={e => setMilestoneTarget(Number(e.target.value))} />
+                    </div>
+                    <div>
+                      <label className="form-label" htmlFor="cc-milestone-current">Current Waiver Spend (INR)</label>
+                      <input id="cc-milestone-current" type="number" className="form-input" value={milestoneCurrent} onChange={e => setMilestoneCurrent(Number(e.target.value))} />
                     </div>
                   </div>
 
                   <div style={{ marginTop: '10px' }}>
-                    <label className="form-label">Milestone Reward Details</label>
-                    <input type="text" className="form-input" value={milestoneDesc} onChange={e => setMilestoneDesc(e.target.value)} placeholder="e.g. Waived Annual Fee, 10k Bonus Points..." />
+                    <label className="form-label" htmlFor="cc-milestone-desc">Milestone Reward Details</label>
+                    <input id="cc-milestone-desc" type="text" className="form-input" value={milestoneDesc} onChange={e => setMilestoneDesc(e.target.value)} placeholder="e.g. Waived Annual Fee, 10k Bonus Points..." />
                   </div>
                 </div>
               )}
@@ -1372,13 +1492,13 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
 
                   <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr auto', gap: '10px', alignItems: 'flex-end', background: 'rgba(255,255,255,0.01)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
                     <div>
-                      <label className="form-label" style={{ fontSize: '10px' }}>Partner Airline / Hotel</label>
-                      <input type="text" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newPartnerName} onChange={e => setNewPartnerName(e.target.value)} placeholder="e.g. KrisFlyer Singapore" />
+                      <label className="form-label" htmlFor="cc-new-partner-name" style={{ fontSize: '10px' }}>Partner Airline / Hotel</label>
+                      <input id="cc-new-partner-name" type="text" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newPartnerName} onChange={e => setNewPartnerName(e.target.value)} placeholder="e.g. KrisFlyer Singapore" />
                     </div>
 
                     <div>
-                      <label className="form-label" style={{ fontSize: '10px' }}>Conversion Ratio</label>
-                      <input type="number" step="0.1" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newPartnerRatio} onChange={e => setNewPartnerRatio(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-new-partner-ratio" style={{ fontSize: '10px' }}>Conversion Ratio</label>
+                      <input id="cc-new-partner-ratio" type="number" step="0.1" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newPartnerRatio} onChange={e => setNewPartnerRatio(Number(e.target.value))} />
                     </div>
 
                     <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={handleAddPartnerRule}>Add Partner</button>

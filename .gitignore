@@ -7,6 +7,8 @@ env/
 # Production Bundles & Packager Outputs
 dist/
 dist-portable/
+dist-portable-mac/
+dist-portable-linux/
 build-out/
 out/
 backend/dist/
@@ -24,6 +26,9 @@ data/
 # Logging
 *.log
 backend_log.txt
+
+# start.sh/stop.sh runtime pid files and logs
+.run/
 
 # Python Cache & Compiled Files
 __pycache__/

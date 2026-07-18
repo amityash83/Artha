@@ -67,7 +67,8 @@ def generate_recommendations(conn) -> list:
             "message": f"Emergency Fund is below rule limit of ₹{min_emergency_target:,.0f} by ₹{gap:,.0f}. Stop equity investing and redirect savings here.",
             "status": "danger",
             "action_type": "save",
-            "suggested_amount": gap
+            "suggested_amount": gap,
+            "rule_key": "min_emergency_fund"
         })
     elif curr_emergency < targ_emergency:
         gap = targ_emergency - curr_emergency
@@ -77,7 +78,8 @@ def generate_recommendations(conn) -> list:
             "message": f"Emergency Fund is currently ₹{curr_emergency:,.0f}. You are ₹{gap:,.0f} away from your target of ₹{targ_emergency:,.0f}.",
             "status": "warning",
             "action_type": "save",
-            "suggested_amount": gap
+            "suggested_amount": gap,
+            "rule_key": "min_emergency_fund"
         })
     else:
         recs.append({
@@ -86,7 +88,8 @@ def generate_recommendations(conn) -> list:
             "message": f"Emergency Fund is fully funded at ₹{curr_emergency:,.0f}.",
             "status": "success",
             "action_type": "info",
-            "suggested_amount": 0.0
+            "suggested_amount": 0.0,
+            "rule_key": "min_emergency_fund"
         })
 
     # Check 2: Insurance Reserve Rule
@@ -106,7 +109,8 @@ def generate_recommendations(conn) -> list:
             "message": f"Insurance reserve is at ₹{curr_ins:,.0f}, below your rule target of ₹{ins_reserve_target:,.0f}. Top up by ₹{gap:,.0f}.",
             "status": "danger",
             "action_type": "save",
-            "suggested_amount": gap
+            "suggested_amount": gap,
+            "rule_key": "insurance_reserve_target"
         })
     else:
         recs.append({
@@ -115,7 +119,8 @@ def generate_recommendations(conn) -> list:
             "message": "Insurance reserve matches or exceeds target rules.",
             "status": "success",
             "action_type": "info",
-            "suggested_amount": 0.0
+            "suggested_amount": 0.0,
+            "rule_key": "insurance_reserve_target"
         })
 
     # Check 3: Loan Prepayment Recommendations
@@ -131,7 +136,8 @@ def generate_recommendations(conn) -> list:
                     "message": f"Your {loan['name']} loan (Lender: {loan['lender'] or 'N/A'}) has an ROI of {loan['roi']}%. Since you have surplus liquidity of ₹{free_liquid:,.0f}, prepaying ₹{prepay_val:,.0f} is highly recommended.",
                     "status": "warning",
                     "action_type": "prepay",
-                    "suggested_amount": prepay_val
+                    "suggested_amount": prepay_val,
+                    "rule_key": "high_interest_roi_threshold"
                 })
             else:
                 recs.append({
@@ -140,7 +146,8 @@ def generate_recommendations(conn) -> list:
                     "message": f"You have an active loan {loan['name']} at {loan['roi']}% ROI. Once your emergency fund is stable, focus your monthly cash surplus on prepaying this.",
                     "status": "info",
                     "action_type": "info",
-                    "suggested_amount": 0.0
+                    "suggested_amount": 0.0,
+                    "rule_key": "high_interest_roi_threshold"
                 })
 
     # Check 4: Debt-Free Liquidity Target (if no active loans)
@@ -153,7 +160,8 @@ def generate_recommendations(conn) -> list:
                 "message": f"You are debt-free! The rule recommends maintaining ₹{debt_free_liquidity_target:,.0f} liquidity. You need ₹{gap:,.0f} more.",
                 "status": "warning",
                 "action_type": "save",
-                "suggested_amount": gap
+                "suggested_amount": gap,
+                "rule_key": "debt_free_liquidity_target"
             })
         else:
             recs.append({
@@ -162,7 +170,8 @@ def generate_recommendations(conn) -> list:
                 "message": f"Debt-free and holding ₹{total_liquid:,.0f} in liquid funds. You are in a premium financial position.",
                 "status": "success",
                 "action_type": "info",
-                "suggested_amount": 0.0
+                "suggested_amount": 0.0,
+                "rule_key": "debt_free_liquidity_target"
             })
 
     # Check 5: Goal specific warnings (e.g. Villa Fund)
@@ -176,9 +185,34 @@ def generate_recommendations(conn) -> list:
                 "message": f"Villa fund is short by ₹{gap:,.0f}. Expected completion: {villa_goal['expected_completion'] or 'N/A'}.",
                 "status": "warning",
                 "action_type": "save",
-                "suggested_amount": gap
+                "suggested_amount": gap,
+                "rule_key": None
             })
             
+    # Check 5b: Goal funding constraints — flag any goal funded (via goal_holdings)
+    # from an asset category the goal explicitly excludes (goal_funding_constraints).
+    # This replaces the old hardcoded, unenforced "no_villa_equity" rule with a
+    # generic, per-goal, DB-configurable constraint.
+    cursor.execute("""
+        SELECT g.name as goal_name, cat.name as category_name, a.name as asset_name
+        FROM goal_funding_constraints gfc
+        JOIN goals g ON g.id = gfc.goal_id
+        JOIN goal_holdings gh ON gh.goal_id = gfc.goal_id
+        JOIN assets a ON a.id = gh.asset_id AND a.category_id = gfc.excluded_category_id
+        JOIN categories cat ON cat.id = gfc.excluded_category_id
+    """)
+    violations = cursor.fetchall()
+    for v in violations:
+        recs.append({
+            "category": "Goal Funding",
+            "title": f"Funding Rule Violated: {v['goal_name']}",
+            "message": f"'{v['goal_name']}' excludes funding from {v['category_name']}, but is currently linked to '{v['asset_name']}' ({v['category_name']}). Reassign this holding or remove the funding constraint.",
+            "status": "warning",
+            "action_type": "info",
+            "suggested_amount": 0.0,
+            "rule_key": None
+        })
+
     # Check 6: Insurance premium reminders (within 30 days) from insurance_details
     cursor.execute("""
         SELECT inst.name as company, ins.renewal_date, ins.premium
@@ -203,9 +237,106 @@ def generate_recommendations(conn) -> list:
                         "message": f"Premium of ₹{premium:,.0f} is due in {days_left} days ({ren_date_str}).",
                         "status": "danger",
                         "action_type": "info",
-                        "suggested_amount": premium
+                        "suggested_amount": premium,
+                        "rule_key": "insurance_renewal_alert_days"
                     })
             except Exception:
                 continue
 
     return recs
+
+
+def generate_credit_card_annual_reviews(conn, liability_id: int = None) -> list:
+    """
+    One verdict dict per owned Credit-Card liability (or just the one matching
+    liability_id if given). Reads credit_card_details only — no transactions, no
+    card_variants — since no per-transaction category spend data exists anywhere
+    in Artha. Verdict is Keep/Close/Downgrade/Upgrade-Candidate based purely on
+    the aggregate fields already stored on the card; never infers category-level
+    spending behavior that isn't actually tracked.
+
+    Deliberately does NOT pick a specific replacement card for Upgrade-Candidate/
+    Downgrade verdicts — that requires comparing against Card Library variants,
+    which is Compare Cards' job, invoked separately by the user.
+    """
+    cursor = conn.cursor()
+    query = """
+        SELECT l.id as liability_id, l.name, inst.name as issuer, l.outstanding, ccd.*
+        FROM liabilities l
+        JOIN credit_card_details ccd ON ccd.liability_id = l.id
+        LEFT JOIN institutions inst ON l.lender_institution_id = inst.id
+        WHERE l.category_id = (SELECT id FROM categories WHERE name = 'Credit Card')
+    """
+    params = ()
+    if liability_id is not None:
+        query += " AND l.id = ?"
+        params = (liability_id,)
+    cursor.execute(query, params)
+    cards = cursor.fetchall()
+
+    reviews = []
+    today_dt = date.today()
+    for c in cards:
+        fee = float(c["annual_fee"] or 0.0)
+        reward_val = float(c["reward_points"] or 0.0) * float(c["point_value"] or 0.25)
+        net_value = reward_val - fee
+        worth_the_fee = net_value >= 0 if fee > 0 else True
+
+        target = float(c["milestone_spend_target"] or 0.0)
+        current = float(c["milestone_spend_current"] or 0.0)
+        renewal_str = c["renewal_date"]
+        renewal_dt = None
+        days_to_renewal = None
+        if renewal_str:
+            try:
+                renewal_dt = datetime.strptime(renewal_str, "%Y-%m-%d").date()
+                days_to_renewal = (renewal_dt - today_dt).days
+            except Exception:
+                pass
+
+        on_pace = None
+        if target > 0 and days_to_renewal is not None and days_to_renewal > 0:
+            progress = current / target
+            time_elapsed_fraction = max(0.0, 1 - (days_to_renewal / 365.0))
+            on_pace = progress >= time_elapsed_fraction
+
+        lounge_limit = float(c["lounge_visits_limit"] or 0.0) + float(c["lounge_int_limit"] or 0.0)
+        lounge_used = float(c["lounge_visits_used"] or 0.0) + float(c["lounge_int_used"] or 0.0)
+        lounge_utilization = (lounge_used / lounge_limit) if lounge_limit > 0 else None
+
+        if fee == 0:
+            verdict = "Keep"
+            reason = "No annual fee — no cost to retain regardless of usage."
+        elif net_value >= 0:
+            verdict = "Keep"
+            reason = f"Reward value (₹{reward_val:,.0f}) covers the ₹{fee:,.0f} annual fee."
+        elif on_pace is False and target > 0:
+            verdict = "Downgrade"
+            reason = f"Not on pace to hit the ₹{target:,.0f} fee-waiver milestone before renewal, and reward value doesn't cover the fee on its own."
+        elif lounge_utilization is not None and lounge_utilization < 0.25 and fee > 3000:
+            verdict = "Downgrade"
+            reason = "High annual fee with low lounge utilization and reward value not covering the fee."
+        else:
+            verdict = "Close"
+            reason = f"Reward value (₹{reward_val:,.0f}) is below the ₹{fee:,.0f} annual fee with no offsetting milestone pace or benefit usage."
+
+        if verdict == "Keep" and fee > 0 and net_value > fee * 2:
+            verdict = "Upgrade-Candidate"
+            reason += " Strong yield suggests a higher-tier variant of this card family may unlock even more value — compare in Card Library."
+
+        reviews.append({
+            "liability_id": c["liability_id"],
+            "name": c["name"],
+            "issuer": c["issuer"],
+            "verdict": verdict,
+            "worth_the_fee": worth_the_fee,
+            "annual_fee": fee,
+            "reward_value": round(reward_val, 2),
+            "net_value": round(net_value, 2),
+            "milestone_on_pace": on_pace,
+            "lounge_utilization": round(lounge_utilization, 2) if lounge_utilization is not None else None,
+            "reason": reason,
+            "next_review_date": renewal_dt.isoformat() if renewal_dt else None,
+            "caveat": "Based on manually-entered aggregate fields (points balance, statement spend, fee); no per-transaction category spend data exists in Artha to refine this further.",
+        })
+    return reviews

@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
-import { Category, Institution, Asset, Liability, Goal } from '../types';
+import { Category, Institution, Asset, Liability, Goal, Person } from '../types';
 import { DynamicForm } from './DynamicForm';
 import { Plus, Edit2, Trash2, Search } from 'lucide-react';
 import { API_BASE_URL } from '../config';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 interface EntityGridProps {
   entityType: 'accounts' | 'assets' | 'liabilities' | 'income' | 'expenses' | 'goals';
   entities: any[];
   categories: Category[];
   institutions: Institution[];
+  people?: Person[];
   goals?: Goal[];
   liabilities?: Liability[];
   properties?: Asset[];
@@ -28,7 +30,7 @@ const COMMON_COLUMNS: Record<string, Column[]> = {
     { label: 'Name', key: 'name' },
     { label: 'Institution', key: 'institution_name' },
     { label: 'Balance', key: 'current_balance', alignRight: true },
-    { label: 'Owner', key: 'owner' },
+    { label: 'Owner', key: 'owner_name' },
     { label: 'Status', key: 'status' },
   ],
   assets: [
@@ -36,13 +38,14 @@ const COMMON_COLUMNS: Record<string, Column[]> = {
     { label: 'Category', key: 'category_name' },
     { label: 'Institution', key: 'institution_name' },
     { label: 'Current Value', key: 'current_value', alignRight: true },
-    { label: 'Owner', key: 'owner' },
+    { label: 'Owner', key: 'owner_name' },
   ],
   liabilities: [
     { label: 'Name', key: 'name' },
     { label: 'Category', key: 'category_name' },
     { label: 'Lender', key: 'lender_name' },
     { label: 'Outstanding Balance', key: 'outstanding', alignRight: true },
+    { label: 'Owner', key: 'owner_name' },
     { label: 'Status', key: 'status' },
   ],
   goals: [
@@ -55,8 +58,8 @@ const COMMON_COLUMNS: Record<string, Column[]> = {
 };
 
 const CATEGORY_COLUMNS: Record<string, Column[]> = {
-  'Stock': [{ label: 'Ticker', key: 'ticker' }, { label: 'Quantity', key: 'quantity', alignRight: true }],
-  'Mutual Fund': [{ label: 'Scheme Code', key: 'ticker' }, { label: 'Units', key: 'quantity', alignRight: true }],
+  'Stock': [{ label: 'Ticker', key: 'ticker' }, { label: 'Quantity', key: 'quantity', alignRight: true }, { label: 'XIRR', key: 'xirr', alignRight: true, suffix: '%' }],
+  'Mutual Fund': [{ label: 'Scheme Code', key: 'ticker' }, { label: 'Units', key: 'quantity', alignRight: true }, { label: 'XIRR', key: 'xirr', alignRight: true, suffix: '%' }],
   'Insurance': [{ label: 'Policy Type', key: 'policy_type' }, { label: 'Premium', key: 'premium', alignRight: true }],
   'Property': [{ label: 'Rental Income', key: 'rental_income', alignRight: true }],
   'Home Loan': [
@@ -82,6 +85,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
   entities,
   categories,
   institutions,
+  people = [],
   goals,
   liabilities = [],
   properties = [],
@@ -93,6 +97,10 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
   const [editingEntity, setEditingEntity] = useState<any | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [deletingEntityId, setDeletingEntityId] = useState<number | null>(null);
+  const modalRef = useModalA11y(isAdding || !!editingEntity, () => {
+    setIsAdding(false);
+    setEditingEntity(null);
+  });
 
   const typeCategories = categories.filter((c) => c.entity_type.toLowerCase() === entityType.replace(/s$/, '').toLowerCase());
 
@@ -124,6 +132,26 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
   };
 
   const dispatchSatelliteData = async (entityId: number, categoryName: string | undefined, formData: any) => {
+    if (entityType === 'goals') {
+      const existing = await fetch(`${API_BASE_URL}/api/goals/${entityId}/funding-constraints`).then((r) => r.json());
+      const existingIds = new Set(existing.map((c: any) => c.excluded_category_id));
+      const submittedIds = new Set((formData.funding_constraints || []).map((c: any) => c.excluded_category_id));
+
+      for (const categoryId of submittedIds) {
+        if (!existingIds.has(categoryId)) {
+          await fetch(`${API_BASE_URL}/api/goals/${entityId}/funding-constraints`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ excluded_category_id: categoryId }),
+          });
+        }
+      }
+      for (const categoryId of existingIds) {
+        if (!submittedIds.has(categoryId)) {
+          await fetch(`${API_BASE_URL}/api/goals/${entityId}/funding-constraints/${categoryId}`, { method: 'DELETE' });
+        }
+      }
+    }
     if (entityType === 'assets' && categoryName === 'Insurance') {
       await fetch(`${API_BASE_URL}/api/assets/${entityId}/insurance-details`, {
         method: 'PUT',
@@ -143,6 +171,71 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
           vehicle_registration: formData.vehicle_registration || '',
         }),
       });
+
+      const existingClaims = await fetch(`${API_BASE_URL}/api/assets/${entityId}/insurance-claims`).then((r) => r.json());
+      const existingClaimIds = new Set(existingClaims.map((c: any) => c.id));
+      const submittedClaimIds = new Set((formData.insurance_claims || []).filter((c: any) => c.id).map((c: any) => c.id));
+      for (const claim of formData.insurance_claims || []) {
+        const body = JSON.stringify({
+          claim_date: claim.claim_date,
+          claim_amount: claim.claim_amount,
+          status: claim.status || 'Filed',
+          description: claim.description || '',
+        });
+        if (claim.id) {
+          await fetch(`${API_BASE_URL}/api/insurance-claims/${claim.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body });
+        } else {
+          await fetch(`${API_BASE_URL}/api/assets/${entityId}/insurance-claims`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+        }
+      }
+      for (const existingId of existingClaimIds) {
+        if (!submittedClaimIds.has(existingId)) {
+          await fetch(`${API_BASE_URL}/api/insurance-claims/${existingId}`, { method: 'DELETE' });
+        }
+      }
+
+      const existingPayments = await fetch(`${API_BASE_URL}/api/assets/${entityId}/premium-payments`).then((r) => r.json());
+      const existingPaymentIds = new Set(existingPayments.map((p: any) => p.id));
+      const submittedPaymentIds = new Set((formData.premium_payments || []).filter((p: any) => p.id).map((p: any) => p.id));
+      for (const payment of formData.premium_payments || []) {
+        const body = JSON.stringify({
+          payment_date: payment.payment_date,
+          amount: payment.amount,
+          notes: payment.notes || '',
+        });
+        if (payment.id) {
+          await fetch(`${API_BASE_URL}/api/premium-payments/${payment.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body });
+        } else {
+          await fetch(`${API_BASE_URL}/api/assets/${entityId}/premium-payments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+        }
+      }
+      for (const existingId of existingPaymentIds) {
+        if (!submittedPaymentIds.has(existingId)) {
+          await fetch(`${API_BASE_URL}/api/premium-payments/${existingId}`, { method: 'DELETE' });
+        }
+      }
+    } else if (entityType === 'assets' && categoryName === 'Property') {
+      const existingEntries = await fetch(`${API_BASE_URL}/api/assets/${entityId}/rental-entries`).then((r) => r.json());
+      const existingEntryIds = new Set(existingEntries.map((e: any) => e.id));
+      const submittedEntryIds = new Set((formData.rental_ledger || []).filter((e: any) => e.id).map((e: any) => e.id));
+      for (const entry of formData.rental_ledger || []) {
+        const body = JSON.stringify({
+          month: entry.month,
+          rent_amount: entry.rent_amount,
+          expenses_amount: entry.expenses_amount,
+          notes: entry.notes || '',
+        });
+        if (entry.id) {
+          await fetch(`${API_BASE_URL}/api/rental-entries/${entry.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body });
+        } else {
+          await fetch(`${API_BASE_URL}/api/assets/${entityId}/rental-entries`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+        }
+      }
+      for (const existingId of existingEntryIds) {
+        if (!submittedEntryIds.has(existingId)) {
+          await fetch(`${API_BASE_URL}/api/rental-entries/${existingId}`, { method: 'DELETE' });
+        }
+      }
     } else if (entityType === 'assets' && (categoryName === 'Stock' || categoryName === 'Mutual Fund')) {
       const existingLots = await fetch(`${API_BASE_URL}/api/assets/${entityId}/holdings`).then((r) => r.json());
       const existingIds = new Set(existingLots.map((l: any) => l.id));
@@ -182,19 +275,16 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
       });
     }
 
-    // Property <-> Home Loan bidirectional link
+    // Property -> Home Loan link: liabilities.linked_asset_id is the single source of
+    // truth for this relationship (assets has no linked_liability_id column), so this is
+    // only ever written from the Property side. When editing from the Home Loan side,
+    // formData.linked_asset_id is already part of the primary liability save above —
+    // no second write is needed or valid here.
     if (entityType === 'assets' && categoryName === 'Property' && formData.linked_liability_id) {
       await fetch(`${API_BASE_URL}/api/entities/liabilities/${formData.linked_liability_id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ linked_asset_id: entityId }),
-      });
-    }
-    if (entityType === 'liabilities' && categoryName === 'Home Loan' && formData.linked_asset_id) {
-      await fetch(`${API_BASE_URL}/api/entities/assets/${formData.linked_asset_id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ linked_liability_id: entityId }),
       });
     }
   };
@@ -214,7 +304,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
       }
 
       const categoryName = categories.find((c) => c.id === formData.category_id)?.name;
-      const { holding_lots, ...primaryPayload } = formData;
+      const { holding_lots, funding_constraints, rental_ledger, insurance_claims, premium_payments, ...primaryPayload } = formData;
 
       const res = await fetch(url, {
         method: isEdit ? 'PUT' : 'POST',
@@ -447,12 +537,20 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
           zIndex: 1000,
           padding: '20px'
         }}>
-          <div style={{ width: '100%', maxWidth: '600px' }}>
+          <div
+            style={{ width: '100%', maxWidth: '600px' }}
+            ref={modalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Edit entity form"
+            tabIndex={-1}
+          >
             <DynamicForm
               entityType={entityType}
               category={activeCategory || typeCategories[0]}
               categories={categories}
               institutions={institutions}
+              people={people}
               goals={goals}
               initialData={editingEntity}
               liabilities={liabilities}

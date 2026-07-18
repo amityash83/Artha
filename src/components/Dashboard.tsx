@@ -10,6 +10,8 @@ import {
 } from 'chart.js';
 import { InitData, Snapshot } from '../types';
 import { API_BASE_URL } from '../config';
+import { InfoTooltip } from './InfoTooltip';
+import { AIExplainButton } from './AIExplainButton';
 
 ChartJS.register(
   CategoryScale, LinearScale, PointElement, LineElement, 
@@ -23,7 +25,8 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
-  const { summary, goals, recommendations, rules, assets, liabilities } = data;
+  const [personFilter, setPersonFilter] = useState<number | 'all'>('all');
+  const { goals, recommendations, rules, people } = data;
 
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/snapshots`)
@@ -31,6 +34,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
       .then(d => setSnapshots(d))
       .catch(err => console.error("Failed to fetch snapshots:", err));
   }, []);
+
+  // Per-person filtering is client-side: /api/init's `summary` is a household-wide
+  // aggregate, so filtered totals are re-derived here from the same raw entities
+  // rather than adding a new backend aggregation endpoint.
+  const accounts = personFilter === 'all' ? data.accounts : data.accounts.filter(a => a.owner_id === personFilter);
+  const assets = personFilter === 'all' ? data.assets : data.assets.filter(a => a.owner_id === personFilter);
+  const liabilities = personFilter === 'all' ? data.liabilities : data.liabilities.filter(l => l.owner_id === personFilter);
+
+  const summary = personFilter === 'all' ? data.summary : (() => {
+    const liquid = accounts.reduce((sum, a) => sum + (a.current_balance || 0), 0);
+    const assetsVal = assets.reduce((sum, a) => sum + (a.current_value || 0), 0);
+    const debt = liabilities.reduce((sum, l) => sum + (l.outstanding || 0), 0);
+    const totalAssets = liquid + assetsVal;
+    return {
+      net_worth: totalAssets - debt,
+      total_assets: totalAssets,
+      total_debt: debt,
+      total_liquid: liquid,
+      total_investments: data.summary.total_investments,
+      total_properties: data.summary.total_properties,
+      monthly_change: 0,
+      yearly_change: 0,
+    };
+  })();
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -45,7 +72,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
   const targetLiquidity = minEmergencyRule ? minEmergencyRule.value : 1500000;
   const liquidFunds = summary.total_liquid;
   const liquidityRatio = targetLiquidity > 0 ? (liquidFunds / targetLiquidity) : 1;
-  
+
   let liquidityHealth = 'green';
   let liquidityHealthLabel = 'Healthy';
   if (liquidityRatio < 0.7) {
@@ -238,9 +265,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
 
   return (
     <div>
-      <div className="page-header">
-        <h1 className="page-title">Artha</h1>
-        <p className="page-subtitle">Dashboard &amp; Actionable Decision Support</p>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '12px' }}>
+        <div>
+          <h1 className="page-title">Artha</h1>
+          <p className="page-subtitle">Dashboard &amp; Actionable Decision Support</p>
+        </div>
+        {people.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>View</span>
+            <select
+              className="form-control"
+              style={{ padding: '6px 12px', fontSize: '12px', height: '32px' }}
+              value={personFilter}
+              onChange={(e) => setPersonFilter(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
+            >
+              <option value="all">Household (All)</option>
+              {people.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Top Summaries Grid */}
@@ -356,7 +401,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
         {/* Left Side Charts Panel */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           <div className="glass-panel" style={{ height: '320px', display: 'flex', flexDirection: 'column' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#f8fafc', marginBottom: '16px' }}>Historic Asset Progression</h3>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#f8fafc', marginBottom: '16px' }}>
+              Historic Asset Progression {personFilter !== 'all' && <span style={{ fontSize: '11px', fontWeight: 400, color: 'var(--text-muted)' }}>(Household total — per-person trend not yet tracked)</span>}
+            </h3>
             <div style={{ flex: 1, position: 'relative' }}>
               <Line data={chartData} options={chartOptions} />
             </div>
@@ -519,7 +566,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
                     {rec.status === 'danger' && <AlertTriangle size={14} style={{ color: 'var(--danger)' }} />}
                     {rec.status === 'success' && <CheckCircle size={14} style={{ color: 'var(--success)' }} />}
                   </div>
-                  <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc' }}>{rec.title}</h4>
+                  <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {rec.title}
+                    {rec.rule_key && <InfoTooltip articles={data.knowledge_articles} ruleKey={rec.rule_key} />}
+                    <AIExplainButton
+                      aiConfigured={data.ai_provider !== 'none'}
+                      ruleKey={rec.rule_key || undefined}
+                      recommendationIndex={i}
+                      contextNote={`Dashboard recommendation: ${rec.category}`}
+                    />
+                  </h4>
                   <p style={{ fontSize: '11.5px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>{rec.message}</p>
                   
                   {rec.action_type !== 'info' && (

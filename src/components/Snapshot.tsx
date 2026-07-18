@@ -15,7 +15,8 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh, showToast }
   const [success, setSuccess] = useState(false);
 
   // Dynamic balances map state
-  const [accountBalances, setAccountBalances] = useState<Record<number, number>>({});
+  // Accounts have no editable balance here: current_balance is derived server-side
+  // from the transactions ledger, so it's shown read-only rather than collected as input.
   const [assetValues, setAssetValues] = useState<Record<number, number>>({});
   const [liabilityBalances, setLiabilityBalances] = useState<Record<number, number>>({});
 
@@ -26,10 +27,6 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh, showToast }
     setMonth(`${YYYY}-${MM}`);
 
     // Prepopulate form states
-    const accs: Record<number, number> = {};
-    data.accounts.forEach(a => { accs[a.id] = a.current_balance; });
-    setAccountBalances(accs);
-
     const asts: Record<number, number> = {};
     data.assets.forEach(a => { asts[a.id] = a.current_value; });
     setAssetValues(asts);
@@ -45,17 +42,8 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh, showToast }
     setSuccess(false);
 
     try {
-      // 1. Update Accounts in active database
-      for (const acc of data.accounts) {
-        const bal = accountBalances[acc.id];
-        if (bal !== acc.current_balance) {
-          await fetch(`${API_BASE_URL}/api/entities/accounts/${acc.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...acc, current_balance: bal })
-          });
-        }
-      }
+      // Accounts are not written back here: current_balance is derived from the
+      // transactions ledger and always up to date, so there is nothing to save.
 
       // 2. Update Assets in active database
       for (const asset of data.assets) {
@@ -83,7 +71,7 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh, showToast }
 
       // 4. Compile and Post the frozen snapshot snapshot
       const snapshotPayload = {
-        accounts: data.accounts.map(a => ({ ...a, current_balance: accountBalances[a.id] })),
+        accounts: data.accounts,
         assets: data.assets.map(a => ({ ...a, current_value: assetValues[a.id] })),
         liabilities: data.liabilities.map(l => ({ ...l, outstanding: liabilityBalances[l.id] })),
         goals: data.goals
@@ -152,7 +140,7 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh, showToast }
           )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-            {/* Accounts balances Section */}
+            {/* Accounts balances Section (read-only: balance is derived from the transactions ledger) */}
             {data.accounts.length > 0 && (
               <div>
                 <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '14px', color: '#a78bfa' }}>Accounts (Liquid Balances)</h3>
@@ -160,11 +148,12 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh, showToast }
                   {data.accounts.map(acc => (
                     <div key={acc.id} className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
                       <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{acc.name} ({acc.institution_name || 'Bank'})</label>
-                      <input 
-                        type="number" 
-                        className="form-control" 
-                        value={accountBalances[acc.id] ?? 0}
-                        onChange={e => setAccountBalances({ ...accountBalances, [acc.id]: parseFloat(e.target.value) || 0 })}
+                      <input
+                        type="number"
+                        className="form-control"
+                        value={acc.current_balance ?? 0}
+                        readOnly
+                        disabled
                       />
                     </div>
                   ))}
@@ -216,7 +205,7 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh, showToast }
           <div style={{ marginTop: '32px', padding: '16px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
             <Info size={16} style={{ color: '#a78bfa', flexShrink: 0 }} />
             <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0 }}>
-              Note: Saving the snapshot will overwrite values for this month if it already exists, and will keep historical trends clean.
+              Note: Account balances are shown for reference only and are always derived automatically. Saving the snapshot updates asset/liability values you've edited above and will overwrite this month's archived entry if it already exists.
             </p>
           </div>
         </form>

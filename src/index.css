@@ -308,6 +308,29 @@ h1, h2, h3, h4, h5 {
   box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15);
 }
 
+/* Global keyboard-focus ring — only fires on keyboard navigation (:focus-visible),
+   not on mouse click, so clicking sidebar items/buttons doesn't get a distracting
+   ring while Tab-navigating still shows one. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* .form-input already has its own bespoke focus treatment above — don't stack
+   a second outline ring on top of it. */
+.form-input:focus-visible {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 .form-input option {
   background-color: var(--bg-secondary);
   color: var(--text-primary);
@@ -394,6 +417,11 @@ h1, h2, h3, h4, h5 {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 24px;
+}
+
+@keyframes artha-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* Charts Wrapper */

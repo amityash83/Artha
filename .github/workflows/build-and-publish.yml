@@ -1,4 +1,4 @@
-name: Build and Publish Portable Binary
+name: Build and Publish Desktop App
 
 on:
   push:
@@ -15,8 +15,26 @@ permissions:
 
 jobs:
   build:
-    name: Build & Package Windows Portable App
-    runs-on: windows-latest
+    name: Build & Package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            package_script: package:portable
+            artifact_name: Artha-Windows-Portable
+            artifact_glob: dist-portable/*.exe
+          - os: macos-latest
+            package_script: package:mac
+            artifact_name: Artha-macOS-Unsigned
+            artifact_glob: |
+              dist-portable-mac/*.dmg
+              dist-portable-mac/*.zip
+          - os: ubuntu-latest
+            package_script: package:linux
+            artifact_name: Artha-Linux-AppImage
+            artifact_glob: dist-portable-linux/*.AppImage
 
     steps:
       - name: Checkout Repository
@@ -35,31 +53,46 @@ jobs:
           cache: 'pip'
           cache-dependency-path: 'backend/requirements.txt'
 
-      - name: Install Python Dependencies
+      - name: Install Python Dependencies (Windows)
+        if: runner.os == 'Windows'
         run: |
           python -m venv venv
           venv\Scripts\python -m pip install --upgrade pip
           venv\Scripts\pip install -r backend/requirements.txt
           venv\Scripts\pip install pyinstaller
 
+      # NOTE (macOS leg): produces an UNSIGNED .app/.dmg/.zip. No Apple Developer ID
+      # certificate or notarization credential is configured in this repo/CI — end
+      # users installing this build will see Gatekeeper's "unidentified developer"
+      # warning and must right-click > Open (or clear the quarantine attribute with
+      # `xattr -cr`) to run it. Signing + notarization is explicitly out of scope for
+      # this change; see claude.md and 11-Security-Architecture.md.
+      - name: Install Python Dependencies (macOS/Linux)
+        if: runner.os != 'Windows'
+        run: |
+          python3 -m venv venv
+          venv/bin/python -m pip install --upgrade pip
+          venv/bin/pip install -r backend/requirements.txt
+          venv/bin/pip install pyinstaller
+
       - name: Install Node Dependencies
         run: npm ci
 
-      - name: Build & Package Portable Executable
-        run: npm run package:portable
+      - name: Build & Package
+        run: npm run ${{ matrix.package_script }}
 
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Artha-Portable
-          path: dist-portable/*.exe
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_glob }}
           if-no-files-found: error
 
       - name: Create and Publish Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist-portable/*.exe
+          files: ${{ matrix.artifact_glob }}
           name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false

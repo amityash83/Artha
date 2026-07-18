@@ -10,7 +10,10 @@
     "dev:electron": "electron .",
     "start": "concurrently --kill-others \"npm run dev:backend\" \"npm run dev:frontend\" \"electron .\"",
     "build:backend": "venv\\Scripts\\pyinstaller --noconfirm --onedir --console --name \"main\" --clean --distpath backend/dist --workpath backend/build run.py",
-    "package:portable": "npm run build:frontend && npm run build:backend && electron-builder --win portable",
+    "build:backend:posix": "venv/bin/pyinstaller --noconfirm --onedir --console --name \"main\" --clean --distpath backend/dist --workpath backend/build run.py",
+    "package:portable": "npm run build:frontend && npm run build:backend && electron-builder --win portable --publish=never",
+    "package:mac": "npm run build:frontend && npm run build:backend:posix && electron-builder --mac -c.directories.output=dist-portable-mac --publish=never",
+    "package:linux": "npm run build:frontend && npm run build:backend:posix && electron-builder --linux AppImage -c.directories.output=dist-portable-linux --publish=never",
     "build:exe": "powershell -ExecutionPolicy Bypass -File ./build_release.ps1"
   },
   "dependencies": {
@@ -26,7 +29,7 @@
     "@vitejs/plugin-react": "^4.3.1",
     "concurrently": "^8.2.2",
     "electron": "^31.0.1",
-    "electron-builder": "^26.15.3",
+    "electron-builder": "^25.1.8",
     "typescript": "^5.2.2",
     "vite": "^5.3.1"
   },
@@ -53,7 +56,42 @@
     "win": {
       "target": [
         "portable"
-      ]
+      ],
+      "icon": "public/favicon.png"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.finance",
+      "identity": null,
+      "hardenedRuntime": false,
+      "icon": "public/favicon.png"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Finance",
+      "icon": "public/favicon.png"
     }
   }
 }
