@@ -11,9 +11,9 @@
     "start": "concurrently --kill-others \"npm run dev:backend\" \"npm run dev:frontend\" \"electron .\"",
     "build:backend": "venv\\Scripts\\pyinstaller --noconfirm --onedir --console --name \"main\" --clean --distpath backend/dist --workpath backend/build run.py",
     "build:backend:posix": "venv/bin/pyinstaller --noconfirm --onedir --console --name \"main\" --clean --distpath backend/dist --workpath backend/build run.py",
-    "package:portable": "npm run build:frontend && npm run build:backend && electron-builder --win portable",
-    "package:mac": "npm run build:frontend && npm run build:backend:posix && electron-builder --mac -c.directories.output=dist-portable-mac",
-    "package:linux": "npm run build:frontend && npm run build:backend:posix && electron-builder --linux AppImage -c.directories.output=dist-portable-linux",
+    "package:portable": "npm run build:frontend && npm run build:backend && electron-builder --win portable --publish=never",
+    "package:mac": "npm run build:frontend && npm run build:backend:posix && electron-builder --mac -c.directories.output=dist-portable-mac --publish=never",
+    "package:linux": "npm run build:frontend && npm run build:backend:posix && electron-builder --linux AppImage -c.directories.output=dist-portable-linux --publish=never",
     "build:exe": "powershell -ExecutionPolicy Bypass -File ./build_release.ps1"
   },
   "dependencies": {
