@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-COPY tsconfig.json vite.config.ts index.html ./
+COPY tsconfig.json vite.config.mts index.html ./
 COPY src/ src/
 
 # Backend base URL the browser will call; override at build time with
