@@ -45,6 +45,7 @@ export const PropertyRentalLedgerEditor: React.FC<PropertyRentalLedgerEditorProp
               <input
                 type="month"
                 className="form-control"
+                aria-label={`Month, entry ${i + 1}`}
                 value={entry.month}
                 onChange={(e) => updateEntry(i, 'month', e.target.value)}
               />
@@ -53,6 +54,7 @@ export const PropertyRentalLedgerEditor: React.FC<PropertyRentalLedgerEditorProp
                 step="any"
                 placeholder="Rent"
                 className="form-control"
+                aria-label={`Rent amount, entry ${i + 1}`}
                 value={entry.rent_amount}
                 onChange={(e) => updateEntry(i, 'rent_amount', parseFloat(e.target.value) || 0)}
               />
@@ -61,6 +63,7 @@ export const PropertyRentalLedgerEditor: React.FC<PropertyRentalLedgerEditorProp
                 step="any"
                 placeholder="Expenses"
                 className="form-control"
+                aria-label={`Expenses amount, entry ${i + 1}`}
                 value={entry.expenses_amount}
                 onChange={(e) => updateEntry(i, 'expenses_amount', parseFloat(e.target.value) || 0)}
               />
@@ -68,6 +71,7 @@ export const PropertyRentalLedgerEditor: React.FC<PropertyRentalLedgerEditorProp
                 type="text"
                 placeholder="Notes"
                 className="form-control"
+                aria-label={`Notes, entry ${i + 1}`}
                 value={entry.notes || ''}
                 onChange={(e) => updateEntry(i, 'notes', e.target.value)}
               />
@@ -76,6 +80,7 @@ export const PropertyRentalLedgerEditor: React.FC<PropertyRentalLedgerEditorProp
                 className="btn btn-secondary"
                 style={{ padding: '6px', minWidth: 'auto', borderRadius: '8px' }}
                 onClick={() => removeEntry(i)}
+                aria-label={`Remove entry ${i + 1}`}
               >
                 <Trash2 size={13} style={{ color: '#ef4444' }} />
               </button>

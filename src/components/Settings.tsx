@@ -1340,8 +1340,9 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
               <form onSubmit={handleAddCategory} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Category Name</label>
+                    <label htmlFor="settings-new-category-name" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Category Name</label>
                     <input
+                      id="settings-new-category-name"
                       type="text"
                       className="form-control"
                       placeholder="e.g. Mutual Fund"
@@ -1351,8 +1352,9 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
                     />
                   </div>
                   <div style={{ width: '120px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Entity Type</label>
+                    <label htmlFor="settings-new-category-type" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Entity Type</label>
                     <select
+                      id="settings-new-category-type"
                       className="form-control"
                       value={newCatType}
                       onChange={e => setNewCatType(e.target.value)}
@@ -1536,8 +1538,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Provider</label>
-              <select className="form-control" value={aiProvider} onChange={(e) => setAiProvider(e.target.value as any)}>
+              <label htmlFor="ai-provider" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Provider</label>
+              <select id="ai-provider" className="form-control" value={aiProvider} onChange={(e) => setAiProvider(e.target.value as any)}>
                 <option value="none">None (disabled)</option>
                 <option value="ollama">Ollama (local, runs on your machine)</option>
                 <option value="openai">OpenAI-compatible (cloud, API key required)</option>
@@ -1548,12 +1550,12 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
             {aiProvider === 'ollama' && (
               <>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Ollama Endpoint</label>
-                  <input className="form-control" placeholder="http://localhost:11434" value={aiEndpoint} onChange={(e) => setAiEndpoint(e.target.value)} />
+                  <label htmlFor="ai-ollama-endpoint" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Ollama Endpoint</label>
+                  <input id="ai-ollama-endpoint" className="form-control" placeholder="http://localhost:11434" value={aiEndpoint} onChange={(e) => setAiEndpoint(e.target.value)} />
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Model</label>
-                  <input className="form-control" placeholder="llama3.1" value={aiModel} onChange={(e) => setAiModel(e.target.value)} />
+                  <label htmlFor="ai-model" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Model</label>
+                  <input id="ai-model" className="form-control" placeholder="llama3.1" value={aiModel} onChange={(e) => setAiModel(e.target.value)} />
                 </div>
               </>
             )}
@@ -1561,8 +1563,9 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
             {(aiProvider === 'openai' || aiProvider === 'anthropic') && (
               <>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>API Key</label>
+                  <label htmlFor="ai-api-key" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>API Key</label>
                   <input
+                    id="ai-api-key"
                     type="password"
                     className="form-control"
                     placeholder={aiApiKeySet ? 'Key saved — leave blank to keep it' : 'Enter API key'}
@@ -1571,8 +1574,9 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
                   />
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Model</label>
+                  <label htmlFor="ai-model" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Model</label>
                   <input
+                    id="ai-model"
                     className="form-control"
                     placeholder={aiProvider === 'openai' ? 'gpt-4o-mini' : 'claude-3-5-haiku-20241022'}
                     value={aiModel}
@@ -1581,8 +1585,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
                 </div>
                 {aiProvider === 'openai' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Custom Base URL (optional, for OpenAI-compatible APIs)</label>
-                    <input className="form-control" placeholder="https://api.openai.com/v1" value={aiEndpoint} onChange={(e) => setAiEndpoint(e.target.value)} />
+                    <label htmlFor="ai-base-url" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Custom Base URL (optional, for OpenAI-compatible APIs)</label>
+                    <input id="ai-base-url" className="form-control" placeholder="https://api.openai.com/v1" value={aiEndpoint} onChange={(e) => setAiEndpoint(e.target.value)} />
                   </div>
                 )}
                 <div style={{
@@ -1597,8 +1601,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
 
             {aiProvider !== 'none' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Max Response Length (tokens)</label>
-                <input type="number" className="form-control" value={aiMaxTokens} onChange={(e) => setAiMaxTokens(parseInt(e.target.value) || 500)} />
+                <label htmlFor="ai-max-tokens" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Max Response Length (tokens)</label>
+                <input id="ai-max-tokens" type="number" className="form-control" value={aiMaxTokens} onChange={(e) => setAiMaxTokens(parseInt(e.target.value) || 500)} />
               </div>
             )}
 

@@ -3,6 +3,7 @@ import { Category, Institution, Asset, Liability, Goal, Person } from '../types'
 import { DynamicForm } from './DynamicForm';
 import { Plus, Edit2, Trash2, Search } from 'lucide-react';
 import { API_BASE_URL } from '../config';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 interface EntityGridProps {
   entityType: 'accounts' | 'assets' | 'liabilities' | 'income' | 'expenses' | 'goals';
@@ -96,6 +97,10 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
   const [editingEntity, setEditingEntity] = useState<any | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [deletingEntityId, setDeletingEntityId] = useState<number | null>(null);
+  const modalRef = useModalA11y(isAdding || !!editingEntity, () => {
+    setIsAdding(false);
+    setEditingEntity(null);
+  });
 
   const typeCategories = categories.filter((c) => c.entity_type.toLowerCase() === entityType.replace(/s$/, '').toLowerCase());
 
@@ -532,7 +537,14 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
           zIndex: 1000,
           padding: '20px'
         }}>
-          <div style={{ width: '100%', maxWidth: '600px' }}>
+          <div
+            style={{ width: '100%', maxWidth: '600px' }}
+            ref={modalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Edit entity form"
+            tabIndex={-1}
+          >
             <DynamicForm
               entityType={entityType}
               category={activeCategory || typeCategories[0]}

@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { InitData } from '../types';
 import { API_BASE_URL } from '../config';
+import { useModalA11y } from '../hooks/useModalA11y';
 import { CardLibraryTab } from './creditcards/CardLibraryTab';
 import { CompareCardsTab } from './creditcards/CompareCardsTab';
 import { AnnualReviewTab } from './creditcards/AnnualReviewTab';
@@ -128,6 +129,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
   // Modals & Overlay forms
   const [modalOpen, setModalOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<any | null>(null);
+  const modalRef = useModalA11y(modalOpen, () => setModalOpen(false));
   const [deletingCardId, setDeletingCardId] = useState<number | null>(null);
   
   // Overlay Tab navigation
@@ -1035,8 +1037,9 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
-                <label className="form-label">Merchant Category</label>
-                <select 
+                <label className="form-label" htmlFor="cc-calc-category">Merchant Category</label>
+                <select
+                  id="cc-calc-category"
                   className="form-input"
                   value={calcCategory}
                   onChange={e => setCalcCategory(e.target.value)}
@@ -1053,9 +1056,10 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
               </div>
 
               <div>
-                <label className="form-label">Transaction Amount (INR)</label>
-                <input 
-                  type="number" 
+                <label className="form-label" htmlFor="cc-calc-amount">Transaction Amount (INR)</label>
+                <input
+                  id="cc-calc-amount"
+                  type="number"
                   className="form-input"
                   value={calcAmount}
                   onChange={e => setCalcAmount(Math.max(Number(e.target.value), 0))}
@@ -1161,15 +1165,24 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
       {/* --- ADD/EDIT TABBED MODAL OVERLAY --- */}
       {modalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' }}>
-          <div className="glass-panel" style={{ width: '100%', maxWidth: '680px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', position: 'relative' }}>
-            <button 
+          <div
+            className="glass-panel"
+            style={{ width: '100%', maxWidth: '680px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', position: 'relative' }}
+            ref={modalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="card-config-title"
+            tabIndex={-1}
+          >
+            <button
               style={{ position: 'absolute', top: '16px', right: '16px', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
               onClick={() => setModalOpen(false)}
+              aria-label="Close"
             >
               <X size={18} />
             </button>
 
-            <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#fff', marginBottom: '18px' }}>
+            <h3 id="card-config-title" style={{ fontSize: '16px', fontWeight: 600, color: '#fff', marginBottom: '18px' }}>
               {editingCard ? `Configure Card: ${editingCard.name}` : 'Register Credit Card'}
             </h3>
 
@@ -1237,12 +1250,12 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                     <div>
-                      <label className="form-label">Card Name *</label>
-                      <input type="text" className="form-input" value={name} onChange={e => setName(e.target.value)} required placeholder="e.g. Infinia" />
+                      <label className="form-label" htmlFor="cc-name">Card Name *</label>
+                      <input id="cc-name" type="text" className="form-input" value={name} onChange={e => setName(e.target.value)} required placeholder="e.g. Infinia" />
                     </div>
                     <div>
-                      <label className="form-label">Issuer Bank *</label>
-                      <select className="form-input" value={lenderId} onChange={e => setLenderId(e.target.value)} required>
+                      <label className="form-label" htmlFor="cc-lender">Issuer Bank *</label>
+                      <select id="cc-lender" className="form-input" value={lenderId} onChange={e => setLenderId(e.target.value)} required>
                         <option value="">-- Pick Issuer --</option>
                         {[...institutions].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })).map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
                       </select>
@@ -1251,41 +1264,41 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                     <div>
-                      <label className="form-label">Credit Limit (INR)</label>
-                      <input type="number" className="form-input" value={creditLimit} onChange={e => setCreditLimit(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-credit-limit">Credit Limit (INR)</label>
+                      <input id="cc-credit-limit" type="number" className="form-input" value={creditLimit} onChange={e => setCreditLimit(Number(e.target.value))} />
                     </div>
                     <div>
-                      <label className="form-label">Outstanding Balance (INR)</label>
-                      <input type="number" className="form-input" value={outstanding} onChange={e => setOutstanding(Number(e.target.value))} />
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                    <div>
-                      <label className="form-label">Statement Date (Day of Month)</label>
-                      <input type="number" className="form-input" value={statementDate} onChange={e => setStatementDate(Number(e.target.value))} min={1} max={31} />
-                    </div>
-                    <div>
-                      <label className="form-label">Payment Due Date (Day of Month)</label>
-                      <input type="number" className="form-input" value={dueDate} onChange={e => setDueDate(Number(e.target.value))} min={1} max={31} />
+                      <label className="form-label" htmlFor="cc-outstanding">Outstanding Balance (INR)</label>
+                      <input id="cc-outstanding" type="number" className="form-input" value={outstanding} onChange={e => setOutstanding(Number(e.target.value))} />
                     </div>
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                     <div>
-                      <label className="form-label">Annual Fee (INR)</label>
-                      <input type="number" className="form-input" value={annualFee} onChange={e => setAnnualFee(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-statement-date">Statement Date (Day of Month)</label>
+                      <input id="cc-statement-date" type="number" className="form-input" value={statementDate} onChange={e => setStatementDate(Number(e.target.value))} min={1} max={31} />
                     </div>
                     <div>
-                      <label className="form-label">Renewal Date</label>
-                      <input type="date" className="form-input" value={renewalDate} onChange={e => setRenewalDate(e.target.value)} />
+                      <label className="form-label" htmlFor="cc-due-date">Payment Due Date (Day of Month)</label>
+                      <input id="cc-due-date" type="number" className="form-input" value={dueDate} onChange={e => setDueDate(Number(e.target.value))} min={1} max={31} />
                     </div>
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                     <div>
-                      <label className="form-label">Card Network</label>
-                      <select className="form-input" value={network} onChange={e => setNetwork(e.target.value)}>
+                      <label className="form-label" htmlFor="cc-annual-fee">Annual Fee (INR)</label>
+                      <input id="cc-annual-fee" type="number" className="form-input" value={annualFee} onChange={e => setAnnualFee(Number(e.target.value))} />
+                    </div>
+                    <div>
+                      <label className="form-label" htmlFor="cc-renewal-date">Renewal Date</label>
+                      <input id="cc-renewal-date" type="date" className="form-input" value={renewalDate} onChange={e => setRenewalDate(e.target.value)} />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                    <div>
+                      <label className="form-label" htmlFor="cc-network">Card Network</label>
+                      <select id="cc-network" className="form-input" value={network} onChange={e => setNetwork(e.target.value)}>
                         <option value="Visa">Visa</option>
                         <option value="Mastercard">Mastercard</option>
                         <option value="RuPay">RuPay</option>
@@ -1294,8 +1307,8 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                       </select>
                     </div>
                     <div>
-                      <label className="form-label">Remarks</label>
-                      <input type="text" className="form-input" value={remarks} onChange={e => setRemarks(e.target.value)} />
+                      <label className="form-label" htmlFor="cc-remarks">Remarks</label>
+                      <input id="cc-remarks" type="text" className="form-input" value={remarks} onChange={e => setRemarks(e.target.value)} />
                     </div>
                   </div>
                 </div>
@@ -1306,30 +1319,30 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                     <div>
-                      <label className="form-label">Base Points Earning</label>
-                      <input type="number" className="form-input" value={basePoints} onChange={e => setBasePoints(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-base-points">Base Points Earning</label>
+                      <input id="cc-base-points" type="number" className="form-input" value={basePoints} onChange={e => setBasePoints(Number(e.target.value))} />
                     </div>
                     <div>
-                      <label className="form-label">Per Spend Amount (INR)</label>
-                      <input type="number" className="form-input" value={baseSpend} onChange={e => setBaseSpend(Number(e.target.value))} />
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                    <div>
-                      <label className="form-label">Cash Value per Point (INR)</label>
-                      <input type="number" step="0.01" className="form-input" value={pointValue} onChange={e => setPointValue(Number(e.target.value))} />
-                    </div>
-                    <div>
-                      <label className="form-label">Current Statement Spend (INR)</label>
-                      <input type="number" className="form-input" value={currentStatementSpend} onChange={e => setCurrentStatementSpend(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-base-spend">Per Spend Amount (INR)</label>
+                      <input id="cc-base-spend" type="number" className="form-input" value={baseSpend} onChange={e => setBaseSpend(Number(e.target.value))} />
                     </div>
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                     <div>
-                      <label className="form-label">Current reward points balance</label>
-                      <input type="number" className="form-input" value={rewardPoints} onChange={e => setRewardPoints(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-point-value">Cash Value per Point (INR)</label>
+                      <input id="cc-point-value" type="number" step="0.01" className="form-input" value={pointValue} onChange={e => setPointValue(Number(e.target.value))} />
+                    </div>
+                    <div>
+                      <label className="form-label" htmlFor="cc-current-statement-spend">Current Statement Spend (INR)</label>
+                      <input id="cc-current-statement-spend" type="number" className="form-input" value={currentStatementSpend} onChange={e => setCurrentStatementSpend(Number(e.target.value))} />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                    <div>
+                      <label className="form-label" htmlFor="cc-reward-points">Current reward points balance</label>
+                      <input id="cc-reward-points" type="number" className="form-input" value={rewardPoints} onChange={e => setRewardPoints(Number(e.target.value))} />
                     </div>
                   </div>
                 </div>
@@ -1354,8 +1367,8 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr auto', gap: '10px', alignItems: 'flex-end', background: 'rgba(255,255,255,0.01)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
                     <div>
-                      <label className="form-label" style={{ fontSize: '10px' }}>Category</label>
-                      <select className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newCatName} onChange={e => setNewCatName(e.target.value)}>
+                      <label className="form-label" htmlFor="cc-new-cat-name" style={{ fontSize: '10px' }}>Category</label>
+                      <select id="cc-new-cat-name" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newCatName} onChange={e => setNewCatName(e.target.value)}>
                         <option value="General">General / Retail</option>
                         <option value="Dining">Dining</option>
                         <option value="Travel">Travel</option>
@@ -1368,13 +1381,13 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                     </div>
 
                     <div>
-                      <label className="form-label" style={{ fontSize: '10px' }}>Multiplier</label>
-                      <input type="number" step="0.1" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newCatMultiplier} onChange={e => setNewCatMultiplier(Number(e.target.value))} disabled={newCatExcluded} />
+                      <label className="form-label" htmlFor="cc-new-cat-multiplier" style={{ fontSize: '10px' }}>Multiplier</label>
+                      <input id="cc-new-cat-multiplier" type="number" step="0.1" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newCatMultiplier} onChange={e => setNewCatMultiplier(Number(e.target.value))} disabled={newCatExcluded} />
                     </div>
 
                     <div>
-                      <label className="form-label" style={{ fontSize: '10px' }}>Monthly Points Cap</label>
-                      <input type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newCatCap} onChange={e => setNewCatCap(e.target.value)} placeholder="None" disabled={newCatExcluded} />
+                      <label className="form-label" htmlFor="cc-new-cat-cap" style={{ fontSize: '10px' }}>Monthly Points Cap</label>
+                      <input id="cc-new-cat-cap" type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newCatCap} onChange={e => setNewCatCap(e.target.value)} placeholder="None" disabled={newCatExcluded} />
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', justifyContent: 'center', height: '100%', paddingBottom: '6px' }}>
@@ -1405,18 +1418,18 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr auto', gap: '10px', alignItems: 'flex-end', background: 'rgba(255,255,255,0.01)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
                     <div>
-                      <label className="form-label" style={{ fontSize: '10px' }}>Spend Threshold (INR)</label>
-                      <input type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newMilestoneSpend} onChange={e => setNewMilestoneSpend(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-new-milestone-spend" style={{ fontSize: '10px' }}>Spend Threshold (INR)</label>
+                      <input id="cc-new-milestone-spend" type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newMilestoneSpend} onChange={e => setNewMilestoneSpend(Number(e.target.value))} />
                     </div>
 
                     <div>
-                      <label className="form-label" style={{ fontSize: '10px' }}>Milestone Points Rate</label>
-                      <input type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newMilestoneRate} onChange={e => setNewMilestoneRate(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-new-milestone-rate" style={{ fontSize: '10px' }}>Milestone Points Rate</label>
+                      <input id="cc-new-milestone-rate" type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newMilestoneRate} onChange={e => setNewMilestoneRate(Number(e.target.value))} />
                     </div>
 
                     <div>
-                      <label className="form-label" style={{ fontSize: '10px' }}>Spend block (INR)</label>
-                      <input type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newMilestoneSpendBlock} onChange={e => setNewMilestoneSpendBlock(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-new-milestone-block" style={{ fontSize: '10px' }}>Spend block (INR)</label>
+                      <input id="cc-new-milestone-block" type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newMilestoneSpendBlock} onChange={e => setNewMilestoneSpendBlock(Number(e.target.value))} />
                     </div>
 
                     <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={handleAddMilestoneRule}>Add</button>
@@ -1425,40 +1438,40 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                   {/* Lounge limits fields */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginTop: '20px' }}>
                     <div>
-                      <label className="form-label">Domestic Lounge Access (Visits/yr)</label>
-                      <input type="number" className="form-input" value={loungeVisitsLimit} onChange={e => setLoungeVisitsLimit(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-lounge-visits-limit">Domestic Lounge Access (Visits/yr)</label>
+                      <input id="cc-lounge-visits-limit" type="number" className="form-input" value={loungeVisitsLimit} onChange={e => setLoungeVisitsLimit(Number(e.target.value))} />
                     </div>
                     <div>
-                      <label className="form-label">Domestic Lounges Used</label>
-                      <input type="number" className="form-input" value={loungeVisitsUsed} onChange={e => setLoungeVisitsUsed(Number(e.target.value))} />
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginTop: '10px' }}>
-                    <div>
-                      <label className="form-label">Intl Lounge Access (Visits/yr)</label>
-                      <input type="number" className="form-input" value={loungeIntLimit} onChange={e => setLoungeIntLimit(Number(e.target.value))} />
-                    </div>
-                    <div>
-                      <label className="form-label">Intl Lounges Used</label>
-                      <input type="number" className="form-input" value={loungeIntUsed} onChange={e => setLoungeIntUsed(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-lounge-visits-used">Domestic Lounges Used</label>
+                      <input id="cc-lounge-visits-used" type="number" className="form-input" value={loungeVisitsUsed} onChange={e => setLoungeVisitsUsed(Number(e.target.value))} />
                     </div>
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginTop: '10px' }}>
                     <div>
-                      <label className="form-label">Waiver Spend Target (INR)</label>
-                      <input type="number" className="form-input" value={milestoneTarget} onChange={e => setMilestoneTarget(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-lounge-int-limit">Intl Lounge Access (Visits/yr)</label>
+                      <input id="cc-lounge-int-limit" type="number" className="form-input" value={loungeIntLimit} onChange={e => setLoungeIntLimit(Number(e.target.value))} />
                     </div>
                     <div>
-                      <label className="form-label">Current Waiver Spend (INR)</label>
-                      <input type="number" className="form-input" value={milestoneCurrent} onChange={e => setMilestoneCurrent(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-lounge-int-used">Intl Lounges Used</label>
+                      <input id="cc-lounge-int-used" type="number" className="form-input" value={loungeIntUsed} onChange={e => setLoungeIntUsed(Number(e.target.value))} />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginTop: '10px' }}>
+                    <div>
+                      <label className="form-label" htmlFor="cc-milestone-target">Waiver Spend Target (INR)</label>
+                      <input id="cc-milestone-target" type="number" className="form-input" value={milestoneTarget} onChange={e => setMilestoneTarget(Number(e.target.value))} />
+                    </div>
+                    <div>
+                      <label className="form-label" htmlFor="cc-milestone-current">Current Waiver Spend (INR)</label>
+                      <input id="cc-milestone-current" type="number" className="form-input" value={milestoneCurrent} onChange={e => setMilestoneCurrent(Number(e.target.value))} />
                     </div>
                   </div>
 
                   <div style={{ marginTop: '10px' }}>
-                    <label className="form-label">Milestone Reward Details</label>
-                    <input type="text" className="form-input" value={milestoneDesc} onChange={e => setMilestoneDesc(e.target.value)} placeholder="e.g. Waived Annual Fee, 10k Bonus Points..." />
+                    <label className="form-label" htmlFor="cc-milestone-desc">Milestone Reward Details</label>
+                    <input id="cc-milestone-desc" type="text" className="form-input" value={milestoneDesc} onChange={e => setMilestoneDesc(e.target.value)} placeholder="e.g. Waived Annual Fee, 10k Bonus Points..." />
                   </div>
                 </div>
               )}
@@ -1479,13 +1492,13 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
 
                   <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr auto', gap: '10px', alignItems: 'flex-end', background: 'rgba(255,255,255,0.01)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
                     <div>
-                      <label className="form-label" style={{ fontSize: '10px' }}>Partner Airline / Hotel</label>
-                      <input type="text" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newPartnerName} onChange={e => setNewPartnerName(e.target.value)} placeholder="e.g. KrisFlyer Singapore" />
+                      <label className="form-label" htmlFor="cc-new-partner-name" style={{ fontSize: '10px' }}>Partner Airline / Hotel</label>
+                      <input id="cc-new-partner-name" type="text" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newPartnerName} onChange={e => setNewPartnerName(e.target.value)} placeholder="e.g. KrisFlyer Singapore" />
                     </div>
 
                     <div>
-                      <label className="form-label" style={{ fontSize: '10px' }}>Conversion Ratio</label>
-                      <input type="number" step="0.1" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newPartnerRatio} onChange={e => setNewPartnerRatio(Number(e.target.value))} />
+                      <label className="form-label" htmlFor="cc-new-partner-ratio" style={{ fontSize: '10px' }}>Conversion Ratio</label>
+                      <input id="cc-new-partner-ratio" type="number" step="0.1" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newPartnerRatio} onChange={e => setNewPartnerRatio(Number(e.target.value))} />
                     </div>
 
                     <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={handleAddPartnerRule}>Add Partner</button>

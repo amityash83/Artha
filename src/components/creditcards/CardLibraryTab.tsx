@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Plus, Trash2, Edit2, X, BookOpen } from 'lucide-react';
 import { CardVariant } from '../../types';
 import { API_BASE_URL } from '../../config';
+import { useModalA11y } from '../../hooks/useModalA11y';
 
 interface CardLibraryTabProps {
   cardVariants: CardVariant[];
@@ -34,6 +35,7 @@ export const CardLibraryTab: React.FC<CardLibraryTabProps> = ({ cardVariants, on
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Partial<CardVariant> | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const modalRef = useModalA11y(modalOpen, () => { setModalOpen(false); setEditing(null); });
 
   const tiers = useMemo(() => ['All', ...Array.from(new Set(cardVariants.map((v) => v.card_tier)))], [cardVariants]);
 
@@ -192,72 +194,82 @@ export const CardLibraryTab: React.FC<CardLibraryTabProps> = ({ cardVariants, on
 
       {modalOpen && editing && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div className="glass-panel" style={{ width: '100%', maxWidth: '560px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', position: 'relative' }}>
+          <div
+            className="glass-panel"
+            style={{ width: '100%', maxWidth: '560px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', position: 'relative' }}
+            ref={modalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="card-library-modal-title"
+            tabIndex={-1}
+          >
             <button
               onClick={() => { setModalOpen(false); setEditing(null); }}
+              aria-label="Close"
               style={{ position: 'absolute', top: '16px', right: '16px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
             >
               <X size={18} />
             </button>
-            <h3 style={{ fontSize: '15px', fontWeight: 700, marginBottom: '18px', color: '#f8fafc' }}>
+            <h3 id="card-library-modal-title" style={{ fontSize: '15px', fontWeight: 700, marginBottom: '18px', color: '#f8fafc' }}>
               {editing.id ? 'Edit Reference Card' : 'Add Reference Card'}
             </h3>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Card Name</label>
-                <input className="form-control" value={editing.name || ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+                <label htmlFor="card-lib-name" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Card Name</label>
+                <input id="card-lib-name" className="form-control" value={editing.name || ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Issuer</label>
-                <input className="form-control" value={editing.issuer || ''} onChange={(e) => setEditing({ ...editing, issuer: e.target.value })} />
+                <label htmlFor="card-lib-issuer" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Issuer</label>
+                <input id="card-lib-issuer" className="form-control" value={editing.issuer || ''} onChange={(e) => setEditing({ ...editing, issuer: e.target.value })} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Network</label>
-                <input className="form-control" value={editing.network || ''} onChange={(e) => setEditing({ ...editing, network: e.target.value })} />
+                <label htmlFor="card-lib-network" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Network</label>
+                <input id="card-lib-network" className="form-control" value={editing.network || ''} onChange={(e) => setEditing({ ...editing, network: e.target.value })} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Tier</label>
-                <input className="form-control" value={editing.card_tier || ''} onChange={(e) => setEditing({ ...editing, card_tier: e.target.value })} />
+                <label htmlFor="card-lib-tier" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Tier</label>
+                <input id="card-lib-tier" className="form-control" value={editing.card_tier || ''} onChange={(e) => setEditing({ ...editing, card_tier: e.target.value })} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Joining Fee</label>
-                <input type="number" className="form-control" value={editing.joining_fee ?? 0} onChange={(e) => setEditing({ ...editing, joining_fee: parseFloat(e.target.value) || 0 })} />
+                <label htmlFor="card-lib-joining-fee" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Joining Fee</label>
+                <input id="card-lib-joining-fee" type="number" className="form-control" value={editing.joining_fee ?? 0} onChange={(e) => setEditing({ ...editing, joining_fee: parseFloat(e.target.value) || 0 })} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Annual Fee</label>
-                <input type="number" className="form-control" value={editing.annual_fee ?? 0} onChange={(e) => setEditing({ ...editing, annual_fee: parseFloat(e.target.value) || 0 })} />
+                <label htmlFor="card-lib-annual-fee" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Annual Fee</label>
+                <input id="card-lib-annual-fee" type="number" className="form-control" value={editing.annual_fee ?? 0} onChange={(e) => setEditing({ ...editing, annual_fee: parseFloat(e.target.value) || 0 })} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Fee Waiver Spend (0 = none)</label>
-                <input type="number" className="form-control" value={editing.fee_waiver_spend ?? 0} onChange={(e) => setEditing({ ...editing, fee_waiver_spend: parseFloat(e.target.value) || 0 })} />
+                <label htmlFor="card-lib-fee-waiver" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Fee Waiver Spend (0 = none)</label>
+                <input id="card-lib-fee-waiver" type="number" className="form-control" value={editing.fee_waiver_spend ?? 0} onChange={(e) => setEditing({ ...editing, fee_waiver_spend: parseFloat(e.target.value) || 0 })} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Point Value (₹)</label>
-                <input type="number" step="any" className="form-control" value={editing.point_value ?? 0.25} onChange={(e) => setEditing({ ...editing, point_value: parseFloat(e.target.value) || 0 })} />
+                <label htmlFor="card-lib-point-value" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Point Value (₹)</label>
+                <input id="card-lib-point-value" type="number" step="any" className="form-control" value={editing.point_value ?? 0.25} onChange={(e) => setEditing({ ...editing, point_value: parseFloat(e.target.value) || 0 })} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Base Points</label>
-                <input type="number" step="any" className="form-control" value={editing.base_points ?? 1} onChange={(e) => setEditing({ ...editing, base_points: parseFloat(e.target.value) || 0 })} />
+                <label htmlFor="card-lib-base-points" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Base Points</label>
+                <input id="card-lib-base-points" type="number" step="any" className="form-control" value={editing.base_points ?? 1} onChange={(e) => setEditing({ ...editing, base_points: parseFloat(e.target.value) || 0 })} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Per Spend (₹)</label>
-                <input type="number" step="any" className="form-control" value={editing.base_spend ?? 100} onChange={(e) => setEditing({ ...editing, base_spend: parseFloat(e.target.value) || 0 })} />
+                <label htmlFor="card-lib-base-spend" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Per Spend (₹)</label>
+                <input id="card-lib-base-spend" type="number" step="any" className="form-control" value={editing.base_spend ?? 100} onChange={(e) => setEditing({ ...editing, base_spend: parseFloat(e.target.value) || 0 })} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Lounge (Domestic)</label>
-                <input type="number" className="form-control" value={editing.lounge_visits_domestic ?? 0} onChange={(e) => setEditing({ ...editing, lounge_visits_domestic: parseInt(e.target.value) || 0 })} />
+                <label htmlFor="card-lib-lounge-dom" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Lounge (Domestic)</label>
+                <input id="card-lib-lounge-dom" type="number" className="form-control" value={editing.lounge_visits_domestic ?? 0} onChange={(e) => setEditing({ ...editing, lounge_visits_domestic: parseInt(e.target.value) || 0 })} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Lounge (International)</label>
-                <input type="number" className="form-control" value={editing.lounge_visits_international ?? 0} onChange={(e) => setEditing({ ...editing, lounge_visits_international: parseInt(e.target.value) || 0 })} />
+                <label htmlFor="card-lib-lounge-intl" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Lounge (International)</label>
+                <input id="card-lib-lounge-intl" type="number" className="form-control" value={editing.lounge_visits_international ?? 0} onChange={(e) => setEditing({ ...editing, lounge_visits_international: parseInt(e.target.value) || 0 })} />
               </div>
               <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Eligibility Notes</label>
-                <input className="form-control" value={editing.eligibility_notes || ''} onChange={(e) => setEditing({ ...editing, eligibility_notes: e.target.value })} />
+                <label htmlFor="card-lib-eligibility" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Eligibility Notes</label>
+                <input id="card-lib-eligibility" className="form-control" value={editing.eligibility_notes || ''} onChange={(e) => setEditing({ ...editing, eligibility_notes: e.target.value })} />
               </div>
               <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Pros (one per line)</label>
+                <label htmlFor="card-lib-pros" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Pros (one per line)</label>
                 <textarea
+                  id="card-lib-pros"
                   className="form-control"
                   rows={2}
                   value={parseList(editing.pros_json).join('\n')}
@@ -265,8 +277,9 @@ export const CardLibraryTab: React.FC<CardLibraryTabProps> = ({ cardVariants, on
                 />
               </div>
               <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Cons (one per line)</label>
+                <label htmlFor="card-lib-cons" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Cons (one per line)</label>
                 <textarea
+                  id="card-lib-cons"
                   className="form-control"
                   rows={2}
                   value={parseList(editing.cons_json).join('\n')}

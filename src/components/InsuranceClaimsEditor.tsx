@@ -45,6 +45,7 @@ export const InsuranceClaimsEditor: React.FC<InsuranceClaimsEditorProps> = ({ cl
               <input
                 type="date"
                 className="form-control"
+                aria-label={`Claim date, claim ${i + 1}`}
                 value={claim.claim_date}
                 onChange={(e) => updateClaim(i, 'claim_date', e.target.value)}
               />
@@ -53,11 +54,13 @@ export const InsuranceClaimsEditor: React.FC<InsuranceClaimsEditorProps> = ({ cl
                 step="any"
                 placeholder="Amount"
                 className="form-control"
+                aria-label={`Claim amount, claim ${i + 1}`}
                 value={claim.claim_amount}
                 onChange={(e) => updateClaim(i, 'claim_amount', parseFloat(e.target.value) || 0)}
               />
               <select
                 className="form-control"
+                aria-label={`Status, claim ${i + 1}`}
                 value={claim.status || 'Filed'}
                 onChange={(e) => updateClaim(i, 'status', e.target.value)}
               >
@@ -69,6 +72,7 @@ export const InsuranceClaimsEditor: React.FC<InsuranceClaimsEditorProps> = ({ cl
                 type="text"
                 placeholder="Description"
                 className="form-control"
+                aria-label={`Description, claim ${i + 1}`}
                 value={claim.description || ''}
                 onChange={(e) => updateClaim(i, 'description', e.target.value)}
               />
@@ -77,6 +81,7 @@ export const InsuranceClaimsEditor: React.FC<InsuranceClaimsEditorProps> = ({ cl
                 className="btn btn-secondary"
                 style={{ padding: '6px', minWidth: 'auto', borderRadius: '8px' }}
                 onClick={() => removeClaim(i)}
+                aria-label={`Remove claim ${i + 1}`}
               >
                 <Trash2 size={13} style={{ color: '#ef4444' }} />
               </button>

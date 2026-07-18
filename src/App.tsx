@@ -173,6 +173,7 @@ const App: React.FC = () => {
             <li>
               <div 
                 className={`sidebar-item ${activeTab === 'dashboard' ? 'active' : ''}`}
+                aria-current={activeTab === 'dashboard' ? 'page' : undefined}
                 onClick={() => handleNavigate('dashboard')}
               >
                 <Compass size={16} />
@@ -182,6 +183,7 @@ const App: React.FC = () => {
              <li>
               <div 
                 className={`sidebar-item ${activeTab === 'snapshot' ? 'active' : ''}`}
+                aria-current={activeTab === 'snapshot' ? 'page' : undefined}
                 onClick={() => handleNavigate('snapshot')}
               >
                 <Calendar size={16} />
@@ -191,6 +193,7 @@ const App: React.FC = () => {
             <li>
               <div 
                 className={`sidebar-item ${activeTab === 'cash-flow' ? 'active' : ''}`}
+                aria-current={activeTab === 'cash-flow' ? 'page' : undefined}
                 onClick={() => handleNavigate('cash-flow')}
               >
                 <LineChart size={16} />
@@ -200,6 +203,7 @@ const App: React.FC = () => {
             <li>
               <div 
                 className={`sidebar-item ${activeTab === 'transactions' ? 'active' : ''}`}
+                aria-current={activeTab === 'transactions' ? 'page' : undefined}
                 onClick={() => handleNavigate('transactions')}
               >
                 <ArrowRightLeft size={16} />
@@ -209,6 +213,7 @@ const App: React.FC = () => {
             <li>
               <div 
                 className={`sidebar-item ${activeTab === 'budget-planner' ? 'active' : ''}`}
+                aria-current={activeTab === 'budget-planner' ? 'page' : undefined}
                 onClick={() => handleNavigate('budget-planner')}
               >
                 <Sliders size={16} />
@@ -218,6 +223,7 @@ const App: React.FC = () => {
             <li>
               <div 
                 className={`sidebar-item ${activeTab === 'financial-calendar' ? 'active' : ''}`}
+                aria-current={activeTab === 'financial-calendar' ? 'page' : undefined}
                 onClick={() => handleNavigate('financial-calendar')}
               >
                 <Calendar size={16} style={{ opacity: 0.8 }} />
@@ -230,6 +236,7 @@ const App: React.FC = () => {
             <li>
               <div 
                 className={`sidebar-item ${activeTab === 'accounts' ? 'active' : ''}`}
+                aria-current={activeTab === 'accounts' ? 'page' : undefined}
                 onClick={() => handleNavigate('accounts')}
               >
                 <Landmark size={16} />
@@ -239,6 +246,7 @@ const App: React.FC = () => {
             <li>
               <div 
                 className={`sidebar-item ${activeTab === 'assets' ? 'active' : ''}`}
+                aria-current={activeTab === 'assets' ? 'page' : undefined}
                 onClick={() => handleNavigate('assets')}
               >
                 <PiggyBank size={16} />
@@ -248,6 +256,7 @@ const App: React.FC = () => {
             <li>
               <div 
                 className={`sidebar-item ${activeTab === 'liabilities' ? 'active' : ''}`}
+                aria-current={activeTab === 'liabilities' ? 'page' : undefined}
                 onClick={() => handleNavigate('liabilities')}
               >
                 <LandmarkIcon size={16} />
@@ -257,6 +266,7 @@ const App: React.FC = () => {
             <li>
               <div 
                 className={`sidebar-item ${activeTab === 'credit-cards' ? 'active' : ''}`}
+                aria-current={activeTab === 'credit-cards' ? 'page' : undefined}
                 onClick={() => handleNavigate('credit-cards')}
               >
                 <CreditCard size={16} />
@@ -266,6 +276,7 @@ const App: React.FC = () => {
             <li>
               <div 
                 className={`sidebar-item ${activeTab === 'goals' ? 'active' : ''}`}
+                aria-current={activeTab === 'goals' ? 'page' : undefined}
                 onClick={() => handleNavigate('goals')}
               >
                 <Target size={16} />
@@ -278,6 +289,7 @@ const App: React.FC = () => {
             <li>
               <div 
                 className={`sidebar-item ${activeTab === 'simulations' ? 'active' : ''}`}
+                aria-current={activeTab === 'simulations' ? 'page' : undefined}
                 onClick={() => handleNavigate('simulations')}
               >
                 <LineChart size={16} />
@@ -287,6 +299,7 @@ const App: React.FC = () => {
             <li>
               <div 
                 className={`sidebar-item ${activeTab === 'emi-calculator' ? 'active' : ''}`}
+                aria-current={activeTab === 'emi-calculator' ? 'page' : undefined}
                 onClick={() => handleNavigate('emi-calculator')}
               >
                 <Calculator size={16} />
@@ -296,6 +309,7 @@ const App: React.FC = () => {
             <li>
               <div 
                 className={`sidebar-item ${activeTab === 'loan-optimizer' ? 'active' : ''}`}
+                aria-current={activeTab === 'loan-optimizer' ? 'page' : undefined}
                 onClick={() => handleNavigate('loan-optimizer')}
               >
                 <Zap size={16} style={{ color: 'var(--accent-light)' }} />
@@ -305,6 +319,7 @@ const App: React.FC = () => {
             <li>
               <div
                 className={`sidebar-item ${activeTab === 'taxation' ? 'active' : ''}`}
+                aria-current={activeTab === 'taxation' ? 'page' : undefined}
                 onClick={() => handleNavigate('taxation')}
               >
                 <Percent size={16} />
@@ -314,6 +329,7 @@ const App: React.FC = () => {
             <li>
               <div
                 className={`sidebar-item ${activeTab === 'ask-artha' ? 'active' : ''}`}
+                aria-current={activeTab === 'ask-artha' ? 'page' : undefined}
                 onClick={() => handleNavigate('ask-artha')}
               >
                 <Sparkles size={16} style={{ color: 'var(--accent-light)' }} />
@@ -323,6 +339,7 @@ const App: React.FC = () => {
             <li>
               <div
                 className={`sidebar-item ${activeTab === 'reports' ? 'active' : ''}`}
+                aria-current={activeTab === 'reports' ? 'page' : undefined}
                 onClick={() => handleNavigate('reports')}
               >
                 <FileText size={16} />
@@ -332,6 +349,7 @@ const App: React.FC = () => {
             <li>
               <div
                 className={`sidebar-item ${activeTab === 'settings' ? 'active' : ''}`}
+                aria-current={activeTab === 'settings' ? 'page' : undefined}
                 onClick={() => handleNavigate('settings')}
               >
                 <Sliders size={16} />

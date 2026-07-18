@@ -385,8 +385,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           if (type === 'institution_select') {
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
                 <select
+                  id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || ''}
                   onChange={(e) => handleChange(k, parseInt(e.target.value))}
@@ -406,8 +407,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           if (type === 'person_select') {
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
                 <select
+                  id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || ''}
                   onChange={(e) => handleChange(k, parseInt(e.target.value))}
@@ -428,8 +430,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
             const assetCategories = categories ? categories.filter((c) => c.entity_type === 'Asset') : [];
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Asset Class (Category)</label>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Asset Class (Category)</label>
                 <select
+                  id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || ''}
                   onChange={(e) => handleChange(k, parseInt(e.target.value))}
@@ -450,8 +453,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
             const activeGoals = goals || [];
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Linked Financial Goal</label>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Linked Financial Goal</label>
                 <select
+                  id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || ''}
                   onChange={(e) => handleChange(k, e.target.value)}
@@ -470,8 +474,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           if (type === 'home_loan_select') {
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
                 <select
+                  id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || ''}
                   onChange={(e) => handleChange(k, e.target.value ? parseInt(e.target.value) : null)}
@@ -490,8 +495,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           if (type === 'property_select') {
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
                 <select
+                  id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || ''}
                   onChange={(e) => handleChange(k, e.target.value ? parseInt(e.target.value) : null)}
@@ -510,8 +516,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           if (type === 'select_status') {
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Status</label>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Status</label>
                 <select
+                  id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || 'Active'}
                   onChange={(e) => handleChange(k, e.target.value)}
@@ -527,8 +534,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           if (type === 'select_priority') {
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Priority</label>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Priority</label>
                 <select
+                  id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || 'Medium'}
                   onChange={(e) => handleChange(k, e.target.value)}
@@ -544,8 +552,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           if (type === 'select_risk') {
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Risk Level</label>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Risk Level</label>
                 <select
+                  id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || 'Medium'}
                   onChange={(e) => handleChange(k, e.target.value)}
@@ -561,8 +570,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           if (type === 'select_policy_type') {
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Policy Type</label>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Policy Type</label>
                 <select
+                  id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || 'Life'}
                   onChange={(e) => handleChange(k, e.target.value)}
@@ -578,8 +588,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
 
           return (
             <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
+              <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
               <input
+                id={`field-${k}`}
                 type={type === 'number' ? 'number' : type === 'date' ? 'date' : 'text'}
                 step={type === 'number' ? 'any' : undefined}
                 className="form-control"

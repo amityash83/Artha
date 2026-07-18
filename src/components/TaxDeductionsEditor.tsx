@@ -47,6 +47,7 @@ export const TaxDeductionsEditor: React.FC<TaxDeductionsEditorProps> = ({ deduct
             <div key={i} style={{ display: 'grid', gridTemplateColumns: '0.9fr 1.4fr 1fr 1.2fr auto', gap: '8px', alignItems: 'center' }}>
               <select
                 className="form-control"
+                aria-label={`Section, deduction ${i + 1}`}
                 value={d.section}
                 onChange={(e) => updateDeduction(i, 'section', e.target.value)}
               >
@@ -58,6 +59,7 @@ export const TaxDeductionsEditor: React.FC<TaxDeductionsEditorProps> = ({ deduct
                 type="text"
                 placeholder="Label (e.g. PPF, LIC Premium)"
                 className="form-control"
+                aria-label={`Label, deduction ${i + 1}`}
                 value={d.label}
                 onChange={(e) => updateDeduction(i, 'label', e.target.value)}
               />
@@ -66,6 +68,7 @@ export const TaxDeductionsEditor: React.FC<TaxDeductionsEditorProps> = ({ deduct
                 step="any"
                 placeholder="Amount"
                 className="form-control"
+                aria-label={`Amount, deduction ${i + 1}`}
                 value={d.amount}
                 onChange={(e) => updateDeduction(i, 'amount', parseFloat(e.target.value) || 0)}
               />
@@ -73,6 +76,7 @@ export const TaxDeductionsEditor: React.FC<TaxDeductionsEditorProps> = ({ deduct
                 type="text"
                 placeholder="Notes"
                 className="form-control"
+                aria-label={`Notes, deduction ${i + 1}`}
                 value={d.notes || ''}
                 onChange={(e) => updateDeduction(i, 'notes', e.target.value)}
               />
@@ -81,6 +85,7 @@ export const TaxDeductionsEditor: React.FC<TaxDeductionsEditorProps> = ({ deduct
                 className="btn btn-secondary"
                 style={{ padding: '6px', minWidth: 'auto', borderRadius: '8px' }}
                 onClick={() => removeDeduction(i)}
+                aria-label={`Remove deduction ${i + 1}`}
               >
                 <Trash2 size={13} style={{ color: '#ef4444' }} />
               </button>

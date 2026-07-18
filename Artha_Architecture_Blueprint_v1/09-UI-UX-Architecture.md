@@ -55,12 +55,49 @@ and `Simulations.tsx` (payoff/projection curves).
 
 ## Accessibility
 
-Not implemented. Confirmed via grep: zero `aria-*` attributes, zero
-explicit `role=` attributes, anywhere in `src/`. No keyboard-navigation
-handling beyond native browser/OS behavior for standard form elements
-(`<input>`, `<select>`, `<button>`). This should be treated as a known
-gap, not assumed to be "probably fine" — a genuine accessibility pass
-has not been done.
+A first hardening pass has been done, scoped to shared-pattern fixes
+rather than an exhaustive per-screen audit:
+
+- **Modal/dialog semantics**: all 6 overlay call sites across the app
+  (`AIExplainButton.tsx`, `InfoTooltip.tsx`, `TransactionsLedger.tsx`,
+  `CreditCards.tsx`, `EntityGrid.tsx`, `creditcards/CardLibraryTab.tsx`)
+  use a shared `useModalA11y` hook (`src/hooks/useModalA11y.ts`) that adds
+  Escape-to-close, a Tab/Shift+Tab focus trap, and focus restore to the
+  previously-focused element on close, plus `role="dialog"`,
+  `aria-modal="true"`, and `aria-labelledby`/`aria-label` on each
+  overlay's content panel. This was a deliberate hook rather than a
+  shared `<Modal>` component — the 6 call sites have different enough
+  visual shells that consolidating them into one component's prop
+  contract would have been a bigger restructure than the accessibility
+  fix itself required.
+- **Sidebar navigation**: all `App.tsx` sidebar items carry
+  `aria-current="page"` on the active tab, alongside the existing
+  className-based active-state styling.
+- **Form labels**: `<label>`/`<input>` pairing via `htmlFor`/`id` was
+  swept across every static form field in `DynamicForm.tsx`,
+  `Settings.tsx`, `Taxation.tsx`, `CreditCards.tsx`, and
+  `creditcards/CardLibraryTab.tsx`. Looped/repeated row editors
+  (`HoldingLotsEditor.tsx`, `TaxDeductionsEditor.tsx`,
+  `InsuranceClaimsEditor.tsx`, `InsurancePremiumPaymentsEditor.tsx`,
+  `PropertyRentalLedgerEditor.tsx`) use per-row `aria-label`s instead,
+  since their inputs rely on `placeholder` text with no visible
+  `<label>` to pair — adding one would have been a visual change beyond
+  an accessibility-only fix.
+- **Focus/motion**: a global `:focus-visible` outline rule was added to
+  `src/index.css` (keyboard-only, so mouse clicks don't get a
+  distracting ring) alongside a `prefers-reduced-motion` media query
+  that collapses all animations/transitions to near-zero duration.
+
+Known gaps still open, deliberately out of scope for this pass: no
+Chart.js canvas accessible-description work (`Dashboard.tsx`,
+`LoanOptimizer.tsx`, `Simulations.tsx` charts remain opaque to screen
+readers), no `role="tablist"`/`role="tab"` conversion of in-page tab
+switchers, no conversion of the sidebar's clickable `<div>` items to
+native `<button>` elements (they already work via `onClick` and now
+carry `aria-current`, but lack native keyboard activation semantics —
+a real gap, just not one of the fixes made here), and no automated
+accessibility testing/CI integration (no test suite exists in this repo
+at all). Treat this as "meaningfully improved," not "audited/complete."
 
 ## Responsive Behavior
 

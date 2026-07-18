@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Info, X } from 'lucide-react';
 import { KnowledgeArticle } from '../types';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 interface InfoTooltipProps {
   articles: KnowledgeArticle[];
@@ -17,12 +18,14 @@ interface InfoTooltipProps {
 export const InfoTooltip: React.FC<InfoTooltipProps> = ({ articles, slug, ruleKey, size = 14 }) => {
   const [hovering, setHovering] = useState(false);
   const [modalArticle, setModalArticle] = useState<KnowledgeArticle | null>(null);
+  const modalRef = useModalA11y(!!modalArticle, () => setModalArticle(null));
 
   const article = articles.find((a) => (slug && a.slug === slug) || (ruleKey && a.related_rule_key === ruleKey));
 
   if (!article) return null;
 
   const paragraphs = article.body.split(/\n\s*\n/).filter(Boolean);
+  const titleId = `info-tooltip-title-${slug || ruleKey}`;
 
   return (
     <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
@@ -58,16 +61,26 @@ export const InfoTooltip: React.FC<InfoTooltipProps> = ({ articles, slug, ruleKe
 
       {modalArticle && (
         <div className="modal-overlay" onClick={() => setModalArticle(null)}>
-          <div className="modal-content" style={{ maxWidth: '520px' }} onClick={(e) => e.stopPropagation()}>
+          <div
+            className="modal-content"
+            style={{ maxWidth: '520px' }}
+            onClick={(e) => e.stopPropagation()}
+            ref={modalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            tabIndex={-1}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
               <div>
                 <span style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--accent-light)', fontWeight: 700 }}>
                   {modalArticle.topic}
                 </span>
-                <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#f8fafc', margin: '4px 0 0 0' }}>{modalArticle.title}</h3>
+                <h3 id={titleId} style={{ fontSize: '16px', fontWeight: 700, color: '#f8fafc', margin: '4px 0 0 0' }}>{modalArticle.title}</h3>
               </div>
               <button
                 onClick={() => setModalArticle(null)}
+                aria-label="Close"
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
               >
                 <X size={18} />

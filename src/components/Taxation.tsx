@@ -254,23 +254,23 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
             <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Regime</label>
-                  <select className="form-control" value={formData.regime} onChange={(e) => setFormData({ ...formData, regime: e.target.value as 'Old' | 'New' })}>
+                  <label htmlFor="tax-regime" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Regime</label>
+                  <select id="tax-regime" className="form-control" value={formData.regime} onChange={(e) => setFormData({ ...formData, regime: e.target.value as 'Old' | 'New' })}>
                     <option value="New">New</option>
                     <option value="Old">Old</option>
                   </select>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Age Band</label>
-                  <select className="form-control" value={formData.age_band} onChange={(e) => setFormData({ ...formData, age_band: e.target.value as TaxProfile['age_band'] })}>
+                  <label htmlFor="tax-age-band" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Age Band</label>
+                  <select id="tax-age-band" className="form-control" value={formData.age_band} onChange={(e) => setFormData({ ...formData, age_band: e.target.value as TaxProfile['age_band'] })}>
                     <option value="Below60">Below 60</option>
                     <option value="60to80">60 to 80</option>
                     <option value="Above80">Above 80</option>
                   </select>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Metro City</label>
-                  <select className="form-control" value={formData.is_metro_city ? 'yes' : 'no'} onChange={(e) => setFormData({ ...formData, is_metro_city: e.target.value === 'yes' })}>
+                  <label htmlFor="tax-metro-city" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Metro City</label>
+                  <select id="tax-metro-city" className="form-control" value={formData.is_metro_city ? 'yes' : 'no'} onChange={(e) => setFormData({ ...formData, is_metro_city: e.target.value === 'yes' })}>
                     <option value="no">No</option>
                     <option value="yes">Yes</option>
                   </select>
@@ -281,16 +281,16 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
                 <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc', marginBottom: '10px' }}>HRA Exemption Inputs</h4>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Annual Basic Salary</label>
-                    <input type="number" className="form-control" value={formData.hra_basic_salary} onChange={(e) => setFormData({ ...formData, hra_basic_salary: parseFloat(e.target.value) || 0 })} />
+                    <label htmlFor="tax-hra-basic-salary" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Annual Basic Salary</label>
+                    <input id="tax-hra-basic-salary" type="number" className="form-control" value={formData.hra_basic_salary} onChange={(e) => setFormData({ ...formData, hra_basic_salary: parseFloat(e.target.value) || 0 })} />
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Annual HRA Received</label>
-                    <input type="number" className="form-control" value={formData.hra_received} onChange={(e) => setFormData({ ...formData, hra_received: parseFloat(e.target.value) || 0 })} />
+                    <label htmlFor="tax-hra-received" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Annual HRA Received</label>
+                    <input id="tax-hra-received" type="number" className="form-control" value={formData.hra_received} onChange={(e) => setFormData({ ...formData, hra_received: parseFloat(e.target.value) || 0 })} />
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Annual Rent Paid</label>
-                    <input type="number" className="form-control" value={formData.hra_rent_paid} onChange={(e) => setFormData({ ...formData, hra_rent_paid: parseFloat(e.target.value) || 0 })} />
+                    <label htmlFor="tax-hra-rent-paid" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Annual Rent Paid</label>
+                    <input id="tax-hra-rent-paid" type="number" className="form-control" value={formData.hra_rent_paid} onChange={(e) => setFormData({ ...formData, hra_rent_paid: parseFloat(e.target.value) || 0 })} />
                   </div>
                 </div>
               </div>
@@ -299,20 +299,20 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
                 <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc', marginBottom: '10px' }}>Other Inputs</h4>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Home Loan Interest (Self-Occupied)</label>
-                    <input type="number" className="form-control" value={formData.home_loan_interest_self_occupied} onChange={(e) => setFormData({ ...formData, home_loan_interest_self_occupied: parseFloat(e.target.value) || 0 })} />
+                    <label htmlFor="tax-home-loan-interest" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Home Loan Interest (Self-Occupied)</label>
+                    <input id="tax-home-loan-interest" type="number" className="form-control" value={formData.home_loan_interest_self_occupied} onChange={(e) => setFormData({ ...formData, home_loan_interest_self_occupied: parseFloat(e.target.value) || 0 })} />
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Other Taxable Income</label>
-                    <input type="number" className="form-control" value={formData.other_income_reported} onChange={(e) => setFormData({ ...formData, other_income_reported: parseFloat(e.target.value) || 0 })} />
+                    <label htmlFor="tax-other-income" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Other Taxable Income</label>
+                    <input id="tax-other-income" type="number" className="form-control" value={formData.other_income_reported} onChange={(e) => setFormData({ ...formData, other_income_reported: parseFloat(e.target.value) || 0 })} />
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>TDS Deducted</label>
-                    <input type="number" className="form-control" value={formData.tds_deducted} onChange={(e) => setFormData({ ...formData, tds_deducted: parseFloat(e.target.value) || 0 })} />
+                    <label htmlFor="tax-tds-deducted" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>TDS Deducted</label>
+                    <input id="tax-tds-deducted" type="number" className="form-control" value={formData.tds_deducted} onChange={(e) => setFormData({ ...formData, tds_deducted: parseFloat(e.target.value) || 0 })} />
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Advance Tax Paid</label>
-                    <input type="number" className="form-control" value={formData.advance_tax_paid} onChange={(e) => setFormData({ ...formData, advance_tax_paid: parseFloat(e.target.value) || 0 })} />
+                    <label htmlFor="tax-advance-tax-paid" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Advance Tax Paid</label>
+                    <input id="tax-advance-tax-paid" type="number" className="form-control" value={formData.advance_tax_paid} onChange={(e) => setFormData({ ...formData, advance_tax_paid: parseFloat(e.target.value) || 0 })} />
                   </div>
                 </div>
               </div>

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Sparkles, X, Loader2 } from 'lucide-react';
 import { API_BASE_URL } from '../config';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 interface AIExplainButtonProps {
   aiConfigured: boolean;
@@ -21,6 +22,7 @@ export const AIExplainButton: React.FC<AIExplainButtonProps> = ({
   const [loading, setLoading] = useState(false);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const modalRef = useModalA11y(open, () => setOpen(false));
 
   const handleClick = async () => {
     if (!aiConfigured) return;
@@ -69,12 +71,21 @@ export const AIExplainButton: React.FC<AIExplainButtonProps> = ({
 
       {open && (
         <div className="modal-overlay" onClick={() => setOpen(false)}>
-          <div className="modal-content" style={{ maxWidth: '480px' }} onClick={(e) => e.stopPropagation()}>
+          <div
+            className="modal-content"
+            style={{ maxWidth: '480px' }}
+            onClick={(e) => e.stopPropagation()}
+            ref={modalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ai-explain-title"
+            tabIndex={-1}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
-              <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#f8fafc', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h3 id="ai-explain-title" style={{ fontSize: '15px', fontWeight: 700, color: '#f8fafc', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Sparkles size={16} style={{ color: 'var(--accent-light)' }} /> AI Explanation
               </h3>
-              <button onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+              <button onClick={() => setOpen(false)} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
                 <X size={18} />
               </button>
             </div>

@@ -43,6 +43,7 @@ export const InsurancePremiumPaymentsEditor: React.FC<InsurancePremiumPaymentsEd
               <input
                 type="date"
                 className="form-control"
+                aria-label={`Payment date, payment ${i + 1}`}
                 value={payment.payment_date}
                 onChange={(e) => updatePayment(i, 'payment_date', e.target.value)}
               />
@@ -51,6 +52,7 @@ export const InsurancePremiumPaymentsEditor: React.FC<InsurancePremiumPaymentsEd
                 step="any"
                 placeholder="Amount"
                 className="form-control"
+                aria-label={`Amount, payment ${i + 1}`}
                 value={payment.amount}
                 onChange={(e) => updatePayment(i, 'amount', parseFloat(e.target.value) || 0)}
               />
@@ -58,6 +60,7 @@ export const InsurancePremiumPaymentsEditor: React.FC<InsurancePremiumPaymentsEd
                 type="text"
                 placeholder="Notes"
                 className="form-control"
+                aria-label={`Notes, payment ${i + 1}`}
                 value={payment.notes || ''}
                 onChange={(e) => updatePayment(i, 'notes', e.target.value)}
               />
@@ -66,6 +69,7 @@ export const InsurancePremiumPaymentsEditor: React.FC<InsurancePremiumPaymentsEd
                 className="btn btn-secondary"
                 style={{ padding: '6px', minWidth: 'auto', borderRadius: '8px' }}
                 onClick={() => removePayment(i)}
+                aria-label={`Remove payment ${i + 1}`}
               >
                 <Trash2 size={13} style={{ color: '#ef4444' }} />
               </button>

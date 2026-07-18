@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { InitData } from '../types';
 import { API_BASE_URL } from '../config';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 interface TransactionsLedgerProps {
   data: InitData;
@@ -28,6 +29,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [modalOpen, setModalOpen] = useState<boolean>(false);
+  const modalRef = useModalA11y(modalOpen, () => setModalOpen(false));
   const [editingId, setEditingId] = useState<number | null>(null);
   const [deletingTxId, setDeletingTxId] = useState<number | null>(null);
 
@@ -555,15 +557,24 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
           backgroundColor: 'rgba(15,23,42,0.85)', backdropFilter: 'blur(8px)',
           display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000
         }}>
-          <div className="glass-panel" style={{ width: '100%', maxWidth: '480px', padding: '28px', border: '1px solid var(--border-glass)', position: 'relative' }}>
-            <button 
-              onClick={() => setModalOpen(false)} 
+          <div
+            className="glass-panel"
+            style={{ width: '100%', maxWidth: '480px', padding: '28px', border: '1px solid var(--border-glass)', position: 'relative' }}
+            ref={modalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="txn-modal-title"
+            tabIndex={-1}
+          >
+            <button
+              onClick={() => setModalOpen(false)}
+              aria-label="Close"
               style={{ position: 'absolute', top: '16px', right: '16px', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
             >
               <X size={18} />
             </button>
 
-            <h3 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '20px', color: '#f1f5f9' }}>
+            <h3 id="txn-modal-title" style={{ fontSize: '18px', fontWeight: 600, marginBottom: '20px', color: '#f1f5f9' }}>
               {editingId ? 'Edit Transaction' : 'Log New Transaction'}
             </h3>
 

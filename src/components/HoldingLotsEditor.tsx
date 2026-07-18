@@ -57,6 +57,7 @@ export const HoldingLotsEditor: React.FC<HoldingLotsEditorProps> = ({ lots, onCh
               <input
                 type="date"
                 className="form-control"
+                aria-label={`Purchase date, lot ${i + 1}`}
                 value={lot.purchase_date}
                 onChange={(e) => updateLot(i, 'purchase_date', e.target.value)}
               />
@@ -65,6 +66,7 @@ export const HoldingLotsEditor: React.FC<HoldingLotsEditorProps> = ({ lots, onCh
                 step="any"
                 placeholder="Quantity"
                 className="form-control"
+                aria-label={`Quantity, lot ${i + 1}`}
                 value={lot.quantity}
                 onChange={(e) => updateLot(i, 'quantity', parseFloat(e.target.value) || 0)}
               />
@@ -73,6 +75,7 @@ export const HoldingLotsEditor: React.FC<HoldingLotsEditorProps> = ({ lots, onCh
                 step="any"
                 placeholder="Price / Unit"
                 className="form-control"
+                aria-label={`Price per unit, lot ${i + 1}`}
                 value={lot.price_per_unit}
                 onChange={(e) => updateLot(i, 'price_per_unit', parseFloat(e.target.value) || 0)}
               />
@@ -80,6 +83,7 @@ export const HoldingLotsEditor: React.FC<HoldingLotsEditorProps> = ({ lots, onCh
                 type="text"
                 placeholder="Notes"
                 className="form-control"
+                aria-label={`Notes, lot ${i + 1}`}
                 value={lot.notes || ''}
                 onChange={(e) => updateLot(i, 'notes', e.target.value)}
               />
@@ -88,6 +92,7 @@ export const HoldingLotsEditor: React.FC<HoldingLotsEditorProps> = ({ lots, onCh
                 className="btn btn-secondary"
                 style={{ padding: '6px', minWidth: 'auto', borderRadius: '8px' }}
                 onClick={() => removeLot(i)}
+                aria-label={`Remove lot ${i + 1}`}
               >
                 <Trash2 size={13} style={{ color: '#ef4444' }} />
               </button>
