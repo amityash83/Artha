@@ -350,6 +350,14 @@ def get_init_data():
         cursor.execute("SELECT * FROM people ORDER BY name ASC")
         people = [dict(row) for row in cursor.fetchall()]
 
+        cursor.execute("""
+            SELECT tp.*, p.name as person_name
+            FROM tax_profiles tp
+            LEFT JOIN people p ON tp.person_id = p.id
+            ORDER BY tp.financial_year DESC, p.name ASC
+        """)
+        tax_profiles = [dict(row) for row in cursor.fetchall()]
+
         # Monthly Cash Flows logs
         cursor.execute("SELECT * FROM monthly_cash_flows ORDER BY month DESC")
         cash_flows = [dict(row) for row in cursor.fetchall()]
@@ -404,6 +412,7 @@ def get_init_data():
             "categories": categories,
             "institutions": institutions,
             "people": people,
+            "tax_profiles": tax_profiles,
             "recommendations": recommendations,
             "cash_flows": cash_flows
         }
@@ -433,6 +442,60 @@ def adjust_double_entry_balances(cursor, t_type: str, amount: float, source_type
         cursor.execute("SELECT id FROM liabilities WHERE id = ?", (dest_id,))
         if cursor.fetchone():
             cursor.execute("UPDATE liabilities SET outstanding = outstanding - ? WHERE id = ?", (amount * factor, dest_id))
+
+def record_capital_gains_realization(cursor, asset_id: int, transaction_id: int, sale_value: float, sale_date: str):
+    """
+    Called when a 'Sell' transaction is recorded against a Stock/Mutual Fund/Property
+    asset. FIFO-consumes holding_lots (Stock/Mutual Fund only — Property has no lots,
+    it's a single cost basis) up to the asset's current quantity, logs the resulting
+    LTCG/STCG split into capital_gains_realizations, and reduces/clears the consumed lots.
+    Best-effort estimate only, not tax advice — see calculations.py.
+    """
+    cursor.execute("""
+        SELECT a.owner_id, a.quantity, a.cost_price, a.purchase_date, c.name as category_name
+        FROM assets a JOIN categories c ON a.category_id = c.id
+        WHERE a.id = ?
+    """, (asset_id,))
+    asset = cursor.fetchone()
+    if not asset or asset["category_name"] not in ("Stock", "Mutual Fund", "Property"):
+        return
+
+    financial_year = calc.get_current_financial_year()
+
+    if asset["category_name"] == "Property":
+        cost_basis = float(asset["cost_price"] or 0.0)
+        gain = sale_value - cost_basis
+        gain_type = calc.determine_gain_type(asset["purchase_date"], sale_date, "Property") if asset["purchase_date"] else "STCG"
+        cursor.execute("""
+            INSERT INTO capital_gains_realizations
+            (asset_id, transaction_id, owner_id, asset_category, sale_date, financial_year,
+             quantity_sold, sale_value, cost_basis, gain_amount, gain_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (asset_id, transaction_id, asset["owner_id"], "Property", sale_date, financial_year,
+              1.0, sale_value, cost_basis, gain, gain_type))
+        return
+
+    cursor.execute("SELECT * FROM holding_lots WHERE asset_id = ? ORDER BY purchase_date", (asset_id,))
+    lots = [dict(row) for row in cursor.fetchall()]
+    total_qty = sum(l["quantity"] for l in lots)
+    if total_qty <= 0:
+        return
+    sale_price_per_unit = sale_value / total_qty
+    result = calc.calculate_capital_gains_for_lots(lots, total_qty, sale_price_per_unit, sale_date, asset["category_name"])
+
+    for consumed in result["lots_consumed"]:
+        cursor.execute("""
+            INSERT INTO capital_gains_realizations
+            (asset_id, transaction_id, owner_id, asset_category, sale_date, financial_year,
+             quantity_sold, sale_value, cost_basis, gain_amount, gain_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (asset_id, transaction_id, asset["owner_id"], asset["category_name"], sale_date, financial_year,
+              consumed["quantity_consumed"], consumed["sale_value"], consumed["cost_basis"],
+              consumed["gain"], consumed["gain_type"]))
+
+    # Fully sold: clear all lots. This route always sells the entire current holding
+    # (no partial-sale/lot-selection UI exists yet — see Taxation domain non-goals).
+    cursor.execute("DELETE FROM holding_lots WHERE asset_id = ?", (asset_id,))
 
 # --- Generic CRUD REST API ---
 @app.get("/api/entities/{entity_type}")
@@ -598,7 +661,15 @@ def create_entity(entity_type: str, payload: dict):
                 int(standard_params.get("dest_ref_id")) if standard_params.get("dest_ref_id") is not None else None,
                 "add"
             )
-            
+            if standard_params.get("type") == "Sell" and standard_params.get("source_ref_type") == "Asset" and standard_params.get("source_ref_id"):
+                record_capital_gains_realization(
+                    cursor,
+                    int(standard_params["source_ref_id"]),
+                    entity_id,
+                    float(standard_params.get("amount", 0.0)),
+                    standard_params.get("transaction_date") or date.today().isoformat()
+                )
+
         if entity_type == "assets":
             goal_mapping = payload.get("goal_mapping")
             if goal_mapping:
@@ -1316,6 +1387,334 @@ def delete_goal_funding_constraint(id: int, category_id: int):
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+# --- Taxation Router ---
+# Decision-support estimate only, NOT tax advice. See calculations.py's Taxation
+# section docstrings for the slab/rate assumptions and their limitations.
+
+def get_tax_rule_value(cursor, rule_key: str, default: float) -> float:
+    cursor.execute("SELECT value FROM financial_rules WHERE rule_key = ? AND is_enabled = 1", (rule_key,))
+    row = cursor.fetchone()
+    return float(row["value"]) if row else default
+
+class TaxProfileSchema(BaseModel):
+    person_id: int
+    financial_year: str
+    regime: str = "New"
+    age_band: str = "Below60"
+    hra_rent_paid: float = 0.0
+    hra_basic_salary: float = 0.0
+    hra_received: float = 0.0
+    is_metro_city: bool = False
+    home_loan_interest_self_occupied: float = 0.0
+    other_income_reported: float = 0.0
+    tds_deducted: float = 0.0
+    advance_tax_paid: float = 0.0
+    notes: Optional[str] = None
+
+@app.get("/api/tax-profiles")
+def get_tax_profiles(person_id: Optional[int] = None, financial_year: Optional[str] = None):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        query = """
+            SELECT tp.*, p.name as person_name
+            FROM tax_profiles tp
+            LEFT JOIN people p ON tp.person_id = p.id
+            WHERE 1=1
+        """
+        params = []
+        if person_id is not None:
+            query += " AND tp.person_id = ?"
+            params.append(person_id)
+        if financial_year is not None:
+            query += " AND tp.financial_year = ?"
+            params.append(financial_year)
+        query += " ORDER BY tp.financial_year DESC, p.name ASC"
+        cursor.execute(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+@app.post("/api/tax-profiles")
+def create_tax_profile(profile: TaxProfileSchema):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO tax_profiles
+            (person_id, financial_year, regime, age_band, hra_rent_paid, hra_basic_salary, hra_received,
+             is_metro_city, home_loan_interest_self_occupied, other_income_reported, tds_deducted,
+             advance_tax_paid, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            profile.person_id, profile.financial_year, profile.regime, profile.age_band,
+            profile.hra_rent_paid, profile.hra_basic_salary, profile.hra_received,
+            int(profile.is_metro_city), profile.home_loan_interest_self_occupied,
+            profile.other_income_reported, profile.tds_deducted, profile.advance_tax_paid, profile.notes
+        ))
+        conn.commit()
+        return {"status": "success", "id": cursor.lastrowid}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.put("/api/tax-profiles/{id}")
+def update_tax_profile(id: int, profile: TaxProfileSchema):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            UPDATE tax_profiles SET
+                person_id = ?, financial_year = ?, regime = ?, age_band = ?, hra_rent_paid = ?,
+                hra_basic_salary = ?, hra_received = ?, is_metro_city = ?,
+                home_loan_interest_self_occupied = ?, other_income_reported = ?, tds_deducted = ?,
+                advance_tax_paid = ?, notes = ?
+            WHERE id = ?
+        """, (
+            profile.person_id, profile.financial_year, profile.regime, profile.age_band,
+            profile.hra_rent_paid, profile.hra_basic_salary, profile.hra_received,
+            int(profile.is_metro_city), profile.home_loan_interest_self_occupied,
+            profile.other_income_reported, profile.tds_deducted, profile.advance_tax_paid, profile.notes, id
+        ))
+        conn.commit()
+        return {"status": "success"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.delete("/api/tax-profiles/{id}")
+def delete_tax_profile(id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM tax_profiles WHERE id = ?", (id,))
+        conn.commit()
+        return {"status": "success"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+class TaxDeductionSchema(BaseModel):
+    section: str
+    label: str
+    amount: float = 0.0
+    notes: Optional[str] = None
+
+@app.get("/api/tax-profiles/{id}/deductions")
+def get_tax_deductions(id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM tax_deductions WHERE tax_profile_id = ? ORDER BY section, id", (id,))
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+@app.post("/api/tax-profiles/{id}/deductions")
+def create_tax_deduction(id: int, deduction: TaxDeductionSchema):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO tax_deductions (tax_profile_id, section, label, amount, notes) VALUES (?, ?, ?, ?, ?)",
+            (id, deduction.section, deduction.label, deduction.amount, deduction.notes)
+        )
+        conn.commit()
+        return {"status": "success", "id": cursor.lastrowid}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.put("/api/tax-deductions/{deduction_id}")
+def update_tax_deduction(deduction_id: int, deduction: TaxDeductionSchema):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "UPDATE tax_deductions SET section = ?, label = ?, amount = ?, notes = ? WHERE id = ?",
+            (deduction.section, deduction.label, deduction.amount, deduction.notes, deduction_id)
+        )
+        conn.commit()
+        return {"status": "success"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.delete("/api/tax-deductions/{deduction_id}")
+def delete_tax_deduction(deduction_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM tax_deductions WHERE id = ?", (deduction_id,))
+        conn.commit()
+        return {"status": "success"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.get("/api/tax-profiles/{id}/capital-gains-realizations")
+def get_capital_gains_realizations(id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT person_id, financial_year FROM tax_profiles WHERE id = ?", (id,))
+        profile = cursor.fetchone()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Tax profile not found")
+        cursor.execute("""
+            SELECT cgr.*, a.name as asset_name
+            FROM capital_gains_realizations cgr
+            LEFT JOIN assets a ON cgr.asset_id = a.id
+            WHERE cgr.owner_id = ? AND cgr.financial_year = ?
+            ORDER BY cgr.sale_date DESC
+        """, (profile["person_id"], profile["financial_year"]))
+        return [dict(row) for row in cursor.fetchall()]
+    except HTTPException:
+        raise
+    finally:
+        conn.close()
+
+@app.get("/api/tax-profiles/{id}/estimate")
+def get_tax_estimate(id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM tax_profiles WHERE id = ?", (id,))
+        profile = cursor.fetchone()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Tax profile not found")
+        profile = dict(profile)
+
+        # Configurable limits (financial_rules-backed, hardcoded fallback if absent/disabled)
+        limit_80c = get_tax_rule_value(cursor, "section_80c_limit", 150000.0)
+        limit_80d_self = get_tax_rule_value(cursor, "section_80d_self_limit", 25000.0)
+        limit_80d_parents = get_tax_rule_value(cursor, "section_80d_parents_limit", 25000.0)
+        limit_80d_senior = get_tax_rule_value(cursor, "section_80d_senior_limit", 50000.0)
+        standard_deduction = get_tax_rule_value(cursor, "standard_deduction_salaried", 75000.0)
+        rebate_new = get_tax_rule_value(cursor, "section_87a_rebate_limit_new", 700000.0)
+        rebate_old = get_tax_rule_value(cursor, "section_87a_rebate_limit_old", 500000.0)
+        ltcg_exemption = get_tax_rule_value(cursor, "equity_ltcg_exemption", 125000.0)
+        stcg_rate = get_tax_rule_value(cursor, "equity_stcg_rate", 20.0)
+        ltcg_rate = get_tax_rule_value(cursor, "equity_ltcg_rate", 12.5)
+        property_ltcg_rate = get_tax_rule_value(cursor, "property_ltcg_rate", 12.5)
+        metro_pct = get_tax_rule_value(cursor, "hra_metro_percentage", 50.0)
+        nonmetro_pct = get_tax_rule_value(cursor, "hra_nonmetro_percentage", 40.0)
+
+        # Gross income: taxable income rows owned by this person
+        cursor.execute("SELECT COALESCE(SUM(amount), 0.0) as total FROM income WHERE taxable = 1")
+        gross_income = float(cursor.fetchone()["total"]) + float(profile.get("other_income_reported") or 0.0)
+
+        # Deductions, capped per-section by the configured limits
+        cursor.execute("SELECT section, COALESCE(SUM(amount), 0.0) as total FROM tax_deductions WHERE tax_profile_id = ? GROUP BY section", (id,))
+        section_totals = {row["section"]: float(row["total"]) for row in cursor.fetchall()}
+        capped_80c = min(section_totals.get("80C", 0.0), limit_80c)
+        senior = profile.get("age_band") != "Below60"
+        capped_80d = min(section_totals.get("80D", 0.0), limit_80d_senior if senior else (limit_80d_self + limit_80d_parents))
+        other_sections = sum(v for k, v in section_totals.items() if k not in ("80C", "80D"))
+        total_deductions = capped_80c + capped_80d + other_sections
+
+        hra_exemption = calc.calculate_hra_exemption(
+            float(profile.get("hra_basic_salary") or 0.0),
+            float(profile.get("hra_received") or 0.0),
+            float(profile.get("hra_rent_paid") or 0.0),
+            bool(profile.get("is_metro_city")),
+            metro_pct, nonmetro_pct
+        )
+
+        # Capital gains: on-the-fly estimate from this person's Stock/Mutual Fund/Property
+        # assets, treating current_value as a hypothetical sale price (unrealized estimate,
+        # distinct from the realized capital_gains_realizations log).
+        cursor.execute("""
+            SELECT a.id, a.current_value, c.name as category_name
+            FROM assets a JOIN categories c ON a.category_id = c.id
+            WHERE a.owner_id = ? AND c.name IN ('Stock', 'Mutual Fund', 'Property')
+        """, (profile["person_id"],))
+        cg_assets = cursor.fetchall()
+        total_stcg = 0.0
+        total_ltcg = 0.0
+        total_cg_tax = 0.0
+        today_str = date.today().strftime("%Y-%m-%d")
+        for a in cg_assets:
+            category = a["category_name"]
+            if category == "Property":
+                cursor.execute("SELECT purchase_date, current_value, cost_price FROM assets WHERE id = ?", (a["id"],))
+                prow = cursor.fetchone()
+                if not prow or not prow["purchase_date"]:
+                    continue
+                gain_type = calc.determine_gain_type(prow["purchase_date"], today_str, "Property")
+                gain = float(prow["current_value"] or 0.0) - float(prow["cost_price"] or 0.0)
+                if gain_type == "LTCG":
+                    total_ltcg += max(gain, 0.0)
+                else:
+                    total_stcg += max(gain, 0.0)
+            else:
+                cursor.execute("SELECT * FROM holding_lots WHERE asset_id = ? ORDER BY purchase_date", (a["id"],))
+                lots = [dict(l) for l in cursor.fetchall()]
+                if not lots:
+                    continue
+                total_qty = sum(l["quantity"] for l in lots)
+                if total_qty <= 0:
+                    continue
+                sale_price_per_unit = float(a["current_value"] or 0.0) / total_qty
+                cg = calc.calculate_capital_gains_for_lots(lots, total_qty, sale_price_per_unit, today_str, category)
+                total_stcg += max(cg["stcg_amount"], 0.0)
+                total_ltcg += max(cg["ltcg_amount"], 0.0)
+
+        cg_tax_equity = calc.calculate_capital_gains_tax(total_stcg, total_ltcg, "Stock", ltcg_exemption, stcg_rate, ltcg_rate)
+        total_cg_tax = cg_tax_equity["total_tax"]
+
+        taxable_income_new = max(gross_income - standard_deduction, 0.0)
+        taxable_income_old = max(gross_income - standard_deduction - total_deductions - hra_exemption -
+                                  float(profile.get("home_loan_interest_self_occupied") or 0.0), 0.0)
+
+        comparison = calc.compare_tax_regimes(
+            taxable_income_old, taxable_income_new, profile.get("age_band", "Below60"),
+            rebate_new, rebate_old
+        )
+        recommended_total_tax = comparison[f"{comparison['recommended_regime'].lower()}_regime"]["total_tax"] + total_cg_tax
+        prepaid = float(profile.get("tds_deducted") or 0.0) + float(profile.get("advance_tax_paid") or 0.0)
+
+        return {
+            "financial_year": profile["financial_year"],
+            "gross_income": round(gross_income, 2),
+            "standard_deduction": round(standard_deduction, 2),
+            "total_80c_deductions": round(capped_80c, 2),
+            "total_80d_deductions": round(capped_80d, 2),
+            "other_deductions": round(other_sections, 2),
+            "hra_exemption": round(hra_exemption, 2),
+            "taxable_income_old": round(taxable_income_old, 2),
+            "taxable_income_new": round(taxable_income_new, 2),
+            "capital_gains": {
+                "stcg": round(total_stcg, 2),
+                "ltcg": round(total_ltcg, 2),
+                "tax": round(total_cg_tax, 2),
+            },
+            "old_regime": comparison["old_regime"],
+            "new_regime": comparison["new_regime"],
+            "recommended_regime": comparison["recommended_regime"],
+            "savings_with_recommended": comparison["savings_with_recommended"],
+            "estimated_total_tax": round(recommended_total_tax, 2),
+            "prepaid_taxes": round(prepaid, 2),
+            "estimated_refund_or_due": round(prepaid - recommended_total_tax, 2),
+            "disclaimer": "Estimate only, based on best-effort modeling of recent Indian tax law. Not tax advice — verify against the current Finance Act before filing.",
+        }
+    except HTTPException:
+        raise
     finally:
         conn.close()
 

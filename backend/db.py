@@ -403,6 +403,71 @@ def init_db():
     )
     """)
 
+    # Taxation domain (per-person, per-financial-year tax profile + itemized deductions +
+    # realized capital-gains log). Regime/HRA inputs live on tax_profiles; itemized 80C/80D/etc
+    # entries are a satellite table since each section bundles multiple concurrent instruments.
+    # Progressive slab brackets are NOT stored here — see calculations.py's TAX_SLABS, since a
+    # multi-bracket table doesn't fit financial_rules' one-value-per-key shape. Only the few
+    # genuinely-scalar, frequently-revised limits (80C cap, 80D caps, standard deduction, 87A
+    # rebate threshold, equity LTCG exemption/rates) live in financial_rules (seeded below).
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tax_profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+        financial_year TEXT NOT NULL,
+        regime TEXT NOT NULL DEFAULT 'New' CHECK(regime IN ('Old', 'New')),
+        age_band TEXT NOT NULL DEFAULT 'Below60' CHECK(age_band IN ('Below60', '60to80', 'Above80')),
+        hra_rent_paid REAL DEFAULT 0.0,
+        hra_basic_salary REAL DEFAULT 0.0,
+        hra_received REAL DEFAULT 0.0,
+        is_metro_city INTEGER NOT NULL DEFAULT 0,
+        home_loan_interest_self_occupied REAL DEFAULT 0.0,
+        other_income_reported REAL DEFAULT 0.0,
+        tds_deducted REAL DEFAULT 0.0,
+        advance_tax_paid REAL DEFAULT 0.0,
+        notes TEXT,
+        UNIQUE(person_id, financial_year)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tax_profiles_person ON tax_profiles(person_id)")
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tax_deductions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tax_profile_id INTEGER NOT NULL REFERENCES tax_profiles(id) ON DELETE CASCADE,
+        section TEXT NOT NULL CHECK(section IN ('80C', '80D', '80CCD1B', '80E', '80G', '80TTA', '24B', 'Other')),
+        label TEXT NOT NULL,
+        amount REAL NOT NULL DEFAULT 0.0,
+        notes TEXT
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tax_deductions_profile ON tax_deductions(tax_profile_id)")
+
+    # Realized capital gains log — one row per Sell event, populated when a Sell transaction
+    # is recorded against a Stock/Mutual Fund/Property asset (see main.py's transactions
+    # handling). Kept distinct from the on-the-fly estimate computed from holding_lots, since
+    # lots are consumed on sale and history would otherwise be unrecoverable for FY reporting.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS capital_gains_realizations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+        transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL,
+        owner_id INTEGER NOT NULL REFERENCES people(id),
+        asset_category TEXT NOT NULL,
+        sale_date TEXT NOT NULL,
+        financial_year TEXT NOT NULL,
+        quantity_sold REAL NOT NULL DEFAULT 0.0,
+        sale_value REAL NOT NULL DEFAULT 0.0,
+        cost_basis REAL NOT NULL DEFAULT 0.0,
+        gain_amount REAL NOT NULL DEFAULT 0.0,
+        gain_type TEXT NOT NULL CHECK(gain_type IN ('LTCG', 'STCG')),
+        tax_rate_applied REAL DEFAULT 0.0,
+        notes TEXT
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_cgr_asset ON capital_gains_realizations(asset_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_cgr_owner_fy ON capital_gains_realizations(owner_id, financial_year)")
+
     # Transactions (Normalized schema)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS transactions (
@@ -804,6 +869,32 @@ def init_db():
     ]
 
     for rule_key, rule_name, desc, val, cat, enabled in default_rules:
+        cursor.execute("""
+        INSERT OR IGNORE INTO financial_rules (rule_key, rule_name, description, value, category, is_enabled)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """, (rule_key, rule_name, desc, val, cat, enabled))
+
+    # Taxation domain scalar limits. These are a best-effort snapshot of recent Indian
+    # tax law — NOT tax advice, they will go stale as Finance Acts change, which is
+    # exactly why they're editable via Settings > Financial Rules rather than hardcoded.
+    # Progressive slab brackets (which can't be a single value) live in calculations.py's
+    # TAX_SLABS instead.
+    default_tax_rules = [
+        ("section_80c_limit", "Section 80C Deduction Limit", "Combined annual cap for 80C investments (PPF/ELSS/life insurance/etc.)", 150000.0, "Taxation", 1),
+        ("section_80d_self_limit", "Section 80D Limit (Self/Family, Non-Senior)", "Health insurance premium deduction cap, self/family under 60", 25000.0, "Taxation", 1),
+        ("section_80d_parents_limit", "Section 80D Limit (Parents, Non-Senior)", "Health insurance premium deduction cap for non-senior parents", 25000.0, "Taxation", 1),
+        ("section_80d_senior_limit", "Section 80D Limit (Senior Citizen)", "Health insurance premium deduction cap when insured is 60+", 50000.0, "Taxation", 1),
+        ("standard_deduction_salaried", "Standard Deduction (Salaried)", "Flat deduction against salary income, both regimes", 75000.0, "Taxation", 1),
+        ("section_87a_rebate_limit_new", "Section 87A Rebate Threshold (New Regime)", "Taxable income up to which tax is fully rebated under the new regime", 700000.0, "Taxation", 1),
+        ("section_87a_rebate_limit_old", "Section 87A Rebate Threshold (Old Regime)", "Taxable income up to which tax is fully rebated under the old regime", 500000.0, "Taxation", 1),
+        ("equity_ltcg_exemption", "Equity LTCG Annual Exemption", "Annual exempt amount of LTCG on listed equity/equity MFs before tax applies", 125000.0, "Taxation", 1),
+        ("equity_stcg_rate", "Equity STCG Tax Rate (%)", "Flat tax rate on short-term capital gains from listed equity/equity MFs", 20.0, "Taxation", 1),
+        ("equity_ltcg_rate", "Equity LTCG Tax Rate (%)", "Flat tax rate on long-term capital gains from listed equity/equity MFs above exemption", 12.5, "Taxation", 1),
+        ("property_ltcg_rate", "Property LTCG Tax Rate (%)", "Flat tax rate on long-term capital gains from property (without indexation, current rules)", 12.5, "Taxation", 1),
+        ("hra_metro_percentage", "HRA Metro Exemption Percentage", "Percentage of basic salary used in HRA exemption calc for metro cities", 50.0, "Taxation", 1),
+        ("hra_nonmetro_percentage", "HRA Non-Metro Exemption Percentage", "Percentage of basic salary used in HRA exemption calc for non-metro cities", 40.0, "Taxation", 1),
+    ]
+    for rule_key, rule_name, desc, val, cat, enabled in default_tax_rules:
         cursor.execute("""
         INSERT OR IGNORE INTO financial_rules (rule_key, rule_name, description, value, category, is_enabled)
         VALUES (?, ?, ?, ?, ?, ?)

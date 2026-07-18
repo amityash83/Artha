@@ -191,6 +191,79 @@ export interface Goal {
   status?: string;
 }
 
+export interface TaxDeduction {
+  id?: number;
+  tax_profile_id?: number;
+  section: '80C' | '80D' | '80CCD1B' | '80E' | '80G' | '80TTA' | '24B' | 'Other';
+  label: string;
+  amount: number;
+  notes?: string;
+}
+
+export interface TaxProfile {
+  id: number;
+  person_id: number;
+  person_name?: string;
+  financial_year: string;
+  regime: 'Old' | 'New';
+  age_band: 'Below60' | '60to80' | 'Above80';
+  hra_rent_paid: number;
+  hra_basic_salary: number;
+  hra_received: number;
+  is_metro_city: boolean;
+  home_loan_interest_self_occupied: number;
+  other_income_reported: number;
+  tds_deducted: number;
+  advance_tax_paid: number;
+  notes?: string;
+}
+
+export interface CapitalGainsRealization {
+  id: number;
+  asset_id: number;
+  asset_name?: string;
+  transaction_id?: number;
+  owner_id: number;
+  asset_category: string;
+  sale_date: string;
+  financial_year: string;
+  quantity_sold: number;
+  sale_value: number;
+  cost_basis: number;
+  gain_amount: number;
+  gain_type: 'LTCG' | 'STCG';
+  tax_rate_applied?: number;
+  notes?: string;
+}
+
+export interface RegimeResult {
+  gross_tax: number;
+  rebate_87a: number;
+  cess: number;
+  total_tax: number;
+}
+
+export interface TaxEstimate {
+  financial_year: string;
+  gross_income: number;
+  standard_deduction: number;
+  total_80c_deductions: number;
+  total_80d_deductions: number;
+  other_deductions: number;
+  hra_exemption: number;
+  taxable_income_old: number;
+  taxable_income_new: number;
+  capital_gains: { stcg: number; ltcg: number; tax: number };
+  old_regime: RegimeResult;
+  new_regime: RegimeResult;
+  recommended_regime: 'Old' | 'New';
+  savings_with_recommended: number;
+  estimated_total_tax: number;
+  prepaid_taxes: number;
+  estimated_refund_or_due: number;
+  disclaimer: string;
+}
+
 export interface FinancialRule {
   id: number;
   rule_key: string;
@@ -256,6 +329,7 @@ export interface InitData {
   categories: Category[];
   institutions: Institution[];
   people: Person[];
+  tax_profiles: TaxProfile[];
   recommendations: Recommendation[];
   cash_flows: MonthlyCashFlow[];
 }
