@@ -30,20 +30,27 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
   const [customBackupDir, setCustomBackupDir] = useState('');
   const [saveSettingsStatus, setSaveSettingsStatus] = useState<string | null>(null);
 
-  // Rules, Categories, Institutions metadata states
+  // Rules, Categories, Institutions, People metadata states
   const [rules, setRules] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [institutions, setInstitutions] = useState<any[]>([]);
+  const [people, setPeople] = useState<any[]>([]);
 
   // Form states for creating custom metadata
   const [newCatName, setNewCatName] = useState('');
   const [newCatType, setNewCatType] = useState('Asset');
   const [newInstName, setNewInstName] = useState('');
+  const [newPersonName, setNewPersonName] = useState('');
+  const [newPersonRole, setNewPersonRole] = useState('Primary Owner');
   const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
   const [editingInstId, setEditingInstId] = useState<number | null>(null);
   const [editingInstName, setEditingInstName] = useState<string>('');
+  const [editingPersonId, setEditingPersonId] = useState<number | null>(null);
+  const [editingPersonName, setEditingPersonName] = useState<string>('');
+  const [editingPersonRole, setEditingPersonRole] = useState<string>('Primary Owner');
   const [deletingCategoryId, setDeletingCategoryId] = useState<number | null>(null);
   const [deletingInstId, setDeletingInstId] = useState<number | null>(null);
+  const [deletingPersonId, setDeletingPersonId] = useState<number | null>(null);
   const [restoringBackupFilename, setRestoringBackupFilename] = useState<string | null>(null);
   const [customFields, setCustomFields] = useState<Array<{ name: string; label: string; type: 'text' | 'number' | 'date' }>>([]);
 
@@ -57,6 +64,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
     fetchRulesList();
     fetchCategoriesList();
     fetchInstitutionsList();
+    fetchPeopleList();
   }, []);
 
   const fetchRulesList = () => {
@@ -79,6 +87,16 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
       .then(data => {
         const sorted = Array.isArray(data) ? [...data].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })) : data;
         setInstitutions(sorted);
+      })
+      .catch(err => console.error(err));
+  };
+
+  const fetchPeopleList = () => {
+    fetch(`${API_BASE_URL}/api/metadata/people`)
+      .then(res => res.json())
+      .then(data => {
+        const sorted = Array.isArray(data) ? [...data].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })) : data;
+        setPeople(sorted);
       })
       .catch(err => console.error(err));
   };
@@ -186,7 +204,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
     }
   };
 
-  const handleDeleteMetadata = async (type: 'categories' | 'institutions', id: number) => {
+  const handleDeleteMetadata = async (type: 'categories' | 'institutions' | 'people', id: number) => {
     try {
       setMetaStatus("Deleting metadata item...");
       const res = await fetch(`${API_BASE_URL}/api/metadata/${type}/${id}`, {
@@ -196,8 +214,10 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
         setMetaStatus("Metadata item deleted successfully.");
         setDeletingCategoryId(null);
         setDeletingInstId(null);
+        setDeletingPersonId(null);
         if (type === 'categories') fetchCategoriesList();
-        else fetchInstitutionsList();
+        else if (type === 'institutions') fetchInstitutionsList();
+        else fetchPeopleList();
         onRefresh();
         setTimeout(() => setMetaStatus(null), 3000);
       } else {
@@ -243,6 +263,63 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
     } catch (err) {
       console.error(err);
       setMetaStatus("Error updating institution");
+    }
+  };
+
+  const handleAddPerson = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPersonName) return;
+    try {
+      setMetaStatus("Adding Person...");
+      const res = await fetch(`${API_BASE_URL}/api/metadata/people`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newPersonName.trim(), role: newPersonRole })
+      });
+      if (res.ok) {
+        setMetaStatus("Person added successfully!");
+        setNewPersonName('');
+        setNewPersonRole('Primary Owner');
+        fetchPeopleList();
+        onRefresh();
+        setTimeout(() => setMetaStatus(null), 3000);
+      } else {
+        setMetaStatus("Failed to add person");
+      }
+    } catch (err) {
+      console.error(err);
+      setMetaStatus("Error adding person");
+    }
+  };
+
+  const handleEditPerson = (id: number, currentName: string, currentRole: string) => {
+    setEditingPersonId(id);
+    setEditingPersonName(currentName);
+    setEditingPersonRole(currentRole);
+  };
+
+  const handleSavePersonEdit = async (id: number) => {
+    if (!editingPersonName || editingPersonName.trim() === '') return;
+    try {
+      setMetaStatus("Updating person...");
+      const res = await fetch(`${API_BASE_URL}/api/metadata/people/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: editingPersonName.trim(), role: editingPersonRole })
+      });
+      if (res.ok) {
+        setMetaStatus("Person updated successfully.");
+        setEditingPersonId(null);
+        fetchPeopleList();
+        onRefresh();
+        setTimeout(() => setMetaStatus(null), 3000);
+      } else {
+        const err = await res.json();
+        setMetaStatus(`Failed to update person: ${err.detail || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error(err);
+      setMetaStatus("Error updating person");
     }
   };
 
@@ -1003,6 +1080,137 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
                     </div>
                   );
                 })}
+              </div>
+            </div>
+
+            {/* People Management List */}
+            <div style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: '12px', padding: '16px', marginTop: '12px' }}>
+              <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent-light)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px', borderBottom: '1px dashed rgba(255,255,255,0.05)', paddingBottom: '4px' }}>
+                People (Account/Portfolio Owners)
+              </h4>
+
+              {/* Inline Simplified Creator Form */}
+              <form onSubmit={handleAddPerson} style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                <input
+                  type="text"
+                  className="form-control"
+                  style={{ flex: 1, padding: '6px 12px', fontSize: '12px', height: '32px' }}
+                  placeholder="Add a person... (e.g. Amit Mishra)"
+                  required
+                  value={newPersonName}
+                  onChange={e => setNewPersonName(e.target.value)}
+                />
+                <select
+                  className="form-control"
+                  style={{ padding: '6px 12px', fontSize: '12px', height: '32px', minWidth: '130px' }}
+                  value={newPersonRole}
+                  onChange={e => setNewPersonRole(e.target.value)}
+                >
+                  <option value="Primary Owner">Primary Owner</option>
+                  <option value="Spouse">Spouse</option>
+                  <option value="Dependent">Dependent</option>
+                </select>
+                <button type="submit" className="btn btn-primary" style={{ padding: '0 16px', fontSize: '12px', height: '32px' }}>
+                  Add
+                </button>
+              </form>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', overflowY: 'auto', paddingRight: '4px' }}>
+                {people.map((person: any) => {
+                  const isEditing = editingPersonId === person.id;
+                  const isDeleting = deletingPersonId === person.id;
+                  return (
+                    <div key={person.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: '8px', fontSize: '12px' }}>
+                      {isEditing ? (
+                        <div style={{ display: 'flex', gap: '8px', flex: 1, alignItems: 'center' }}>
+                          <input
+                            type="text"
+                            className="form-control"
+                            style={{ flex: 1, padding: '4px 8px', fontSize: '12px', height: '28px' }}
+                            value={editingPersonName}
+                            onChange={e => setEditingPersonName(e.target.value)}
+                            required
+                          />
+                          <select
+                            className="form-control"
+                            style={{ padding: '4px 8px', fontSize: '12px', height: '28px', minWidth: '110px' }}
+                            value={editingPersonRole}
+                            onChange={e => setEditingPersonRole(e.target.value)}
+                          >
+                            <option value="Primary Owner">Primary Owner</option>
+                            <option value="Spouse">Spouse</option>
+                            <option value="Dependent">Dependent</option>
+                          </select>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ padding: '4px 8px', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', color: '#10b981', minWidth: 'auto', height: '28px' }}
+                            onClick={() => handleSavePersonEdit(person.id)}
+                          >
+                            <Check size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ padding: '4px 8px', minWidth: 'auto', height: '28px' }}
+                            onClick={() => setEditingPersonId(null)}
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ) : isDeleting ? (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flex: 1 }}>
+                          <span style={{ color: 'var(--danger-light)', fontWeight: 500 }}>Confirm Delete?</span>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ padding: '4px 8px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444', minWidth: 'auto', height: '26px' }}
+                              onClick={() => handleDeleteMetadata('people', person.id)}
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ padding: '4px 8px', minWidth: 'auto', height: '26px' }}
+                              onClick={() => setDeletingPersonId(null)}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <span style={{ fontWeight: 500 }}>{person.name} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>({person.role})</span></span>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ padding: '4px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px' }}
+                              onClick={() => handleEditPerson(person.id, person.name, person.role)}
+                            >
+                              <Edit2 size={11} style={{ color: 'var(--info)' }} />
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ padding: '4px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px' }}
+                              onClick={() => setDeletingPersonId(person.id)}
+                            >
+                              <Trash2 size={11} style={{ color: '#ef4444' }} />
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+                {people.length === 0 && (
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic', padding: '8px 0' }}>
+                    No people added yet. Add one above, then it becomes selectable as an Account's Owner.
+                  </div>
+                )}
               </div>
             </div>
           </div>
