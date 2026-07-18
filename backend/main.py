@@ -38,15 +38,20 @@ def _parse_allowed_origins() -> list:
     if raw:
         return [o.strip() for o in raw.split(",") if o.strip()]
     # Safe default matching today's real desktop/dev usage (Vite dev server
-    # only) — never silently falls back to "*". Docker/web deployments that
-    # need a different browser-facing origin must set ARTHA_ALLOWED_ORIGINS
-    # explicitly. Packaged Electron loads the frontend via file:// and either
-    # sends no Origin header or "null", neither of which needs (or should be)
-    # listed here — CORS is a browser-enforced, not server-enforced, concept
-    # and doesn't apply to that request shape.
+    # only) — never silently falls back to "*". Derived from ARTHA_FRONTEND_PORT
+    # (same env var electron/main.js and vite.config.mts already read, default
+    # 5173) so this stays correct for any dev setup that overrides the frontend
+    # port — e.g. start.sh's 5183 default — without also having to set
+    # ARTHA_ALLOWED_ORIGINS by hand. Docker/web deployments that need a
+    # different browser-facing origin (a real hostname, HTTPS, etc.) must still
+    # set ARTHA_ALLOWED_ORIGINS explicitly. Packaged Electron loads the
+    # frontend via file:// and either sends no Origin header or "null", neither
+    # of which needs (or should be) listed here — CORS is a browser-enforced,
+    # not server-enforced, concept and doesn't apply to that request shape.
+    frontend_port = os.environ.get("ARTHA_FRONTEND_PORT", "5173").strip() or "5173"
     return [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
+        f"http://localhost:{frontend_port}",
+        f"http://127.0.0.1:{frontend_port}",
     ]
 
 # Enable CORS for frontend development

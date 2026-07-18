@@ -14,6 +14,14 @@ cd "$ROOT_DIR"
 
 export ARTHA_BACKEND_PORT="${ARTHA_BACKEND_PORT:-8010}"
 export ARTHA_FRONTEND_PORT="${ARTHA_FRONTEND_PORT:-5183}"
+# The backend's CORS allowlist defaults to Vite's own default port (5173),
+# not whatever ARTHA_FRONTEND_PORT resolves to here — without this, requests
+# from this script's frontend get silently blocked by the browser, and the
+# renderer's retry loop looks identical to "backend not responding" even
+# though the backend is up. Respect an explicitly-set ARTHA_ALLOWED_ORIGINS
+# as-is (e.g. to add a LAN origin); otherwise derive it from the frontend
+# port so the two never drift out of sync.
+export ARTHA_ALLOWED_ORIGINS="${ARTHA_ALLOWED_ORIGINS:-http://localhost:${ARTHA_FRONTEND_PORT},http://127.0.0.1:${ARTHA_FRONTEND_PORT}}"
 
 PID_DIR="$ROOT_DIR/.run"
 mkdir -p "$PID_DIR"
@@ -59,7 +67,7 @@ else
     echo "See what's using it: lsof -i :${ARTHA_BACKEND_PORT}"
     exit 1
   fi
-  echo "Starting FastAPI backend on 127.0.0.1:${ARTHA_BACKEND_PORT}..."
+  echo "Starting FastAPI backend on 127.0.0.1:${ARTHA_BACKEND_PORT} (CORS allowlist: ${ARTHA_ALLOWED_ORIGINS})..."
   FINANCE_DB_DIR="$DATA_DIR" ./venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port "$ARTHA_BACKEND_PORT" \
     > "$PID_DIR/backend.log" 2>&1 &
   echo $! > "$PID_DIR/backend.pid"
