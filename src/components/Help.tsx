@@ -272,24 +272,41 @@ const SECTIONS: HelpSection[] = [
         <H4>Current Value vs. coverage amount — two different numbers</H4>
         <p>
           "Current Value" (on the main asset record) and the policy's coverage figure (sum assured / sum insured /
-          IDV, depending on type) are tracked completely independently — one does not calculate or influence the
-          other.
+          IDV, depending on type) measure different things, and the Assets grid shows them as separate columns
+          (Current Value and Cover).
         </p>
         <Bullets items={[
-          <><strong>Current Value</strong> is meant to represent any cash/surrender value the policy has today — for a Term policy, this is legitimately <strong>₹0</strong>, since a pure Term plan has no cash value to redeem.</>,
-          <><strong>Sum Assured / Sum Insured / IDV</strong> is the coverage amount — what would be paid out on a claim.</>,
+          <><strong>Current Value</strong> is the policy's cash/surrender value today — what the insurer would pay you to exit. Saving a policy's <strong>Surrender Value</strong> field automatically sets Current Value, so it flows into net worth, asset allocation, and any linked goal's progress. For a Term policy this is legitimately <strong>₹0</strong>, since a pure Term plan has no cash value to redeem.</>,
+          <><strong>Cover (Sum Assured / Sum Insured / IDV)</strong> is the protection amount — what would be paid out on a claim. It is never counted in net worth.</>,
+          <><strong>Premiums Paid</strong> is your cost basis — the sum of payments logged in Premium Payment History (or the Invested Amount field if no payments are logged yet).</>,
         ]} />
         <Note>Don't be alarmed if Current Value shows ₹0 on a Term policy — that's expected, not a bug.</Note>
+
+        <H4>How to find your surrender value</H4>
+        <p>
+          Only traditional/endowment life policies acquire a surrender value (usually after 2–3 full years of
+          premiums). Term, Health, and Vehicle policies have none — leave theirs at ₹0.
+        </p>
+        <Bullets items={[
+          <><strong>LIC</strong>: log in to the LIC customer portal (licindia.in) → Policy Status, which shows surrender value for most policies — or ask any LIC branch for a surrender-value quote with your policy number.</>,
+          <><strong>Private insurers (HDFC Life, Bajaj Allianz, etc.)</strong>: the insurer's app or customer portal usually shows it under policy details; otherwise request a quote via their helpline.</>,
+          <>Insurers may quote two figures: the <strong>Guaranteed Surrender Value</strong> (a formula percentage of premiums paid) and the <strong>Special Surrender Value</strong> (usually higher, based on paid-up value and accrued bonuses). Enter the special/actual quote — that's what they would really pay.</>,
+        ]} />
+        <p>
+          Surrender values change with each premium paid and bonus declaration — refreshing them once or twice a
+          year (say, at policy anniversary) is plenty. Enter it via Assets → Insurance → edit the policy →
+          Surrender Value → Save.
+        </p>
 
         <H4>Claims and premium history</H4>
         <p>Each insurance asset has two optional history logs you can maintain:</p>
         <Bullets items={[
           <><strong>Adding a claim</strong>: open the policy, find Claims History, click Add Claim, and record the date, amount, status (Filed/Approved/Rejected/Settled), and a short description.</>,
-          <><strong>Recording a premium payment</strong>: open the policy, find Premium Payment History, click Add Payment, and record the date, amount, and any notes.</>,
+          <><strong>Recording a premium payment</strong>: open the policy, find Premium Payment History, click Add Payment, and record the date, amount, and any notes. Logged payments add up into the Premiums Paid column on the Assets grid.</>,
         ]} />
         <p>
-          These histories are informational logs for your own record-keeping — they don't automatically update the
-          policy's claims-made/claims-amount summary fields, so if you track both, keep them consistent yourself.
+          The claims log is an informational record — it doesn't automatically update the policy's
+          claims-made/claims-amount summary fields, so if you track both, keep them consistent yourself.
         </p>
       </>
     ),
