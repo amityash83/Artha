@@ -140,23 +140,21 @@ export const CardLibraryTab: React.FC<CardLibraryTabProps> = ({ cardVariants, on
                     <div style={{ fontSize: '14px', fontWeight: 700, color: '#f8fafc' }}>{v.name}</div>
                     <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{v.issuer} &middot; {v.network} &middot; {v.card_tier}</div>
                   </div>
-                  {!v.is_seeded && (
-                    <div style={{ display: 'flex', gap: '4px' }}>
-                      <button className="btn btn-secondary" style={{ padding: '4px', minWidth: 'auto', borderRadius: '6px' }} onClick={() => openEdit(v)}>
-                        <Edit2 size={11} style={{ color: 'var(--info)' }} />
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <button className="btn btn-secondary" style={{ padding: '4px', minWidth: 'auto', borderRadius: '6px' }} onClick={() => openEdit(v)}>
+                      <Edit2 size={11} style={{ color: 'var(--info)' }} />
+                    </button>
+                    {deletingId === v.id ? (
+                      <>
+                        <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '10px', color: '#ef4444' }} onClick={() => handleDelete(v.id)}>Confirm</button>
+                        <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '10px' }} onClick={() => setDeletingId(null)}>Cancel</button>
+                      </>
+                    ) : (
+                      <button className="btn btn-secondary" style={{ padding: '4px', minWidth: 'auto', borderRadius: '6px' }} onClick={() => setDeletingId(v.id)}>
+                        <Trash2 size={11} style={{ color: '#ef4444' }} />
                       </button>
-                      {deletingId === v.id ? (
-                        <>
-                          <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '10px', color: '#ef4444' }} onClick={() => handleDelete(v.id)}>Confirm</button>
-                          <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '10px' }} onClick={() => setDeletingId(null)}>Cancel</button>
-                        </>
-                      ) : (
-                        <button className="btn btn-secondary" style={{ padding: '4px', minWidth: 'auto', borderRadius: '6px' }} onClick={() => setDeletingId(v.id)}>
-                          <Trash2 size={11} style={{ color: '#ef4444' }} />
-                        </button>
-                      )}
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '11.5px', color: 'var(--text-secondary)' }}>

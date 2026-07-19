@@ -248,6 +248,11 @@ def init_db():
     # Compare Cards, and so a chosen variant can prefill a new card's details with
     # zero transformation. Static reference data only — Artha never fetches live
     # card data — is_seeded distinguishes shipped starter rows from user entries.
+    # Existence is checked BEFORE the CREATE so the starter catalogue (seeded further
+    # below) runs exactly once, on the run that first creates the table — reseeding on
+    # every startup would resurrect starter cards the user deliberately deleted or renamed.
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='card_variants'")
+    card_variants_table_existed = cursor.fetchone() is not None
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS card_variants (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1035,8 +1040,10 @@ def init_db():
         print("[Migration Warning] no_villa_equity rule removal error:", e)
 
     # Card Library starter catalogue. Indicative terms only, not fetched from any live
-    # source — verify current offers with the issuer before applying. UNIQUE(name, issuer)
-    # on card_variants makes this INSERT OR IGNORE idempotent across repeated init_db() runs.
+    # source — verify current offers with the issuer before applying. Seeded ONLY when
+    # the card_variants table was just created (see card_variants_table_existed above):
+    # blind INSERT OR IGNORE on every startup would re-inject starter cards the user
+    # has since deleted or renamed (docs/memory.md, "Database Seeding Safety").
     source_note = "Indicative terms, verify current offer with issuer before applying — Artha does not fetch live card data."
     default_card_variants = [
         {
@@ -1194,20 +1201,22 @@ def init_db():
             "cons_json": json.dumps(["Higher category multiplier limited to select spends"]),
         },
     ]
-    for v in default_card_variants:
-        cursor.execute("""
-        INSERT OR IGNORE INTO card_variants
-        (name, issuer, network, card_tier, joining_fee, annual_fee, fee_waiver_spend,
-         base_points, base_spend, point_value, lounge_visits_domestic, lounge_visits_international,
-         eligibility_notes, category_rules_json, milestone_rules_json, redemption_partners_json,
-         pros_json, cons_json, is_seeded, source_notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-        """, (
-            v["name"], v["issuer"], v["network"], v["card_tier"], v["joining_fee"], v["annual_fee"], v["fee_waiver_spend"],
-            v["base_points"], v["base_spend"], v["point_value"], v["lounge_visits_domestic"], v["lounge_visits_international"],
-            v["eligibility_notes"], v["category_rules_json"], v["milestone_rules_json"], v["redemption_partners_json"],
-            v["pros_json"], v["cons_json"], source_note
-        ))
+    if not card_variants_table_existed:
+        for v in default_card_variants:
+            cursor.execute("""
+            INSERT OR IGNORE INTO card_variants
+            (name, issuer, network, card_tier, joining_fee, annual_fee, fee_waiver_spend,
+             base_points, base_spend, point_value, lounge_visits_domestic, lounge_visits_international,
+             eligibility_notes, category_rules_json, milestone_rules_json, redemption_partners_json,
+             pros_json, cons_json, is_seeded, source_notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+            """, (
+                v["name"], v["issuer"], v["network"], v["card_tier"], v["joining_fee"], v["annual_fee"], v["fee_waiver_spend"],
+                v["base_points"], v["base_spend"], v["point_value"], v["lounge_visits_domestic"], v["lounge_visits_international"],
+                v["eligibility_notes"], v["category_rules_json"], v["milestone_rules_json"], v["redemption_partners_json"],
+                v["pros_json"], v["cons_json"], source_note
+            ))
+        print(f"[Seed] Card Library starter catalogue seeded ({len(default_card_variants)} variants).")
 
     # Knowledge Base starter content. Plain-language explainers, not tax/legal advice —
     # numeric thresholds live in financial_rules/calculations.py; these articles explain

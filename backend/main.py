@@ -1029,6 +1029,11 @@ def update_card_variant(id: int, variant: CardVariantSchema):
             raise HTTPException(status_code=404, detail="Card variant not found")
         payload = variant.dict()
         payload["id"] = id
+        # Editing a starter-catalogue card makes it the user's own copy: is_seeded
+        # drops to 0 so "Starter Catalogue" in the UI always means untouched shipped
+        # reference data. (Seeding runs only on table creation, so the pristine row
+        # is not resurrected either — see init_db in db.py.)
+        payload["is_seeded"] = 0
         set_clauses = [f"{c} = :{c}" for c in payload.keys() if c != "id"]
         cursor.execute(
             f"UPDATE card_variants SET {', '.join(set_clauses)}, updated_at = datetime('now') WHERE id = :id",
