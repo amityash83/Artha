@@ -214,6 +214,7 @@ def get_init_data():
                 a.*,
                 i.name as institution_name,
                 p.name as owner_name,
+                c.name as category_name,
                 (
                     SELECT COALESCE(SUM(t.amount), 0.0)
                     FROM transactions t
@@ -222,10 +223,17 @@ def get_init_data():
                     SELECT COALESCE(SUM(t.amount), 0.0)
                     FROM transactions t
                     WHERE t.source_ref_type = 'Account' AND t.source_ref_id = a.id
-                ) AS current_balance
+                ) AS current_balance,
+                (
+                    SELECT COALESCE(SUM(t.amount), 0.0)
+                    FROM transactions t
+                    WHERE t.dest_ref_type = 'Account' AND t.dest_ref_id = a.id
+                      AND t.notes IN ('Initial balance registration', 'CSV Import Initial Balance')
+                ) AS opening_balance
             FROM accounts a
             LEFT JOIN institutions i ON a.institution_id = i.id
             LEFT JOIN people p ON a.owner_id = p.id
+            LEFT JOIN categories c ON a.category_id = c.id
         """)
         accounts = []
         for row in cursor.fetchall():
@@ -234,11 +242,6 @@ def get_init_data():
                 try:
                     meta = json.loads(d["metadata_json"])
                     d.update(meta)
-                    if "category_id" in meta:
-                        cursor.execute("SELECT name FROM categories WHERE id = ?", (meta["category_id"],))
-                        cat_row = cursor.fetchone()
-                        if cat_row:
-                            d["category_name"] = cat_row["name"]
                 except:
                     pass
             accounts.append(d)
@@ -749,6 +752,39 @@ def update_entity(entity_type: str, id: int, payload: dict):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
+        if entity_type == "accounts":
+            # Accounts have no stored balance (it's derived from the transactions ledger),
+            # so an edited opening balance maps to the account's 'Initial balance
+            # registration' credit transaction: update it in place, create it if the
+            # account was registered without one, or delete it when set back to 0.
+            # current_balance is popped too: it's the derived read-only figure echoed
+            # back by the form and must never be written anywhere.
+            payload.pop("current_balance", None)
+            opening_raw = payload.pop("opening_balance", None)
+            if opening_raw is not None:
+                opening_balance = float(opening_raw or 0.0)
+                # Two markers identify an account's opening credit: create_entity writes
+                # 'Initial balance registration', the MMex CSV importer writes
+                # 'CSV Import Initial Balance'. Matching both here (and in /api/init's
+                # opening_balance subquery) prevents an edit from inserting a duplicate
+                # opening transaction alongside an import-created one.
+                cursor.execute("""
+                    SELECT id, amount FROM transactions
+                    WHERE dest_ref_type = 'Account' AND dest_ref_id = ?
+                      AND notes IN ('Initial balance registration', 'CSV Import Initial Balance')
+                    ORDER BY id LIMIT 1
+                """, (id,))
+                initial_tx = cursor.fetchone()
+                if initial_tx is None and opening_balance > 0.0:
+                    cursor.execute("""
+                    INSERT INTO transactions (source_ref_type, source_ref_id, dest_ref_type, dest_ref_id, type, amount, transaction_date, notes)
+                    VALUES ('None', NULL, 'Account', ?, 'Credit', ?, ?, 'Initial balance registration')
+                    """, (id, opening_balance, date.today().isoformat()))
+                elif initial_tx is not None and opening_balance > 0.0 and float(initial_tx["amount"]) != opening_balance:
+                    cursor.execute("UPDATE transactions SET amount = ? WHERE id = ?", (opening_balance, initial_tx["id"]))
+                elif initial_tx is not None and opening_balance == 0.0:
+                    cursor.execute("DELETE FROM transactions WHERE id = ?", (initial_tx["id"],))
+
         # Preprocess custom fields and map expected dates for Goals
         if entity_type == "goals" and "target_amount" in payload and "current_amount" in payload and "monthly_contribution" in payload:
             comp = calc.calculate_goal_expected_completion(

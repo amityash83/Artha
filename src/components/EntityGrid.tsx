@@ -28,6 +28,7 @@ interface Column {
 const COMMON_COLUMNS: Record<string, Column[]> = {
   accounts: [
     { label: 'Name', key: 'name' },
+    { label: 'Category', key: 'category_name' },
     { label: 'Institution', key: 'institution_name' },
     { label: 'Balance', key: 'current_balance', alignRight: true },
     { label: 'Owner', key: 'owner_name' },
@@ -296,11 +297,15 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
         ? `${API_BASE_URL}/api/entities/${entityType}/${editingEntity.id}`
         : `${API_BASE_URL}/api/entities/${entityType}`;
 
-      // Ensure category_id is set if not 'all'
-      if (!formData.category_id && selectedCategoryId !== 'all') {
-        formData.category_id = selectedCategoryId;
-      } else if (!formData.category_id && typeCategories.length > 0) {
-        formData.category_id = typeCategories[0].id;
+      // Ensure category_id is set if not 'all'. Accounts are exempt: their category
+      // is nullable and the form offers an explicit "Uncategorized" choice that a
+      // silent fallback here would override.
+      if (entityType !== 'accounts') {
+        if (!formData.category_id && selectedCategoryId !== 'all') {
+          formData.category_id = selectedCategoryId;
+        } else if (!formData.category_id && typeCategories.length > 0) {
+          formData.category_id = typeCategories[0].id;
+        }
       }
 
       const categoryName = categories.find((c) => c.id === formData.category_id)?.name;

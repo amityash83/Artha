@@ -147,11 +147,23 @@ def init_db():
         name TEXT NOT NULL,
         institution_id INTEGER NOT NULL REFERENCES institutions(id),
         owner_id INTEGER NOT NULL REFERENCES people(id),
+        category_id INTEGER REFERENCES categories(id),
         status TEXT NOT NULL DEFAULT 'Active' CHECK(status IN ('Active', 'Closed')),
         currency TEXT NOT NULL DEFAULT 'INR',
         UNIQUE(name, institution_id, owner_id)
     )
     """)
+
+    # Accounts gained a category FK (Savings/Demat/Retirement/...) after the normalized
+    # schema shipped — add it in place for databases created before the column existed.
+    try:
+        cursor.execute("PRAGMA table_info('accounts')")
+        account_cols = [col['name'] for col in cursor.fetchall()]
+        if account_cols and 'category_id' not in account_cols:
+            cursor.execute("ALTER TABLE accounts ADD COLUMN category_id INTEGER REFERENCES categories(id)")
+            print("[Migration] Added category_id column to accounts.")
+    except Exception as e:
+        print("[Migration Warning] accounts category_id column migration error:", e)
 
     # Assets
     cursor.execute("""
@@ -628,6 +640,7 @@ def init_db():
                 name TEXT NOT NULL,
                 institution_id INTEGER NOT NULL REFERENCES institutions(id),
                 owner_id INTEGER NOT NULL REFERENCES people(id),
+                category_id INTEGER REFERENCES categories(id),
                 status TEXT NOT NULL DEFAULT 'Active' CHECK(status IN ('Active', 'Closed')),
                 currency TEXT NOT NULL DEFAULT 'INR',
                 UNIQUE(name, institution_id, owner_id)

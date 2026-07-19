@@ -70,16 +70,20 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
     };
 
     if (entityType === 'accounts') {
+      standardFields['category_id'] = 'category_select';
       standardFields['institution_id'] = 'institution_select';
       standardFields['owner_id'] = 'person_select';
       standardFields['currency'] = 'text';
       standardFields['status'] = 'select_status';
-      // Opening balance only applies at creation time: the backend turns this into a
-      // one-off "Initial Balance" credit transaction (see create_entity in main.py).
-      // Balance afterwards is always derived from the transactions ledger, so this
-      // field would silently do nothing on an edit — only show it when adding new.
+      // Balance is always derived from the transactions ledger; both fields below map
+      // to the account's one-off 'Initial balance registration' credit transaction.
+      // On create the backend turns current_balance into that transaction; on edit,
+      // opening_balance (prefilled from it by /api/init) lets the user set or correct
+      // it later — update_entity rewrites the underlying transaction, never a column.
       if (!initialData) {
         standardFields['current_balance'] = 'number';
+      } else {
+        standardFields['opening_balance'] = 'number';
       }
     } else if (entityType === 'assets') {
       standardFields['category_id'] = 'category_select';
@@ -191,7 +195,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       } else if (type === 'number') {
         defaultData[k] = 0;
       } else if (type === 'institution_select') {
-        defaultData[k] = institutions[0]?.id || '';
+        // accounts.institution_id is NOT NULL; everywhere else (e.g. self-held
+        // property, physical gold) an institution is legitimately absent.
+        defaultData[k] = entityType === 'accounts' ? (institutions[0]?.id || '') : '';
       } else if (type === 'person_select') {
         defaultData[k] = people[0]?.id || '';
       } else if (type === 'category_select') {
@@ -307,6 +313,11 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
     }
 
     const knownLabels: Record<string, string> = {
+      institution_id: 'Institution',
+      lender_institution_id: 'Lender',
+      owner_id: 'Owner',
+      current_balance: 'Opening Balance',
+      opening_balance: 'Opening Balance',
       linked_liability_id: 'Linked Home Loan',
       linked_asset_id: 'Linked Property',
       sum_assured: 'Sum Assured',
@@ -323,8 +334,6 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       annual_fee: 'Annual Fee',
       policy_type: 'Policy Type',
       policy_number: 'Policy Number',
-      owner_id: 'Owner',
-      current_balance: 'Opening Balance',
     };
     if (knownLabels[key]) return knownLabels[key];
 
@@ -383,6 +392,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           const type = fields[k];
 
           if (type === 'institution_select') {
+            const institutionRequired = entityType === 'accounts';
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
@@ -390,10 +400,10 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
                   id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || ''}
-                  onChange={(e) => handleChange(k, parseInt(e.target.value))}
-                  required
+                  onChange={(e) => handleChange(k, e.target.value ? parseInt(e.target.value) : null)}
+                  required={institutionRequired}
                 >
-                  <option value="">Select Institution</option>
+                  <option value="">{institutionRequired ? 'Select Institution' : 'None (self-held)'}</option>
                   {[...institutions].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })).map((inst) => (
                     <option key={inst.id} value={inst.id}>
                       {inst.name}
@@ -427,18 +437,23 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           }
 
           if (type === 'category_select') {
-            const assetCategories = categories ? categories.filter((c) => c.entity_type === 'Asset') : [];
+            const catEntityType = entityType === 'accounts' ? 'Account' : 'Asset';
+            const assetCategories = categories ? categories.filter((c) => c.entity_type === catEntityType) : [];
+            const catLabel = entityType === 'accounts' ? 'Account Type (Category)' : 'Asset Class (Category)';
+            // assets.category_id is NOT NULL; accounts.category_id is nullable —
+            // an account that fits no defined type may stay uncategorized.
+            const categoryRequired = entityType !== 'accounts';
             return (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Asset Class (Category)</label>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{catLabel}</label>
                 <select
                   id={`field-${k}`}
                   className="form-control"
                   value={formData[k] || ''}
-                  onChange={(e) => handleChange(k, parseInt(e.target.value))}
-                  required
+                  onChange={(e) => handleChange(k, e.target.value ? parseInt(e.target.value) : null)}
+                  required={categoryRequired}
                 >
-                  <option value="">Select Category</option>
+                  <option value="">{categoryRequired ? 'Select Category' : 'Uncategorized'}</option>
                   {assetCategories.map((cat) => (
                     <option key={cat.id} value={cat.id}>
                       {cat.name}

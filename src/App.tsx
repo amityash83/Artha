@@ -416,6 +416,7 @@ const App: React.FC = () => {
             entities={data.assets}
             categories={data.categories}
             institutions={data.institutions}
+            people={data.people}
             goals={data.goals}
             liabilities={data.liabilities}
             properties={data.assets.filter((a) => a.category_name === 'Property')}
@@ -429,6 +430,7 @@ const App: React.FC = () => {
             entities={data.liabilities}
             categories={data.categories}
             institutions={data.institutions}
+            people={data.people}
             goals={data.goals}
             liabilities={data.liabilities}
             properties={data.assets.filter((a) => a.category_name === 'Property')}
