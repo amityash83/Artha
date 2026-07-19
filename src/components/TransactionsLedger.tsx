@@ -167,10 +167,10 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
     } else if (type === 'EMI' || type === 'Prepayment') {
       relatedEntityType = 'Liability';
       relatedEntityId = parsedCounterpartId;
-    } else if (type === 'Debit') {
-      categoryId = parsedCounterpartId;
-    } else if (type === 'Credit') {
-      categoryId = parsedCounterpartId;
+    } else if (type === 'Debit' || type === 'Credit') {
+      // Category is optional for Debit/Credit — empty selection stays null (NaN
+      // from parseInt('') would otherwise serialize as null anyway, but be explicit).
+      categoryId = counterpartId ? parsedCounterpartId : null;
     }
 
     const payload = {
@@ -701,9 +701,13 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
 
               {(type === 'Debit' || type === 'Credit') && (
                 <div className="form-group">
-                  <label className="form-label">Budget Category</label>
-                  <select className="form-input" required value={counterpartId} onChange={e => setCounterpartId(e.target.value)}>
-                    <option value="">-- Select Category --</option>
+                  <label className="form-label">Budget Category (optional)</label>
+                  {/* Not required: transactions have no category column (the selection is
+                      not persisted — see serialize_entity_payload in main.py), and rows
+                      like opening-balance credits legitimately have none, so a mandatory
+                      select would make them uneditable. */}
+                  <select className="form-input" value={counterpartId} onChange={e => setCounterpartId(e.target.value)}>
+                    <option value="">None (Uncategorized)</option>
                     {categoriesList.map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
