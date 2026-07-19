@@ -172,7 +172,9 @@ const App: React.FC = () => {
           <span className="logo-text">Artha</span>
         </div>
 
-        <nav style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        {/* flex:1 + minHeight:0 (not height:100%) so the nav takes the space left
+            after the logo row and lets .sidebar-menu shrink and scroll inside it */}
+        <nav style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
           <ul className="sidebar-menu">
             <li>
               <div 
