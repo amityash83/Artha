@@ -272,6 +272,19 @@ def get_init_data():
                 d["insurance_claims"] = [dict(row) for row in cursor.fetchall()]
                 cursor.execute("SELECT * FROM insurance_premium_payments WHERE asset_id = ? ORDER BY payment_date", (d["id"],))
                 d["premium_payments"] = [dict(row) for row in cursor.fetchall()]
+                # Cost basis for the Assets grid: sum of logged premium payments, falling
+                # back to invested_amount (where legacy/manual entries recorded premiums
+                # paid so far) when no payments have been logged yet.
+                paid = sum(p["amount"] or 0.0 for p in d["premium_payments"])
+                d["premiums_paid"] = paid if paid > 0 else (d.get("invested_amount") or 0.0)
+                # Unified coverage figure across policy types: Life/Term use sum_assured,
+                # Health uses sum_insured, Vehicle uses idv (matches the Dashboard's
+                # Insurance Coverage panel logic).
+                d["cover"] = max(
+                    d.get("sum_assured") or 0.0,
+                    d.get("sum_insured") or 0.0,
+                    d.get("idv") or 0.0,
+                )
             if d.get("category_name") == "Property":
                 cursor.execute("SELECT * FROM property_rental_ledger WHERE asset_id = ? ORDER BY month", (d["id"],))
                 ledger = [dict(row) for row in cursor.fetchall()]

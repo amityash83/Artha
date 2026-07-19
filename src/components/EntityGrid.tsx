@@ -61,7 +61,14 @@ const COMMON_COLUMNS: Record<string, Column[]> = {
 const CATEGORY_COLUMNS: Record<string, Column[]> = {
   'Stock': [{ label: 'Ticker', key: 'ticker' }, { label: 'Quantity', key: 'quantity', alignRight: true }, { label: 'XIRR', key: 'xirr', alignRight: true, suffix: '%' }],
   'Mutual Fund': [{ label: 'Scheme Code', key: 'ticker' }, { label: 'Units', key: 'quantity', alignRight: true }, { label: 'XIRR', key: 'xirr', alignRight: true, suffix: '%' }],
-  'Insurance': [{ label: 'Policy Type', key: 'policy_type' }, { label: 'Premium', key: 'premium', alignRight: true }],
+  'Insurance': [
+    { label: 'Policy Type', key: 'policy_type' },
+    { label: 'Premium', key: 'premium', alignRight: true },
+    // 'cover' is computed by /api/init: sum_assured for Life/Term, sum_insured
+    // for Health, idv for Vehicle — one comparable column across policy types.
+    { label: 'Cover', key: 'cover', alignRight: true },
+    { label: 'Premiums Paid', key: 'premiums_paid', alignRight: true },
+  ],
   'Property': [{ label: 'Rental Income', key: 'rental_income', alignRight: true }],
   'Home Loan': [
     { label: 'Rate (ROI)', key: 'interest_rate', suffix: '%' },
@@ -98,6 +105,8 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
   const [editingEntity, setEditingEntity] = useState<any | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [deletingEntityId, setDeletingEntityId] = useState<number | null>(null);
+  const [sortKey, setSortKey] = useState<string>('name');
+  const [sortAsc, setSortAsc] = useState<boolean>(true);
   const modalRef = useModalA11y(isAdding || !!editingEntity, () => {
     setIsAdding(false);
     setEditingEntity(null);
@@ -113,6 +122,30 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
       (e.lender_name && e.lender_name.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesCategory && matchesSearch;
   });
+
+  // Sort client-side, right before render (per docs/memory.md's sorting rule):
+  // numbers numerically, everything else with a case-insensitive natural compare;
+  // null/undefined values always sink to the bottom regardless of direction.
+  const sortedEntities = [...filteredEntities].sort((a, b) => {
+    const av = a[sortKey];
+    const bv = b[sortKey];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    const cmp = typeof av === 'number' && typeof bv === 'number'
+      ? av - bv
+      : String(av).localeCompare(String(bv), undefined, { sensitivity: 'base', numeric: true });
+    return sortAsc ? cmp : -cmp;
+  });
+
+  const handleSort = (key: string) => {
+    if (key === sortKey) {
+      setSortAsc((prev) => !prev);
+    } else {
+      setSortKey(key);
+      setSortAsc(true);
+    }
+  };
 
   const handleDelete = async (id: number) => {
     try {
@@ -578,29 +611,34 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
               {columns.map((col) => (
                 <th
                   key={col.key}
+                  onClick={() => handleSort(col.key)}
+                  title={`Sort by ${col.label}`}
                   style={{
-                    color: 'var(--text-muted)',
+                    color: sortKey === col.key ? '#e2e8f0' : 'var(--text-muted)',
                     fontWeight: 600,
                     fontSize: '12px',
                     padding: '12px 16px',
-                    textAlign: col.alignRight ? 'right' : 'left'
+                    textAlign: col.alignRight ? 'right' : 'left',
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                    whiteSpace: 'nowrap'
                   }}
                 >
-                  {col.label}
+                  {col.label}{sortKey === col.key ? (sortAsc ? ' ▲' : ' ▼') : ''}
                 </th>
               ))}
               <th style={{ color: 'var(--text-muted)', fontWeight: 600, fontSize: '12px', padding: '12px 16px', textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {filteredEntities.length === 0 ? (
+            {sortedEntities.length === 0 ? (
               <tr>
                 <td colSpan={columns.length + 1} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
                   No entities found matching active filters.
                 </td>
               </tr>
             ) : (
-              filteredEntities.map((ent) => (
+              sortedEntities.map((ent) => (
                 <tr key={ent.id} style={{ borderBottom: '1px solid var(--border-glass)' }} className="table-row">
                   {columns.map((col) => {
                     const rawVal = ent[col.key];
