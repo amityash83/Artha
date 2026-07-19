@@ -86,7 +86,25 @@ def build_ask_context(conn, question: str):
     ]
 
     if "goals" in sections:
-        cursor.execute("SELECT name, target_amount, current_amount, monthly_contribution, target_date FROM goals")
+        # current_amount derived from linked holdings when any exist (matching /api/init),
+        # else the manually-entered stored value.
+        cursor.execute("""
+            SELECT
+                name, target_amount,
+                CASE WHEN EXISTS (SELECT 1 FROM goal_holdings gh WHERE gh.goal_id = g.id)
+                    THEN COALESCE(
+                        (
+                            SELECT SUM(a.current_value * gh.allocation_weight)
+                            FROM assets a
+                            JOIN goal_holdings gh ON a.id = gh.asset_id
+                            WHERE gh.goal_id = g.id
+                        ), 0.0
+                    )
+                    ELSE g.current_amount
+                END AS current_amount,
+                monthly_contribution, target_date
+            FROM goals g
+        """)
         ctx["goals"] = [dict(r) for r in cursor.fetchall()]
     if "liabilities" in sections:
         cursor.execute("SELECT name, outstanding, interest_rate, emi FROM liabilities LIMIT 20")

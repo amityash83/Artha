@@ -44,8 +44,25 @@ def generate_recommendations(conn) -> list:
     loans = cursor.fetchall()
     total_loans_outstanding = sum(row["outstanding"] for row in loans)
     
-    # 4. Fetch Goals
-    cursor.execute("SELECT name, target_amount, current_amount, monthly_contribution, target_date as expected_completion, priority FROM goals")
+    # 4. Fetch Goals — current_amount derived from linked holdings when any exist
+    # (matching /api/init), else the manually-entered stored value.
+    cursor.execute("""
+        SELECT
+            name, target_amount,
+            CASE WHEN EXISTS (SELECT 1 FROM goal_holdings gh WHERE gh.goal_id = g.id)
+                THEN COALESCE(
+                    (
+                        SELECT SUM(a.current_value * gh.allocation_weight)
+                        FROM assets a
+                        JOIN goal_holdings gh ON a.id = gh.asset_id
+                        WHERE gh.goal_id = g.id
+                    ), 0.0
+                )
+                ELSE g.current_amount
+            END AS current_amount,
+            monthly_contribution, target_date as expected_completion, priority
+        FROM goals g
+    """)
     goals = cursor.fetchall()
     
     recs = []

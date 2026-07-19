@@ -344,24 +344,32 @@ def get_init_data():
         """)
         expenses = [dict(row) for row in cursor.fetchall()]
 
-        # Goals (derived current_amount from holdings weight mapping)
+        # Goals: current_amount is derived from linked holdings when any exist, else the
+        # manually-entered stored value (goals funded outside tracked assets stay manual).
+        # The alias must NOT be named current_amount: g.* already carries that column, and
+        # sqlite3.Row name lookup resolves duplicate names to the LEFTMOST column — a
+        # same-named alias is silently shadowed by the stored value (the original bug).
         cursor.execute("""
-            SELECT 
+            SELECT
                 g.*,
-                COALESCE(
-                    (
-                        SELECT SUM(a.current_value * gh.allocation_weight)
-                        FROM assets a
-                        JOIN goal_holdings gh ON a.id = gh.asset_id
-                        WHERE gh.goal_id = g.id
-                    ), 0.0
-                ) AS current_amount
+                CASE WHEN EXISTS (SELECT 1 FROM goal_holdings gh WHERE gh.goal_id = g.id)
+                    THEN COALESCE(
+                        (
+                            SELECT SUM(a.current_value * gh.allocation_weight)
+                            FROM assets a
+                            JOIN goal_holdings gh ON a.id = gh.asset_id
+                            WHERE gh.goal_id = g.id
+                        ), 0.0
+                    )
+                    ELSE g.current_amount
+                END AS derived_current_amount
             FROM goals g
         """)
         goals_raw = cursor.fetchall()
         goals = []
         for r in goals_raw:
             d = dict(r)
+            d["current_amount"] = d.pop("derived_current_amount")
             if d.get("funding_sources_json"):
                 try:
                     d["funding_sources"] = json.loads(d["funding_sources_json"])
@@ -577,26 +585,35 @@ def get_entities(entity_type: str):
                 FROM accounts a
             """)
         elif entity_type == "goals":
+            # Aliased derived_current_amount, not current_amount: g.* already carries the
+            # stored column and sqlite3.Row resolves duplicate names to the leftmost, so a
+            # same-named alias would be shadowed. Derived only when holdings exist —
+            # manually-valued goals (no linked assets) keep their stored amount.
             cursor.execute("""
-                SELECT 
+                SELECT
                     g.*,
-                    COALESCE(
-                        (
-                            SELECT SUM(a.current_value * gh.allocation_weight)
-                            FROM assets a
-                            JOIN goal_holdings gh ON a.id = gh.asset_id
-                            WHERE gh.goal_id = g.id
-                        ), 0.0
-                    ) AS current_amount
+                    CASE WHEN EXISTS (SELECT 1 FROM goal_holdings gh WHERE gh.goal_id = g.id)
+                        THEN COALESCE(
+                            (
+                                SELECT SUM(a.current_value * gh.allocation_weight)
+                                FROM assets a
+                                JOIN goal_holdings gh ON a.id = gh.asset_id
+                                WHERE gh.goal_id = g.id
+                            ), 0.0
+                        )
+                        ELSE g.current_amount
+                    END AS derived_current_amount
                 FROM goals g
             """)
         else:
             cursor.execute(f"SELECT * FROM {entity_type}")
         rows = cursor.fetchall()
-        
+
         result = []
         for row in rows:
             d = dict(row)
+            if entity_type == "goals" and "derived_current_amount" in d:
+                d["current_amount"] = d.pop("derived_current_amount")
             for k in ["metadata_json", "funding_sources_json", "snapshot_data"]:
                 if k in d and d[k]:
                     try:
@@ -2275,21 +2292,29 @@ def run_simulation(req: SimulationRequestSchema):
         """)
         total_properties = sum(row["current_value"] for row in cursor.fetchall())
         
+        # See /api/init's goals query for why the alias is not named current_amount.
         cursor.execute("""
-            SELECT 
+            SELECT
                 g.*,
-                COALESCE(
-                    (
-                        SELECT SUM(a.current_value * gh.allocation_weight)
-                        FROM assets a
-                        JOIN goal_holdings gh ON a.id = gh.asset_id
-                        WHERE gh.goal_id = g.id
-                    ), 0.0
-                ) AS current_amount
+                CASE WHEN EXISTS (SELECT 1 FROM goal_holdings gh WHERE gh.goal_id = g.id)
+                    THEN COALESCE(
+                        (
+                            SELECT SUM(a.current_value * gh.allocation_weight)
+                            FROM assets a
+                            JOIN goal_holdings gh ON a.id = gh.asset_id
+                            WHERE gh.goal_id = g.id
+                        ), 0.0
+                    )
+                    ELSE g.current_amount
+                END AS derived_current_amount
             FROM goals g
         """)
-        goals = [dict(row) for row in cursor.fetchall()]
-        
+        goals = []
+        for row in cursor.fetchall():
+            d = dict(row)
+            d["current_amount"] = d.pop("derived_current_amount")
+            goals.append(d)
+
         total_assets = total_liquid + total_investments + total_properties
         total_debt = sum(l["outstanding"] for l in loans)
         current_net_worth = total_assets - total_debt
@@ -3044,9 +3069,27 @@ def get_financial_calendar():
             "renewal_date": d["renewal_date"]
         })
         
-    # Fetch goals
-    cursor.execute("SELECT name, monthly_contribution, target_amount, current_amount FROM goals WHERE (target_amount - current_amount) > 0 AND monthly_contribution > 0")
-    goals = cursor.fetchall()
+    # Fetch goals still needing contributions. current_amount is derived from linked
+    # holdings when any exist (matching /api/init), else the stored manual value —
+    # otherwise a goal already funded via linked assets keeps generating monthly
+    # SIP reminder events forever off its stale stored amount.
+    cursor.execute("""
+        SELECT name, monthly_contribution, target_amount,
+            CASE WHEN EXISTS (SELECT 1 FROM goal_holdings gh WHERE gh.goal_id = g.id)
+                THEN COALESCE(
+                    (
+                        SELECT SUM(a.current_value * gh.allocation_weight)
+                        FROM assets a
+                        JOIN goal_holdings gh ON a.id = gh.asset_id
+                        WHERE gh.goal_id = g.id
+                    ), 0.0
+                )
+                ELSE g.current_amount
+            END AS current_amount
+        FROM goals g
+        WHERE monthly_contribution > 0
+    """)
+    goals = [gr for gr in cursor.fetchall() if (gr["target_amount"] - gr["current_amount"]) > 0]
 
     # Fetch credit cards (liabilities where category is 'Credit Card')
     cursor.execute("""
