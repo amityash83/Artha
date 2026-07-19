@@ -567,7 +567,7 @@ def init_db():
         source_ref_id INTEGER,
         dest_ref_type TEXT CHECK(dest_ref_type IN ('Account', 'Asset', 'None')),
         dest_ref_id INTEGER,
-        type TEXT NOT NULL CHECK(type IN ('Credit', 'Debit', 'Transfer', 'Buy', 'Sell', 'Investment', 'Redemption')),
+        type TEXT NOT NULL CHECK(type IN ('Credit', 'Debit', 'Transfer', 'Buy', 'Sell', 'Investment', 'Redemption', 'EMI', 'Prepayment')),
         amount REAL NOT NULL CHECK(amount > 0.0),
         transaction_date TEXT NOT NULL,
         notes TEXT,
@@ -780,7 +780,7 @@ def init_db():
                 source_ref_id INTEGER,
                 dest_ref_type TEXT CHECK(dest_ref_type IN ('Account', 'Asset', 'None')),
                 dest_ref_id INTEGER,
-                type TEXT NOT NULL CHECK(type IN ('Credit', 'Debit', 'Transfer', 'Buy', 'Sell', 'Investment', 'Redemption')),
+                type TEXT NOT NULL CHECK(type IN ('Credit', 'Debit', 'Transfer', 'Buy', 'Sell', 'Investment', 'Redemption', 'EMI', 'Prepayment')),
                 amount REAL NOT NULL CHECK(amount > 0.0),
                 transaction_date TEXT NOT NULL,
                 notes TEXT,
@@ -844,6 +844,40 @@ def init_db():
             print("[Migration] transactions table restructured successfully.")
     except Exception as e:
         print("[Migration Error] transactions restructuring failed:", e)
+
+    # Expand transactions.type CHECK to accept 'EMI' and 'Prepayment'. The ledger UI,
+    # create_entity's type mapping, and adjust_double_entry_balances all support these,
+    # but the original CHECK list omitted them, so every EMI/Prepayment insert failed
+    # with a constraint error. SQLite cannot alter a CHECK in place — rebuild the table
+    # when the old constraint (identified by the missing 'Prepayment' literal) is found.
+    try:
+        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='transactions'")
+        tx_sql_row = cursor.fetchone()
+        if tx_sql_row and "'Prepayment'" not in tx_sql_row['sql']:
+            print("[Migration] Expanding transactions.type CHECK to include EMI/Prepayment...")
+            cursor.execute("""
+            CREATE TABLE transactions_checkfix (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_ref_type TEXT CHECK(source_ref_type IN ('Account', 'Asset', 'None')),
+                source_ref_id INTEGER,
+                dest_ref_type TEXT CHECK(dest_ref_type IN ('Account', 'Asset', 'None')),
+                dest_ref_id INTEGER,
+                type TEXT NOT NULL CHECK(type IN ('Credit', 'Debit', 'Transfer', 'Buy', 'Sell', 'Investment', 'Redemption', 'EMI', 'Prepayment')),
+                amount REAL NOT NULL CHECK(amount > 0.0),
+                transaction_date TEXT NOT NULL,
+                notes TEXT,
+                linked_goal_id INTEGER REFERENCES goals(id)
+            )
+            """)
+            cursor.execute("""
+            INSERT INTO transactions_checkfix (id, source_ref_type, source_ref_id, dest_ref_type, dest_ref_id, type, amount, transaction_date, notes, linked_goal_id)
+            SELECT id, source_ref_type, source_ref_id, dest_ref_type, dest_ref_id, type, amount, transaction_date, notes, linked_goal_id FROM transactions
+            """)
+            cursor.execute("DROP TABLE transactions")
+            cursor.execute("ALTER TABLE transactions_checkfix RENAME TO transactions")
+            print("[Migration] transactions.type CHECK expanded successfully.")
+    except Exception as e:
+        print("[Migration Warning] transactions CHECK expansion failed:", e)
 
     cursor.execute("PRAGMA foreign_keys = ON")
 

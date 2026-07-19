@@ -30,6 +30,9 @@ backend_log.txt
 # start.sh/stop.sh runtime pid files and logs
 .run/
 
+# artha.ps1 runtime pid file
+.artha.pid
+
 # Python Cache & Compiled Files
 __pycache__/
 *.pyc
