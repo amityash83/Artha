@@ -481,6 +481,69 @@ def get_init_data():
     finally:
         conn.close()
 
+def normalize_legacy_transaction_payload(payload: dict):
+    """
+    Map the Transactions Ledger's legacy payload shape (account_id + type +
+    related_entity_type/related_entity_id) onto the double-entry columns
+    (source_ref_type/source_ref_id/dest_ref_type/dest_ref_id). No-op when the
+    payload already carries source_ref_type. Must run on BOTH create and update:
+    update reverts the old row's balance impact then reapplies from the new
+    payload, so a payload without refs would revert without reapplying.
+    """
+    if "source_ref_type" in payload:
+        return
+
+    acc_id = payload.get("account_id")
+    ttype = payload.get("type")
+    rel_id = payload.get("related_entity_id")
+
+    source_type = 'None'
+    source_id = None
+    dest_type = 'None'
+    dest_id = None
+    new_type = 'Credit'
+
+    if ttype == 'Credit':
+        source_type = 'None'
+        dest_type = 'Account'
+        dest_id = acc_id
+        new_type = 'Credit'
+    elif ttype == 'Debit':
+        source_type = 'Account'
+        source_id = acc_id
+        dest_type = 'None'
+        new_type = 'Debit'
+    elif ttype == 'Transfer':
+        source_type = 'Account'
+        source_id = acc_id
+        dest_type = 'Account'
+        dest_id = rel_id
+        new_type = 'Transfer'
+    elif ttype in ('Investment', 'Buy'):
+        source_type = 'Account'
+        source_id = acc_id
+        dest_type = 'Asset'
+        dest_id = rel_id
+        new_type = 'Buy'
+    elif ttype in ('Redemption', 'Sell'):
+        source_type = 'Asset'
+        source_id = rel_id
+        dest_type = 'Account'
+        dest_id = acc_id
+        new_type = 'Sell'
+    elif ttype in ('EMI', 'Prepayment'):
+        source_type = 'Account'
+        source_id = acc_id
+        dest_type = 'None'
+        dest_id = rel_id
+        new_type = ttype
+
+    payload["source_ref_type"] = source_type
+    payload["source_ref_id"] = source_id
+    payload["dest_ref_type"] = dest_type
+    payload["dest_ref_id"] = dest_id
+    payload["type"] = new_type
+
 def adjust_double_entry_balances(cursor, t_type: str, amount: float, source_type: str, source_id: int, dest_type: str, dest_id: int, operation: str = "add"):
     """
     Adjust balances of assets and liabilities based on double-entry transaction specs.
@@ -643,58 +706,7 @@ def create_entity(entity_type: str, payload: dict):
             payload["owner_id"] = payload.get("owner_id", 1)
 
         if entity_type == "transactions":
-            if "source_ref_type" not in payload:
-                acc_id = payload.get("account_id")
-                ttype = payload.get("type")
-                rel_type = payload.get("related_entity_type")
-                rel_id = payload.get("related_entity_id")
-                
-                source_type = 'None'
-                source_id = None
-                dest_type = 'None'
-                dest_id = None
-                new_type = 'Credit'
-                
-                if ttype == 'Credit':
-                    source_type = 'None'
-                    dest_type = 'Account'
-                    dest_id = acc_id
-                    new_type = 'Credit'
-                elif ttype == 'Debit':
-                    source_type = 'Account'
-                    source_id = acc_id
-                    dest_type = 'None'
-                    new_type = 'Debit'
-                elif ttype == 'Transfer':
-                    source_type = 'Account'
-                    source_id = acc_id
-                    dest_type = 'Account'
-                    dest_id = rel_id
-                    new_type = 'Transfer'
-                elif ttype in ('Investment', 'Buy'):
-                    source_type = 'Account'
-                    source_id = acc_id
-                    dest_type = 'Asset'
-                    dest_id = rel_id
-                    new_type = 'Buy'
-                elif ttype in ('Redemption', 'Sell'):
-                    source_type = 'Asset'
-                    source_id = rel_id
-                    dest_type = 'Account'
-                    dest_id = acc_id
-                    new_type = 'Sell'
-                elif ttype in ('EMI', 'Prepayment'):
-                    source_type = 'Account'
-                    source_id = acc_id
-                    dest_type = 'None'
-                    dest_id = rel_id
-                    new_type = ttype
-                    
-                payload["source_ref_type"] = source_type
-                payload["source_ref_id"] = source_id
-                payload["dest_ref_type"] = dest_type
-                payload["dest_ref_id"] = dest_id
-                payload["type"] = new_type
+            normalize_legacy_transaction_payload(payload)
 
         # Preprocess custom fields and map expected dates for Goals
         if entity_type == "goals" and "target_amount" in payload and "current_amount" in payload and "monthly_contribution" in payload:
@@ -812,6 +824,10 @@ def update_entity(entity_type: str, id: int, payload: dict):
             payload["expected_completion"] = comp["expected_date"]
             
         if entity_type == "transactions":
+            # The Ledger edits with the legacy payload shape — normalize it to the
+            # double-entry columns BEFORE the revert/reapply cycle, otherwise the old
+            # impact is reverted but the reapply below sees no refs and does nothing.
+            normalize_legacy_transaction_payload(payload)
             # Revert old balances first
             cursor.execute("SELECT * FROM transactions WHERE id = ?", (id,))
             old_row = cursor.fetchone()
@@ -827,7 +843,7 @@ def update_entity(entity_type: str, id: int, payload: dict):
                     int(old.get("dest_ref_id")) if old.get("dest_ref_id") is not None else None,
                     "revert"
                 )
-                
+
         standard_params = serialize_entity_payload(cursor, entity_type, payload)
         
         set_clauses = [f"{c} = :{c}" for c in standard_params.keys()]

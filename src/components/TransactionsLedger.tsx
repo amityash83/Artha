@@ -55,6 +55,63 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
   const [date, setDate] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
 
+  // The API stores double-entry rows (source_ref_type/source_ref_id/dest_ref_type/
+  // dest_ref_id, with Buy/Sell types); this ledger's form and display work in the
+  // legacy view-model (account_id + related_entity, Investment/Redemption types).
+  // Map each row back — the backend performs the inverse mapping on POST/PUT
+  // (normalize_legacy_transaction_payload in main.py).
+  const toLedgerView = (t: any): Transaction => {
+    let account_id: number = 0;
+    let related_entity_type: string | undefined;
+    let related_entity_id: number | undefined;
+    let displayType: string = t.type;
+
+    switch (t.type) {
+      case 'Credit':
+        account_id = t.dest_ref_id;
+        break;
+      case 'Debit':
+        account_id = t.source_ref_id;
+        break;
+      case 'Transfer':
+        account_id = t.source_ref_id;
+        related_entity_type = 'Account';
+        related_entity_id = t.dest_ref_id;
+        break;
+      case 'Buy':
+      case 'Investment':
+        displayType = 'Investment';
+        account_id = t.source_ref_id;
+        related_entity_type = 'Asset';
+        related_entity_id = t.dest_ref_id;
+        break;
+      case 'Sell':
+      case 'Redemption':
+        displayType = 'Redemption';
+        account_id = t.dest_ref_id;
+        related_entity_type = 'Asset';
+        related_entity_id = t.source_ref_id;
+        break;
+      case 'EMI':
+      case 'Prepayment':
+        account_id = t.source_ref_id;
+        related_entity_type = 'Liability';
+        related_entity_id = t.dest_ref_id;
+        break;
+    }
+
+    return {
+      id: t.id,
+      account_id,
+      type: displayType,
+      amount: t.amount,
+      transaction_date: t.transaction_date,
+      notes: t.notes,
+      related_entity_type,
+      related_entity_id,
+    };
+  };
+
   const fetchTransactions = async () => {
     setLoading(true);
     try {
@@ -63,7 +120,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
         const d = await res.json();
         // Sort transactions by date descending
         d.sort((a: any, b: any) => new Date(b.transaction_date).getTime() - new Date(a.transaction_date).getTime());
-        setTransactions(d);
+        setTransactions(d.map(toLedgerView));
       }
     } catch (err) {
       console.error("Failed to load transactions:", err);
@@ -166,7 +223,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
   const handleEdit = (tx: Transaction) => {
     setEditingId(tx.id);
     setType(tx.type);
-    setAccountId(tx.account_id.toString());
+    setAccountId(tx.account_id != null ? tx.account_id.toString() : '');
     setAmount(tx.amount.toString());
     setDate(tx.transaction_date);
     setNotes(tx.notes || '');
