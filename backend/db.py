@@ -1052,17 +1052,29 @@ def init_db():
             "base_points": 5.0, "base_spend": 150.0, "point_value": 1.0,
             "lounge_visits_domestic": 99, "lounge_visits_international": 99,
             "eligibility_notes": "By-invitation or high income/relationship value.",
+            # Travel demonstrates a real-world simultaneous daily + monthly cap (both
+            # 15,000 pts, matching HDFC Infinia's actual SmartBuy accelerated-rewards
+            # terms) — resolve_reward_rate applies the tighter of monthlyCapPoints and
+            # every caps[] entry. groupLabel documents that this ceiling is part of a
+            # bank-stated shared pool; it's not enforced across categories (see
+            # resolve_reward_rate's docstring for why).
             "category_rules_json": json.dumps([
-                {"category": "Travel", "multiplier": 5, "isExcluded": False, "monthlyCapPoints": 15000},
+                {"category": "Travel", "multiplier": 5, "isExcluded": False, "monthlyCapPoints": 15000,
+                 "caps": [{"capPoints": 15000, "period": "daily", "groupLabel": "SmartBuy Accelerated Rewards"}]},
                 {"category": "Dining", "multiplier": 5, "isExcluded": False, "monthlyCapPoints": 5000},
                 {"category": "Fuel", "multiplier": 0, "isExcluded": True},
                 {"category": "Rent", "multiplier": 0, "isExcluded": True},
                 {"category": "Utilities", "multiplier": 1, "isExcluded": False},
             ]),
             "milestone_rules_json": "[]",
+            # pointValue demonstrates redemption-channel-specific valuation: airline/hotel
+            # transfer partners are worth the full ₹1/point base rate, while redeeming
+            # for cashback/statement credit is worth less — the same point, different
+            # value depending on how it's redeemed.
             "redemption_partners_json": json.dumps([
-                {"partnerName": "Club Vistara (1:1)", "transferRatio": 1.0},
-                {"partnerName": "KrisFlyer Singapore (1:1)", "transferRatio": 1.0},
+                {"partnerName": "Club Vistara (1:1)", "transferRatio": 1.0, "pointValue": 1.0},
+                {"partnerName": "KrisFlyer Singapore (1:1)", "transferRatio": 1.0, "pointValue": 1.0},
+                {"partnerName": "Cashback / Statement Credit", "transferRatio": 1.0, "pointValue": 0.5},
             ]),
             "pros_json": json.dumps(["Uncapped lounge access", "Strong travel transfer partners", "High base reward rate"]),
             "cons_json": json.dumps(["High joining/annual fee", "Invite-only for most applicants"]),

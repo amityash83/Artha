@@ -96,6 +96,41 @@ export interface AttachedDocument {
   uploaded_at: string;
 }
 
+// Shapes stored (JSON-stringified) inside CreditCardDetails/CardVariant's
+// category_rules_json / milestone_rules_json / redemption_partners_json fields.
+// Shared between a user's own cards and Card Library reference variants.
+export interface CapRule {
+  capPoints: number;
+  period: 'daily' | 'monthly' | 'quarterly' | 'statement_cycle' | 'annual';
+  // Display-only: documents a bank's stated shared/pooled cap (e.g. "part of the
+  // 15,000/mo Accelerated Rewards pool"). Not enforced across categories — Artha
+  // has no per-transaction, per-category spend ledger to enforce it against.
+  groupLabel?: string;
+}
+
+export interface CategoryMultiplierRule {
+  category: string;
+  multiplier: number;
+  isExcluded: boolean;
+  monthlyCapPoints?: number;
+  // Additional simultaneous ceilings (e.g. a daily cap alongside the monthly one) —
+  // resolve_reward_rate applies the tightest of monthlyCapPoints + every caps[].capPoints.
+  caps?: CapRule[];
+}
+
+export interface MilestoneThresholdRule {
+  spendThreshold: number;
+  bonusPointsRate: number; // e.g. 35 points instead of 12
+  pointsPerSpend: number;  // e.g. per 200 spent
+}
+
+export interface RedemptionPartnerRatio {
+  partnerName: string; // shown as "Redemption Route" — covers external mile-transfer
+                       // partners and in-house channels (Travel Portal, Cashback) alike
+  transferRatio: number; // e.g. 0.8 for 5:4, 0.4 for 5:2; 1.0 for an in-house/no-conversion route
+  pointValue?: number;   // INR value per point via this route; falls back to 1.0 if unset
+}
+
 export interface CreditCardDetails {
   liability_id?: number;
   credit_limit: number;

@@ -8,6 +8,7 @@ from backend.calculations import (
     calculate_tax_old_regime,
     determine_gain_type,
     calculate_capital_gains_for_lots,
+    resolve_reward_rate,
 )
 
 
@@ -105,3 +106,60 @@ def test_calculate_capital_gains_for_lots_fifo_consumption():
     assert result["lots_consumed"][0]["quantity_consumed"] == 10.0
     assert result["lots_consumed"][1]["lot_id"] == 2
     assert result["lots_consumed"][1]["quantity_consumed"] == 5.0
+
+
+def test_resolve_reward_rate_applies_tighter_of_monthly_and_daily_cap():
+    # 100000 at 5x with a base block of 150 would earn 3333 raw points -
+    # both the legacy monthlyCapPoints (15000) and a new daily cap (2000) are
+    # configured; the tighter (2000) must win, matching how a real cardholder
+    # would actually be capped for an isolated transaction.
+    rules = [{
+        "category": "Travel", "multiplier": 5, "isExcluded": False,
+        "monthlyCapPoints": 15000,
+        "caps": [{"capPoints": 2000, "period": "daily", "groupLabel": "Accelerated Pool"}],
+    }]
+    result = resolve_reward_rate(rules, [], current_spend=0.0, hypothetical_amount=100000,
+                                  base_points=5, base_spend=150, category="Travel")
+    assert result["points"] == 2000
+    assert result["capped"] is True
+
+
+def test_resolve_reward_rate_caps_array_without_legacy_field():
+    # No monthlyCapPoints at all - only the new caps[] array - must still clamp.
+    rules = [{
+        "category": "Dining", "multiplier": 3, "isExcluded": False,
+        "caps": [{"capPoints": 500, "period": "monthly"}],
+    }]
+    result = resolve_reward_rate(rules, [], current_spend=0.0, hypothetical_amount=50000,
+                                  base_points=1, base_spend=150, category="Dining")
+    assert result["points"] == 500
+    assert result["capped"] is True
+
+
+def test_resolve_reward_rate_group_label_is_purely_informational():
+    # Two categories sharing a groupLabel each still resolve independently -
+    # the label is documentation only, never enforced as a pooled ceiling
+    # across categories (Artha has no per-category spend ledger to enforce
+    # it against), so neither category's own cap is affected by the other.
+    rules = [
+        {"category": "Travel", "multiplier": 5, "isExcluded": False,
+         "caps": [{"capPoints": 15000, "period": "monthly", "groupLabel": "Pool"}]},
+        {"category": "Dining", "multiplier": 5, "isExcluded": False,
+         "caps": [{"capPoints": 15000, "period": "monthly", "groupLabel": "Pool"}]},
+    ]
+    travel = resolve_reward_rate(rules, [], current_spend=0.0, hypothetical_amount=1000000,
+                                   base_points=1, base_spend=150, category="Travel")
+    dining = resolve_reward_rate(rules, [], current_spend=0.0, hypothetical_amount=1000000,
+                                   base_points=1, base_spend=150, category="Dining")
+    # Both independently hit their own 15000 cap - no cross-category reduction.
+    assert travel["points"] == 15000
+    assert dining["points"] == 15000
+
+
+def test_resolve_reward_rate_uncapped_category_unaffected_by_new_fields():
+    # A rule with no monthlyCapPoints and no caps[] must behave exactly as before.
+    rules = [{"category": "Grocery", "multiplier": 2, "isExcluded": False}]
+    result = resolve_reward_rate(rules, [], current_spend=0.0, hypothetical_amount=10000,
+                                   base_points=1, base_spend=150, category="Grocery")
+    assert result["points"] == round((10000 / 150) * 1 * 2)
+    assert result["capped"] is False

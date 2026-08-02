@@ -3,7 +3,7 @@ import {
   CreditCard as CardIcon, Plus, Edit2, Trash2, ShieldAlert,
   X, Sparkles
 } from 'lucide-react';
-import { InitData } from '../types';
+import { InitData, CategoryMultiplierRule, MilestoneThresholdRule, RedemptionPartnerRatio, CapRule } from '../types';
 import { API_BASE_URL } from '../config';
 import { useModalA11y } from '../hooks/useModalA11y';
 import { CardLibraryTab } from './creditcards/CardLibraryTab';
@@ -16,23 +16,7 @@ interface CreditCardsProps {
   showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
 
-interface CategoryMultiplierRule {
-  category: string;
-  multiplier: number;
-  isExcluded: boolean;
-  monthlyCapPoints?: number;
-}
-
-interface MilestoneThresholdRule {
-  spendThreshold: number;
-  bonusPointsRate: number; // e.g. 35 points instead of 12
-  pointsPerSpend: number;  // e.g. per 200 spent
-}
-
-interface RedemptionPartnerRatio {
-  partnerName: string;
-  transferRatio: number; // e.g. 0.8 for 5:4, 0.4 for 5:2
-}
+const CAP_PERIODS: CapRule['period'][] = ['daily', 'monthly', 'quarterly', 'statement_cycle', 'annual'];
 
 // Popular Premium Cards Preset Templates
 const PRESETS = [
@@ -169,6 +153,12 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
   const [newCatMultiplier, setNewCatMultiplier] = useState(2);
   const [newCatExcluded, setNewCatExcluded] = useState(false);
   const [newCatCap, setNewCatCap] = useState('');
+  // Staged additional simultaneous caps (e.g. a daily cap alongside the monthly one
+  // above) for the category rule about to be added — see handleAddCatRule.
+  const [newCatExtraCaps, setNewCatExtraCaps] = useState<CapRule[]>([]);
+  const [newCapPeriod, setNewCapPeriod] = useState<CapRule['period']>('daily');
+  const [newCapPoints, setNewCapPoints] = useState('');
+  const [newCapGroupLabel, setNewCapGroupLabel] = useState('');
 
   const [newMilestoneSpend, setNewMilestoneSpend] = useState(150000);
   const [newMilestoneRate, setNewMilestoneRate] = useState(35);
@@ -176,6 +166,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
 
   const [newPartnerName, setNewPartnerName] = useState('');
   const [newPartnerRatio, setNewPartnerRatio] = useState(1.0);
+  const [newPartnerPointValue, setNewPartnerPointValue] = useState('');
 
   // Calculator states
   const [calcCategory, setCalcCategory] = useState('General');
@@ -417,9 +408,26 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
       category: newCatName,
       multiplier: Number(newCatMultiplier),
       isExcluded: newCatExcluded,
-      monthlyCapPoints: newCatCap ? Number(newCatCap) : undefined
+      monthlyCapPoints: newCatCap ? Number(newCatCap) : undefined,
+      caps: newCatExtraCaps.length > 0 ? newCatExtraCaps : undefined
     }]);
     setNewCatCap('');
+    setNewCatExtraCaps([]);
+  };
+
+  const handleAddExtraCap = () => {
+    if (!newCapPoints) return;
+    setNewCatExtraCaps(prev => [...prev, {
+      capPoints: Number(newCapPoints),
+      period: newCapPeriod,
+      groupLabel: newCapGroupLabel || undefined
+    }]);
+    setNewCapPoints('');
+    setNewCapGroupLabel('');
+  };
+
+  const handleRemoveExtraCap = (idx: number) => {
+    setNewCatExtraCaps(prev => prev.filter((_, i) => i !== idx));
   };
 
   const handleAddMilestoneRule = () => {
@@ -434,10 +442,12 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
     if (!newPartnerName) return;
     setRedemptionPartners(prev => [...prev, {
       partnerName: newPartnerName,
-      transferRatio: Number(newPartnerRatio)
+      transferRatio: Number(newPartnerRatio),
+      pointValue: newPartnerPointValue ? Number(newPartnerPointValue) : undefined
     }]);
     setNewPartnerName('');
     setNewPartnerRatio(1.0);
+    setNewPartnerPointValue('');
   };
 
   // Summary Metrics calculations
@@ -543,13 +553,20 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
       // points = (Amount / SpendBlock) * Rate * Multiplier
       let rawPoints = (calcAmount / resolvedSpendBlock) * resolvedPointsRate * multiplier;
 
-      // 5. Apply category monthly caps if configured
+      // 5. Apply the tightest of all configured caps (legacy monthlyCapPoints plus any
+      // additional simultaneous ceilings in caps[], e.g. a daily cap alongside the
+      // monthly one). Mirrors resolve_reward_rate's clamp in calculations.py.
       let isCapped = false;
-      if (matchingCatRule && matchingCatRule.monthlyCapPoints !== undefined) {
-        const cap = Number(matchingCatRule.monthlyCapPoints);
-        if (rawPoints > cap) {
-          rawPoints = cap;
-          isCapped = true;
+      if (matchingCatRule) {
+        const candidateCaps: number[] = [];
+        if (matchingCatRule.monthlyCapPoints !== undefined) candidateCaps.push(Number(matchingCatRule.monthlyCapPoints));
+        (matchingCatRule.caps || []).forEach(c => { if (c.capPoints !== undefined) candidateCaps.push(Number(c.capPoints)); });
+        if (candidateCaps.length > 0) {
+          const effectiveCap = Math.min(...candidateCaps);
+          if (rawPoints > effectiveCap) {
+            rawPoints = effectiveCap;
+            isCapped = true;
+          }
         }
       }
 
@@ -560,12 +577,14 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
       let yieldDetails = `Redeemed at base value of ₹${ptVal} per point.`;
 
       if (redemptionStrategy === 'miles' && partnerRatios.length > 0) {
-        // Find partner with best ratio
-        const bestPartner = [...partnerRatios].sort((a, b) => b.transferRatio - a.transferRatio)[0];
-        // Standard assumption: 1 Mile = ₹1.0 value
-        const effectiveMileValue = 1.0;
+        // Best route by actual INR yield (ratio * per-point value), not ratio alone —
+        // a high-ratio route to a low-value point isn't necessarily the best deal.
+        const bestPartner = [...partnerRatios].sort(
+          (a, b) => (b.transferRatio * (b.pointValue ?? 1.0)) - (a.transferRatio * (a.pointValue ?? 1.0))
+        )[0];
+        const effectiveMileValue = bestPartner.pointValue ?? 1.0;
         resolvedValue = rawPoints * bestPartner.transferRatio * effectiveMileValue;
-        yieldDetails = `Transferred to ${bestPartner.partnerName} at ratio ${bestPartner.transferRatio}x (estimated value of ₹1/mile).`;
+        yieldDetails = `Transferred to ${bestPartner.partnerName} at ratio ${bestPartner.transferRatio}x (₹${effectiveMileValue}/point estimated value).`;
       } else if (redemptionStrategy === 'miles') {
         yieldDetails = `No mileage partners configured. Defaulted to statement cash value.`;
       }
@@ -1358,7 +1377,12 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                       <div key={rIdx} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 12px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '6px', fontSize: '12px' }}>
                         <div>
                           <strong>{rule.category}</strong>: {rule.isExcluded ? <span style={{ color: 'var(--danger-light)' }}>Excluded (0 points)</span> : <span style={{ color: 'var(--accent-light)' }}>{rule.multiplier}x multiplier</span>}
-                          {rule.monthlyCapPoints && <span style={{ color: 'var(--text-muted)', marginLeft: '8px' }}>(Cap: {rule.monthlyCapPoints} pts)</span>}
+                          {rule.monthlyCapPoints && <span style={{ color: 'var(--text-muted)', marginLeft: '8px' }}>(Cap: {rule.monthlyCapPoints} pts/mo)</span>}
+                          {(rule.caps || []).map((cap, cIdx) => (
+                            <span key={cIdx} style={{ color: 'var(--text-muted)', marginLeft: '8px' }}>
+                              (Cap: {cap.capPoints} pts/{cap.period}{cap.groupLabel ? `, ${cap.groupLabel}` : ''})
+                            </span>
+                          ))}
                         </div>
                         <button type="button" style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer' }} onClick={() => setCategoryRules(prev => prev.filter((_, i) => i !== rIdx))}><X size={12} /></button>
                       </div>
@@ -1398,6 +1422,41 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                     </div>
 
                     <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={handleAddCatRule}>Add Rule</button>
+                  </div>
+
+                  {/* Additional simultaneous caps for the rule about to be added above —
+                      e.g. a daily cap alongside the Monthly Points Cap, or a cap shared/
+                      pooled with other categories (label only, not cross-category enforced;
+                      Artha has no per-category spend ledger to enforce a shared pool against). */}
+                  <div style={{ marginTop: '10px', padding: '12px', borderRadius: '8px', border: '1px dashed var(--border-glass)' }}>
+                    <label className="form-label" style={{ fontSize: '10px' }}>Additional caps for the rule above (optional — e.g. a daily cap)</label>
+                    {newCatExtraCaps.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                        {newCatExtraCaps.map((cap, idx) => (
+                          <span key={idx} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', padding: '3px 8px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px' }}>
+                            {cap.capPoints} pts/{cap.period}{cap.groupLabel ? ` (${cap.groupLabel})` : ''}
+                            <button type="button" style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', display: 'flex' }} onClick={() => handleRemoveExtraCap(idx)}><X size={10} /></button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.2fr auto', gap: '8px', alignItems: 'flex-end' }}>
+                      <div>
+                        <label className="form-label" htmlFor="cc-new-cap-period" style={{ fontSize: '10px' }}>Period</label>
+                        <select id="cc-new-cap-period" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newCapPeriod} onChange={e => setNewCapPeriod(e.target.value as CapRule['period'])}>
+                          {CAP_PERIODS.map(p => <option key={p} value={p}>{p.replace('_', ' ')}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="form-label" htmlFor="cc-new-cap-points" style={{ fontSize: '10px' }}>Points cap</label>
+                        <input id="cc-new-cap-points" type="number" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newCapPoints} onChange={e => setNewCapPoints(e.target.value)} placeholder="e.g. 15000" />
+                      </div>
+                      <div>
+                        <label className="form-label" htmlFor="cc-new-cap-group" style={{ fontSize: '10px' }}>Shared pool label (optional)</label>
+                        <input id="cc-new-cap-group" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newCapGroupLabel} onChange={e => setNewCapGroupLabel(e.target.value)} placeholder="e.g. Accelerated Rewards" />
+                      </div>
+                      <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={handleAddExtraCap}>Add Cap</button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1479,21 +1538,28 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
               {/* MODAL TAB 5: PARTNERS */}
               {activeModalTab === 'partners' && (
                 <div>
-                  <h4 style={{ fontSize: '12px', fontWeight: 600, color: '#fff', marginBottom: '10px' }}>Redemption Partners &amp; Airline Miles</h4>
-                  
+                  <h4 style={{ fontSize: '12px', fontWeight: 600, color: '#fff', marginBottom: '10px' }}>Redemption Routes &amp; Airline Miles</h4>
+                  <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '10px' }}>
+                    Covers external mile-transfer partners as well as the bank's own in-house channels
+                    (e.g. a travel portal or cashback) — use a ratio of 1 for a channel with no external conversion.
+                  </p>
+
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }}>
                     {redemptionPartners.map((ratio, idx) => (
                       <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 12px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '6px', fontSize: '12px' }}>
-                        <span><strong>{ratio.partnerName}</strong>: {ratio.transferRatio} mile/point ratio</span>
+                        <span>
+                          <strong>{ratio.partnerName}</strong>: {ratio.transferRatio} mile/point ratio
+                          {ratio.pointValue !== undefined && <span style={{ color: 'var(--text-muted)', marginLeft: '8px' }}>(₹{ratio.pointValue}/point)</span>}
+                        </span>
                         <button type="button" style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer' }} onClick={() => setRedemptionPartners(prev => prev.filter((_, i) => i !== idx))}><X size={12} /></button>
                       </div>
                     ))}
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr auto', gap: '10px', alignItems: 'flex-end', background: 'rgba(255,255,255,0.01)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1fr auto', gap: '10px', alignItems: 'flex-end', background: 'rgba(255,255,255,0.01)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
                     <div>
-                      <label className="form-label" htmlFor="cc-new-partner-name" style={{ fontSize: '10px' }}>Partner Airline / Hotel</label>
-                      <input id="cc-new-partner-name" type="text" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newPartnerName} onChange={e => setNewPartnerName(e.target.value)} placeholder="e.g. KrisFlyer Singapore" />
+                      <label className="form-label" htmlFor="cc-new-partner-name" style={{ fontSize: '10px' }}>Redemption Route</label>
+                      <input id="cc-new-partner-name" type="text" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newPartnerName} onChange={e => setNewPartnerName(e.target.value)} placeholder="e.g. KrisFlyer Singapore, Travel Portal, Cashback" />
                     </div>
 
                     <div>
@@ -1501,7 +1567,12 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                       <input id="cc-new-partner-ratio" type="number" step="0.1" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newPartnerRatio} onChange={e => setNewPartnerRatio(Number(e.target.value))} />
                     </div>
 
-                    <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={handleAddPartnerRule}>Add Partner</button>
+                    <div>
+                      <label className="form-label" htmlFor="cc-new-partner-value" style={{ fontSize: '10px' }}>Point Value (₹, optional)</label>
+                      <input id="cc-new-partner-value" type="number" step="0.01" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newPartnerPointValue} onChange={e => setNewPartnerPointValue(e.target.value)} placeholder="Default ₹1" />
+                    </div>
+
+                    <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={handleAddPartnerRule}>Add Route</button>
                   </div>
                 </div>
               )}

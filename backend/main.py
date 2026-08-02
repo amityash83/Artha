@@ -990,12 +990,22 @@ def put_credit_card_details(id: int, details: CreditCardDetailsSchema):
     try:
         cursor.execute("SELECT liability_id FROM credit_card_details WHERE liability_id = ?", (id,))
         exists = cursor.fetchone()
-        payload = details.dict()
         if exists:
-            set_clauses = [f"{c} = :{c}" for c in payload.keys()]
-            payload["id"] = id
-            cursor.execute(f"UPDATE credit_card_details SET {', '.join(set_clauses)} WHERE liability_id = :id", payload)
+            # Only overwrite fields the caller actually sent. The generic Liabilities
+            # grid (EntityGrid.tsx) PUTs a partial payload (credit_limit/statement_balance/
+            # statement_date/due_date/annual_fee/reward_points/point_value only) — a full
+            # .dict() would fill in every omitted field from this schema's defaults and
+            # silently wipe category_rules_json/milestone_rules_json/redemption_partners_json/
+            # base_points/base_spend/etc. back to '[]'/0, destroying whatever was configured
+            # via the dedicated Credit Cards screen.
+            payload = details.dict(exclude_unset=True)
+            if payload:
+                set_clauses = [f"{c} = :{c}" for c in payload.keys()]
+                payload["id"] = id
+                cursor.execute(f"UPDATE credit_card_details SET {', '.join(set_clauses)} WHERE liability_id = :id", payload)
         else:
+            # New row: every column needs a real value, not just whatever the caller sent.
+            payload = details.dict()
             payload["liability_id"] = id
             columns = list(payload.keys())
             placeholders = [f":{c}" for c in columns]

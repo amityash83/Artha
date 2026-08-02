@@ -678,8 +678,22 @@ def resolve_reward_rate(category_rules: list, milestone_rules: list, current_spe
     """
     Ports CreditCards.tsx's calculatorRecommendations rate-resolution logic:
     category exclusion check -> category multiplier -> milestone step-up ->
-    raw points -> optional monthly cap. Returns points earned on
-    hypothetical_amount plus whether a milestone/exclusion applied.
+    raw points -> tightest applicable cap. Returns points earned on
+    hypothetical_amount plus whether a milestone/exclusion/cap applied.
+
+    A category rule may carry a legacy single `monthlyCapPoints` and/or a
+    `caps` list (each `{capPoints, period, groupLabel?}`) for banks with
+    multiple simultaneous ceilings (e.g. a daily cap alongside a monthly one).
+    All present cap values are treated as independent simultaneous ceilings and
+    the tightest (minimum) one is applied — since hypothetical_amount is always
+    one isolated transaction, not a running total, this is exact: whichever
+    cap is tightest is the one that would actually bind, with no date
+    arithmetic needed. `groupLabel` (a bank's stated shared/pooled cap name,
+    e.g. "part of the overall Accelerated Rewards pool") is read but NOT
+    enforced across categories — Artha has no per-transaction, per-category
+    spend ledger anywhere, so true cross-category pool depletion can't be
+    tracked; it exists purely to let a bank's real rule structure be recorded
+    as data, not to change the numeric result.
     """
     matching_rule = None
     if category:
@@ -707,11 +721,18 @@ def resolve_reward_rate(category_rules: list, milestone_rules: list, current_spe
     raw_points = (hypothetical_amount / spend_block) * rate * multiplier
 
     capped = False
-    if matching_rule and matching_rule.get("monthlyCapPoints") is not None:
-        cap = float(matching_rule["monthlyCapPoints"])
-        if raw_points > cap:
-            raw_points = cap
-            capped = True
+    if matching_rule:
+        candidate_caps = []
+        if matching_rule.get("monthlyCapPoints") is not None:
+            candidate_caps.append(float(matching_rule["monthlyCapPoints"]))
+        for cap_rule in (matching_rule.get("caps") or []):
+            if cap_rule.get("capPoints") is not None:
+                candidate_caps.append(float(cap_rule["capPoints"]))
+        if candidate_caps:
+            effective_cap = min(candidate_caps)
+            if raw_points > effective_cap:
+                raw_points = effective_cap
+                capped = True
 
     return {"points": round(raw_points), "excluded": False, "milestone_triggered": milestone_triggered, "capped": capped}
 
