@@ -138,11 +138,11 @@ def test_resolve_reward_rate_caps_array_without_legacy_field():
     assert result["capped"] is True
 
 
-def test_resolve_reward_rate_group_label_is_purely_informational():
-    # Two categories sharing a groupLabel each still resolve independently -
-    # the label is documentation only, never enforced as a pooled ceiling
-    # across categories (Artha has no per-category spend ledger to enforce
-    # it against), so neither category's own cap is affected by the other.
+def test_resolve_reward_rate_group_label_is_informational_without_a_spend_map():
+    # Without category_spend_map (the default, and the only mode Compare Cards'
+    # spend-free projection ever uses), a shared groupLabel has no effect - each
+    # category resolves independently against its own cap. This is the
+    # backward-compatible default every pre-existing caller keeps getting.
     rules = [
         {"category": "Travel", "multiplier": 5, "isExcluded": False,
          "caps": [{"capPoints": 15000, "period": "monthly", "groupLabel": "Pool"}]},
@@ -156,6 +156,94 @@ def test_resolve_reward_rate_group_label_is_purely_informational():
     # Both independently hit their own 15000 cap - no cross-category reduction.
     assert travel["points"] == 15000
     assert dining["points"] == 15000
+
+
+def test_resolve_reward_rate_group_label_pools_across_categories_when_spend_map_given():
+    # Same shared-15000-point-pool rules as above, but now backed by a real
+    # category_spend_map: Travel has already earned 10000 points this cycle
+    # from its own real spend (2000 at 5x/₹150 block = 66.67 pts/₹ * ... let's
+    # just pick a spend figure that resolves to exactly 10000 points: spend/150
+    # * 1 * 5 = 10000 -> spend = 300000), leaving only 5000 of headroom in the
+    # shared pool for Dining's new hypothetical transaction.
+    rules = [
+        {"category": "Travel", "multiplier": 5, "isExcluded": False,
+         "caps": [{"capPoints": 15000, "period": "monthly", "groupLabel": "Pool"}]},
+        {"category": "Dining", "multiplier": 5, "isExcluded": False,
+         "caps": [{"capPoints": 15000, "period": "monthly", "groupLabel": "Pool"}]},
+    ]
+    spend_map = {"Travel": 300000.0}  # -> 300000/150 * 1 * 5 = 10000 points already earned
+    dining = resolve_reward_rate(rules, [], current_spend=300000.0, hypothetical_amount=1000000,
+                                   base_points=1, base_spend=150, category="Dining",
+                                   category_spend_map=spend_map)
+    assert dining["points"] == 5000
+    assert dining["capped"] is True
+
+
+def test_resolve_reward_rate_group_label_pool_fully_consumed_by_sibling_yields_zero():
+    rules = [
+        {"category": "Travel", "multiplier": 5, "isExcluded": False,
+         "caps": [{"capPoints": 15000, "period": "monthly", "groupLabel": "Pool"}]},
+        {"category": "Dining", "multiplier": 5, "isExcluded": False,
+         "caps": [{"capPoints": 15000, "period": "monthly", "groupLabel": "Pool"}]},
+    ]
+    spend_map = {"Travel": 450000.0}  # -> 450000/150 * 1 * 5 = 15000, the whole pool
+    dining = resolve_reward_rate(rules, [], current_spend=450000.0, hypothetical_amount=1000000,
+                                   base_points=1, base_spend=150, category="Dining",
+                                   category_spend_map=spend_map)
+    assert dining["points"] == 0
+    assert dining["capped"] is True
+
+
+def test_resolve_reward_rate_group_label_pool_respects_siblings_own_individual_cap():
+    # Travel has its OWN individual (non-pooled) cap of 3000 in addition to
+    # sharing the 15000 pool - even though its real spend would raw-earn far
+    # more than 3000, only 3000 of it should count as "already consumed" from
+    # the pool (a category can't consume more of a shared pool than its own
+    # individual ceiling would ever have let it earn in the first place).
+    rules = [
+        {"category": "Travel", "multiplier": 5, "isExcluded": False, "monthlyCapPoints": 3000,
+         "caps": [{"capPoints": 15000, "period": "monthly", "groupLabel": "Pool"}]},
+        {"category": "Dining", "multiplier": 5, "isExcluded": False,
+         "caps": [{"capPoints": 15000, "period": "monthly", "groupLabel": "Pool"}]},
+    ]
+    spend_map = {"Travel": 450000.0}  # raw would be 15000, but Travel's own cap limits it to 3000
+    dining = resolve_reward_rate(rules, [], current_spend=450000.0, hypothetical_amount=1000000,
+                                   base_points=1, base_spend=150, category="Dining",
+                                   category_spend_map=spend_map)
+    assert dining["points"] == 12000  # 15000 pool - 3000 actually consumed by Travel
+    assert dining["capped"] is True
+
+
+def test_resolve_reward_rate_group_label_pool_includes_own_prior_spend_in_same_category():
+    # The category being calculated right now also contributes its OWN prior
+    # real spend this cycle to the pool consumption total - a card shouldn't
+    # let repeated small Dining swipes bypass the shared pool just because
+    # they're all "the current category."
+    rules = [
+        {"category": "Dining", "multiplier": 5, "isExcluded": False,
+         "caps": [{"capPoints": 15000, "period": "monthly", "groupLabel": "Pool"}]},
+    ]
+    spend_map = {"Dining": 300000.0}  # already earned 10000 points from prior Dining spend
+    dining = resolve_reward_rate(rules, [], current_spend=300000.0, hypothetical_amount=1000000,
+                                   base_points=1, base_spend=150, category="Dining",
+                                   category_spend_map=spend_map)
+    assert dining["points"] == 5000
+    assert dining["capped"] is True
+
+
+def test_resolve_reward_rate_excluded_sibling_never_contributes_to_pool():
+    rules = [
+        {"category": "Travel", "multiplier": 5, "isExcluded": True,
+         "caps": [{"capPoints": 15000, "period": "monthly", "groupLabel": "Pool"}]},
+        {"category": "Dining", "multiplier": 5, "isExcluded": False,
+         "caps": [{"capPoints": 15000, "period": "monthly", "groupLabel": "Pool"}]},
+    ]
+    spend_map = {"Travel": 450000.0}
+    dining = resolve_reward_rate(rules, [], current_spend=450000.0, hypothetical_amount=1000000,
+                                   base_points=1, base_spend=150, category="Dining",
+                                   category_spend_map=spend_map)
+    assert dining["points"] == 15000  # excluded Travel never earns, so nothing to consume
+    assert dining["capped"] is True
 
 
 def test_resolve_reward_rate_uncapped_category_unaffected_by_new_fields():

@@ -670,11 +670,14 @@ def compare_tax_regimes(taxable_income_old: float, taxable_income_new: float, ag
 # variants have no real spend data at all — reward value there is always a
 # projection against a hypothetical assumed annual spend. Owned cards now have
 # a real per-category 'Spend' transaction ledger (see calculate_statement_cycle
-# below and get_init_data/spend-breakdown in main.py), so current_spend can be
-# backed by real current-cycle totals — but resolve_reward_rate itself still
-# only takes one aggregate current_spend figure; it doesn't (yet) enforce a
-# category rule's groupLabel as a real pooled ceiling across categories, since
-# that's a distinct, separately-reviewable change to a user-facing number.
+# below and get_init_data/spend-breakdown in main.py); resolve_reward_rate's
+# optional category_spend_map parameter lets a caller enforce a category
+# rule's groupLabel as a real pooled ceiling across categories using that real
+# per-category data — compare_cards itself still doesn't pass one, since its
+# projection is against a hypothetical assumed annual spend with no current-
+# cycle history to pool against; the live Calculator in CreditCards.tsx is
+# where this is wired to real data (its TS port of this function mirrors the
+# pooling logic here).
 # ---------------------------------------------------------------------------
 
 def calculate_statement_cycle(statement_date: Optional[int], as_of: date) -> dict:
@@ -713,7 +716,7 @@ def calculate_statement_cycle(statement_date: Optional[int], as_of: date) -> dic
 
 def resolve_reward_rate(category_rules: list, milestone_rules: list, current_spend: float,
                          hypothetical_amount: float, base_points: float, base_spend: float,
-                         category: Optional[str] = None) -> dict:
+                         category: Optional[str] = None, category_spend_map: Optional[dict] = None) -> dict:
     """
     Ports CreditCards.tsx's calculatorRecommendations rate-resolution logic:
     category exclusion check -> category multiplier -> milestone step-up ->
@@ -727,12 +730,27 @@ def resolve_reward_rate(category_rules: list, milestone_rules: list, current_spe
     the tightest (minimum) one is applied — since hypothetical_amount is always
     one isolated transaction, not a running total, this is exact: whichever
     cap is tightest is the one that would actually bind, with no date
-    arithmetic needed. `groupLabel` (a bank's stated shared/pooled cap name,
-    e.g. "part of the overall Accelerated Rewards pool") is read but NOT
-    enforced across categories — Artha has no per-transaction, per-category
-    spend ledger anywhere, so true cross-category pool depletion can't be
-    tracked; it exists purely to let a bank's real rule structure be recorded
-    as data, not to change the numeric result.
+    arithmetic needed.
+
+    `groupLabel` (a bank's stated shared/pooled cap name, e.g. "part of the
+    overall Accelerated Rewards pool") marks a cap entry as shared across every
+    category rule on the card that declares the same groupLabel — the pool's
+    capPoints is a ceiling on their COMBINED points this cycle, not each
+    category's own independent ceiling. Enforcing this needs real per-category
+    spend-so-far-this-cycle, which callers pass as `category_spend_map` (a
+    {category_name: amount} dict, e.g. from GET /api/liabilities/{id}/
+    spend-breakdown's by_category) — the only reason this function now takes a
+    DB-adjacent input despite otherwise being pure math. If omitted (or a card
+    has no real Spend history yet), pooled caps are silently skipped and only
+    each category's own individual caps apply, exactly like before this
+    parameter existed. Sibling categories' already-earned points are estimated
+    using THIS call's resolved card-wide rate/spend-block (milestone step-up is
+    a card-level threshold, not per-category, so there is no separate
+    "historical rate" to reconstruct) and clamped by each sibling's own
+    non-pooled caps — an approximation Artha's design already leans on
+    elsewhere (e.g. compare_cards' spend-free projections), since there is no
+    per-transaction point ledger anywhere to know the exact rate that applied
+    to each real historical transaction.
     """
     matching_rule = None
     if category:
@@ -764,9 +782,47 @@ def resolve_reward_rate(category_rules: list, milestone_rules: list, current_spe
         candidate_caps = []
         if matching_rule.get("monthlyCapPoints") is not None:
             candidate_caps.append(float(matching_rule["monthlyCapPoints"]))
+        pooled_caps = []
         for cap_rule in (matching_rule.get("caps") or []):
-            if cap_rule.get("capPoints") is not None:
-                candidate_caps.append(float(cap_rule["capPoints"]))
+            if cap_rule.get("capPoints") is None:
+                continue
+            # A pooled cap still applies as its own ordinary ceiling on this
+            # category (unchanged default behavior) - category_spend_map, when
+            # available, adds an EXTRA, usually-tighter candidate below for the
+            # pool's combined remaining headroom. It never replaces this one.
+            candidate_caps.append(float(cap_rule["capPoints"]))
+            if cap_rule.get("groupLabel"):
+                pooled_caps.append(cap_rule)
+
+        if category_spend_map:
+            for pool_cap in pooled_caps:
+                group_label = pool_cap["groupLabel"]
+                pool_ceiling = float(pool_cap["capPoints"])
+                consumed = 0.0
+                for sibling in category_rules:
+                    sibling_name = str(sibling.get("category", ""))
+                    if sibling.get("isExcluded"):
+                        continue
+                    if not any(
+                        c.get("groupLabel") == group_label and c.get("capPoints") is not None
+                        for c in (sibling.get("caps") or [])
+                    ):
+                        continue
+                    sibling_spend = float(category_spend_map.get(sibling_name, 0.0) or 0.0)
+                    if sibling_spend <= 0:
+                        continue
+                    sibling_points = sibling_spend / spend_block * rate * float(sibling.get("multiplier", 1.0))
+                    sibling_individual_caps = [
+                        float(c["capPoints"]) for c in (sibling.get("caps") or [])
+                        if c.get("capPoints") is not None and c.get("groupLabel") != group_label
+                    ]
+                    if sibling.get("monthlyCapPoints") is not None:
+                        sibling_individual_caps.append(float(sibling["monthlyCapPoints"]))
+                    if sibling_individual_caps:
+                        sibling_points = min(sibling_points, min(sibling_individual_caps))
+                    consumed += sibling_points
+                candidate_caps.append(max(0.0, pool_ceiling - consumed))
+
         if candidate_caps:
             effective_cap = min(candidate_caps)
             if raw_points > effective_cap:

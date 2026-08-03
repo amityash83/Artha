@@ -102,9 +102,13 @@ export interface AttachedDocument {
 export interface CapRule {
   capPoints: number;
   period: 'daily' | 'monthly' | 'quarterly' | 'statement_cycle' | 'annual';
-  // Display-only: documents a bank's stated shared/pooled cap (e.g. "part of the
-  // 15,000/mo Accelerated Rewards pool"). Not enforced across categories — Artha
-  // has no per-transaction, per-category spend ledger to enforce it against.
+  // Documents a bank's stated shared/pooled cap (e.g. "part of the 15,000/mo
+  // Accelerated Rewards pool") — every CapRule across a card's category_rules
+  // sharing the same groupLabel string draws from one combined ceiling.
+  // Enforced by CreditCards.tsx's Calculator against real per-category spend
+  // this cycle (see spendBreakdownsByCard); if no real spend has been logged
+  // yet for a sibling category, that category simply can't have consumed any
+  // of the pool, so this falls back to each category's own individual cap.
   groupLabel?: string;
 }
 

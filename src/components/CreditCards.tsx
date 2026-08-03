@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   CreditCard as CardIcon, Plus, Edit2, Trash2, ShieldAlert,
   X, Sparkles
@@ -115,6 +115,23 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
   const creditCards = useMemo(() => {
     return liabilities.filter((l: any) => l.category_name === 'Credit Card');
   }, [liabilities]);
+
+  // Per-card current-cycle category breakdown, fetched for every owned card
+  // (not just the one being edited) so the Calculator's pooled-cap enforcement
+  // below has real per-category spend to work from. A card with no logged
+  // Spend transactions yet simply has no entry here — pooling for it silently
+  // falls back to each category's own individual cap, same as before real
+  // spend data existed (see resolve_reward_rate's category_spend_map docstring
+  // in backend/calculations.py for the mirrored backend logic).
+  const [spendBreakdownsByCard, setSpendBreakdownsByCard] = useState<Record<number, SpendBreakdown>>({});
+  useEffect(() => {
+    creditCards.forEach((c: any) => {
+      fetch(`${API_BASE_URL}/api/liabilities/${c.id}/spend-breakdown`)
+        .then(res => res.json())
+        .then(bd => setSpendBreakdownsByCard(prev => ({ ...prev, [c.id]: bd })))
+        .catch(() => {});
+    });
+  }, [creditCards]);
 
   const [activeSubTab, setActiveSubTab] = useState<
     'inventory' | 'milestones' | 'calculator' | 'library' | 'compare' | 'annual-review'
@@ -589,7 +606,53 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
       if (matchingCatRule) {
         const candidateCaps: number[] = [];
         if (matchingCatRule.monthlyCapPoints !== undefined) candidateCaps.push(Number(matchingCatRule.monthlyCapPoints));
-        (matchingCatRule.caps || []).forEach(c => { if (c.capPoints !== undefined) candidateCaps.push(Number(c.capPoints)); });
+        const pooledCaps: CapRule[] = [];
+        (matchingCatRule.caps || []).forEach(capRule => {
+          if (capRule.capPoints === undefined) return;
+          // A pooled cap still applies as its own ordinary ceiling on this
+          // category — pooling below only ADDS an extra, usually-tighter
+          // candidate; it never replaces this one.
+          candidateCaps.push(Number(capRule.capPoints));
+          if (capRule.groupLabel) pooledCaps.push(capRule);
+        });
+
+        // Enforce each pooled cap's combined ceiling across every sibling
+        // category sharing the same groupLabel, using real per-category spend
+        // this cycle (mirrors resolve_reward_rate's category_spend_map logic
+        // in backend/calculations.py). Sibling "already earned" points are
+        // estimated at THIS card's currently-resolved rate, since milestone
+        // step-up is a card-wide threshold, not per-category — there's no
+        // separate historical rate to reconstruct.
+        if (pooledCaps.length > 0) {
+          const categorySpendMap: Record<string, number> = {};
+          (spendBreakdownsByCard[c.id]?.by_category || []).forEach(row => {
+            categorySpendMap[row.category_name] = row.amount;
+          });
+          pooledCaps.forEach(poolCap => {
+            const groupLabel = poolCap.groupLabel;
+            const poolCeiling = Number(poolCap.capPoints);
+            let consumed = 0;
+            catRules.forEach(sibling => {
+              if (sibling.isExcluded) return;
+              const sharesGroup = (sibling.caps || []).some(
+                sc => sc.groupLabel === groupLabel && sc.capPoints !== undefined
+              );
+              if (!sharesGroup) return;
+              const siblingSpend = categorySpendMap[sibling.category] || 0;
+              if (siblingSpend <= 0) return;
+              let siblingPoints = (siblingSpend / resolvedSpendBlock) * resolvedPointsRate * Number(sibling.multiplier);
+              const siblingIndividualCaps: number[] = [];
+              (sibling.caps || []).forEach(sc => {
+                if (sc.capPoints !== undefined && sc.groupLabel !== groupLabel) siblingIndividualCaps.push(Number(sc.capPoints));
+              });
+              if (sibling.monthlyCapPoints !== undefined) siblingIndividualCaps.push(Number(sibling.monthlyCapPoints));
+              if (siblingIndividualCaps.length > 0) siblingPoints = Math.min(siblingPoints, Math.min(...siblingIndividualCaps));
+              consumed += siblingPoints;
+            });
+            candidateCaps.push(Math.max(0, poolCeiling - consumed));
+          });
+        }
+
         if (candidateCaps.length > 0) {
           const effectiveCap = Math.min(...candidateCaps);
           if (rawPoints > effectiveCap) {
@@ -630,7 +693,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
         network: meta.network || 'Visa'
       };
     }).sort((a, b) => b.rewardValueInr - a.rewardValueInr);
-  }, [creditCards, calcCategory, calcAmount, redemptionStrategy]);
+  }, [creditCards, calcCategory, calcAmount, redemptionStrategy, spendBreakdownsByCard]);
 
   const getNetworkIconText = (networkStr: string) => {
     const net = networkStr.toLowerCase();
