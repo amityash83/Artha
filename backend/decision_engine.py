@@ -267,10 +267,13 @@ def generate_credit_card_annual_reviews(conn, liability_id: int = None) -> list:
     """
     One verdict dict per owned Credit-Card liability (or just the one matching
     liability_id if given). Reads credit_card_details only — no transactions, no
-    card_variants — since no per-transaction category spend data exists anywhere
-    in Artha. Verdict is Keep/Close/Downgrade/Upgrade-Candidate based purely on
-    the aggregate fields already stored on the card; never infers category-level
-    spending behavior that isn't actually tracked.
+    card_variants. A real per-transaction, per-category spend ledger now exists
+    (see compute_real_cycle_spend_total/get_spend_breakdown in main.py), but this
+    generator doesn't incorporate it yet — that's a legitimate follow-up once
+    users have logged enough real spend history to make it meaningful, not a
+    requirement of the ledger itself. Verdict is Keep/Close/Downgrade/Upgrade-
+    Candidate based purely on the aggregate fields already stored on the card;
+    never infers category-level spending behavior beyond what's actually used here.
 
     Deliberately does NOT pick a specific replacement card for Upgrade-Candidate/
     Downgrade verdicts — that requires comparing against Card Library variants,
@@ -354,6 +357,6 @@ def generate_credit_card_annual_reviews(conn, liability_id: int = None) -> list:
             "lounge_utilization": round(lounge_utilization, 2) if lounge_utilization is not None else None,
             "reason": reason,
             "next_review_date": renewal_dt.isoformat() if renewal_dt else None,
-            "caveat": "Based on manually-entered aggregate fields (points balance, statement spend, fee); no per-transaction category spend data exists in Artha to refine this further.",
+            "caveat": "Based on manually-entered aggregate fields (points balance, statement spend, fee); a per-transaction spend ledger now exists in Artha but this review doesn't yet incorporate it.",
         })
     return reviews

@@ -16,7 +16,7 @@ interface TransactionsLedgerProps {
 interface Transaction {
   id: number;
   account_id: number;
-  type: string; // Credit, Debit, Transfer, Investment, Redemption, EMI, Prepayment
+  type: string; // Credit, Debit, Transfer, Investment, Redemption, EMI, Prepayment, Spend
   amount: number;
   transaction_date: string;
   category_id?: number;
@@ -54,6 +54,11 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
   const [amount, setAmount] = useState<string>('');
   const [date, setDate] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
+  // Spend needs BOTH a target card AND a category simultaneously — unlike every
+  // other type, which needs at most one "other thing" besides amount/date (the
+  // single counterpartId field already means "target card" for Spend, so
+  // category needs its own state).
+  const [spendCategoryId, setSpendCategoryId] = useState<string>('');
 
   // The API stores double-entry rows (source_ref_type/source_ref_id/dest_ref_type/
   // dest_ref_id, with Buy/Sell types); this ledger's form and display work in the
@@ -98,6 +103,12 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
         related_entity_type = 'Liability';
         related_entity_id = t.dest_ref_id;
         break;
+      case 'Spend':
+        // No account is involved (source_ref_type='None') — a card charge isn't
+        // paid from a cash account at the moment it's made.
+        related_entity_type = 'Liability';
+        related_entity_id = t.dest_ref_id;
+        break;
     }
 
     return {
@@ -106,6 +117,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
       type: displayType,
       amount: t.amount,
       transaction_date: t.transaction_date,
+      category_id: t.category_id,
       notes: t.notes,
       related_entity_type,
       related_entity_id,
@@ -145,9 +157,16 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!accountId || !amount || !date) {
+    // Spend has no account (a card charge doesn't touch a cash account) — every
+    // other type still requires one.
+    if ((type !== 'Spend' && !accountId) || !amount || !date) {
       if (showToast) showToast("Please fill in all required fields.", "error");
       else alert("Please fill in all required fields.");
+      return;
+    }
+    if (type === 'Spend' && !counterpartId) {
+      if (showToast) showToast("Please select a card.", "error");
+      else alert("Please select a card.");
       return;
     }
 
@@ -167,6 +186,10 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
     } else if (type === 'EMI' || type === 'Prepayment') {
       relatedEntityType = 'Liability';
       relatedEntityId = parsedCounterpartId;
+    } else if (type === 'Spend') {
+      relatedEntityType = 'Liability';
+      relatedEntityId = parsedCounterpartId;
+      categoryId = spendCategoryId ? parseInt(spendCategoryId) : null;
     } else if (type === 'Debit' || type === 'Credit') {
       // Category is optional for Debit/Credit — empty selection stays null (NaN
       // from parseInt('') would otherwise serialize as null anyway, but be explicit).
@@ -174,7 +197,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
     }
 
     const payload = {
-      account_id: parseInt(accountId),
+      account_id: type === 'Spend' ? null : parseInt(accountId),
       type,
       amount: parseFloat(amount),
       transaction_date: date,
@@ -204,6 +227,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
         setAmount('');
         setNotes('');
         setCounterpartId('');
+        setSpendCategoryId('');
         fetchTransactions();
         onRefresh();
         if (showToast) showToast("Transaction saved successfully!", "success");
@@ -229,7 +253,10 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
     setNotes(tx.notes || '');
 
     // Prefill counterpart select depending on type
-    if (tx.type === 'Transfer' || tx.type === 'Investment' || tx.type === 'Redemption' || tx.type === 'EMI' || tx.type === 'Prepayment') {
+    if (tx.type === 'Spend') {
+      setCounterpartId(tx.related_entity_id?.toString() || '');
+      setSpendCategoryId(tx.category_id?.toString() || '');
+    } else if (tx.type === 'Transfer' || tx.type === 'Investment' || tx.type === 'Redemption' || tx.type === 'EMI' || tx.type === 'Prepayment') {
       setCounterpartId(tx.related_entity_id?.toString() || '');
     } else {
       setCounterpartId(tx.category_id?.toString() || '');
@@ -275,6 +302,12 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
       const liab = data.liabilities.find(l => l.id === tx.related_entity_id);
       return liab ? `→ Debt: ${liab.name}` : `Debt #${tx.related_entity_id}`;
     }
+    if (tx.type === 'Spend') {
+      const card = data.liabilities.find(l => l.id === tx.related_entity_id);
+      const cat = data.categories.find(c => c.id === tx.category_id);
+      const cardText = card ? card.name : `Card #${tx.related_entity_id}`;
+      return cat ? `→ ${cardText} (${cat.name})` : `→ ${cardText}`;
+    }
     if (tx.category_id) {
       const cat = data.categories.find(c => c.id === tx.category_id);
       return cat ? `Category: ${cat.name}` : `Category #${tx.category_id}`;
@@ -291,6 +324,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
       case 'Investment':
       case 'EMI':
       case 'Prepayment':
+      case 'Spend':
         return <ArrowUpRight size={16} style={{ color: 'var(--danger)' }} />;
       case 'Transfer':
         return <ArrowRightLeft size={16} style={{ color: 'var(--info)' }} />;
@@ -312,10 +346,11 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
   const targetAssetsList = data.assets;
   const targetLiabilitiesList = data.liabilities;
   const categoriesList = data.categories.filter(c => {
-    if (type === 'Debit') return c.entity_type === 'Expense';
+    if (type === 'Debit' || type === 'Spend') return c.entity_type === 'Expense';
     if (type === 'Credit') return c.entity_type === 'Income';
     return false;
   });
+  const targetCreditCardsList = data.liabilities.filter((l: any) => l.category_name === 'Credit Card');
 
   const handleSort = (col: string) => {
     if (sortColumn === col) {
@@ -428,6 +463,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
               <option value="Redemption">Redemption</option>
               <option value="EMI">EMI</option>
               <option value="Prepayment">Prepayment</option>
+              <option value="Spend">Card Spend</option>
             </select>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -642,6 +678,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
                 <select className="form-input" value={type} onChange={e => {
                   setType(e.target.value);
                   setCounterpartId('');
+                  setSpendCategoryId('');
                 }}>
                   <option value="Debit">Debit (Expense Payment)</option>
                   <option value="Credit">Credit (Income Deposit)</option>
@@ -650,17 +687,20 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
                   <option value="Redemption">Asset Redemption</option>
                   <option value="EMI">EMI Payment (Liability)</option>
                   <option value="Prepayment">Prepayment (Liability)</option>
+                  <option value="Spend">Card Spend (New Charge)</option>
                 </select>
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Primary Account</label>
-                <select className="form-input" value={accountId} onChange={e => setAccountId(e.target.value)}>
-                  {data.accounts.map(acc => (
-                    <option key={acc.id} value={acc.id}>{acc.name} (Bal: {formatCurrency(acc.current_balance)})</option>
-                  ))}
-                </select>
-              </div>
+              {type !== 'Spend' && (
+                <div className="form-group">
+                  <label className="form-label">Primary Account</label>
+                  <select className="form-input" value={accountId} onChange={e => setAccountId(e.target.value)}>
+                    {data.accounts.map(acc => (
+                      <option key={acc.id} value={acc.id}>{acc.name} (Bal: {formatCurrency(acc.current_balance)})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* Dynamic counterpart target list */}
               {type === 'Transfer' && (
@@ -699,15 +739,33 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
                 </div>
               )}
 
-              {(type === 'Debit' || type === 'Credit') && (
+              {type === 'Spend' && (
                 <div className="form-group">
-                  <label className="form-label">Budget Category (optional)</label>
-                  {/* Not required: transactions have no category column (the selection is
-                      not persisted — see serialize_entity_payload in main.py), and rows
-                      like opening-balance credits legitimately have none, so a mandatory
-                      select would make them uneditable. */}
-                  <select className="form-input" value={counterpartId} onChange={e => setCounterpartId(e.target.value)}>
-                    <option value="">None (Uncategorized)</option>
+                  <label className="form-label">Card Charged</label>
+                  <select className="form-input" required value={counterpartId} onChange={e => setCounterpartId(e.target.value)}>
+                    <option value="">-- Select Credit Card --</option>
+                    {targetCreditCardsList.map(l => (
+                      <option key={l.id} value={l.id}>{l.name} (O/S: {formatCurrency(l.outstanding)})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {(type === 'Debit' || type === 'Credit' || type === 'Spend') && (
+                <div className="form-group">
+                  <label className="form-label">{type === 'Spend' ? 'Category' : 'Budget Category (optional)'}</label>
+                  {/* Not required for Debit/Credit: rows like opening-balance credits
+                      legitimately have no clean category, so a mandatory select would
+                      make them uneditable. Required for Spend, since these categories
+                      double as the reward engine's category vocabulary and an
+                      uncategorized card charge can't be matched to a reward rule. */}
+                  <select
+                    className="form-input"
+                    required={type === 'Spend'}
+                    value={type === 'Spend' ? spendCategoryId : counterpartId}
+                    onChange={e => type === 'Spend' ? setSpendCategoryId(e.target.value) : setCounterpartId(e.target.value)}
+                  >
+                    <option value="">{type === 'Spend' ? '-- Select Category --' : 'None (Uncategorized)'}</option>
                     {categoriesList.map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}

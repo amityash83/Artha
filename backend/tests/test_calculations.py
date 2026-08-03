@@ -1,4 +1,5 @@
 import pytest
+from datetime import date
 
 from backend.calculations import (
     calculate_monthly_emi,
@@ -9,6 +10,7 @@ from backend.calculations import (
     determine_gain_type,
     calculate_capital_gains_for_lots,
     resolve_reward_rate,
+    calculate_statement_cycle,
 )
 
 
@@ -163,3 +165,43 @@ def test_resolve_reward_rate_uncapped_category_unaffected_by_new_fields():
                                    base_points=1, base_spend=150, category="Grocery")
     assert result["points"] == round((10000 / 150) * 1 * 2)
     assert result["capped"] is False
+
+
+def test_calculate_statement_cycle_day_already_passed_this_month():
+    # Statement day 5, today is the 20th - cycle started this month on the 5th.
+    result = calculate_statement_cycle(5, date(2026, 7, 20))
+    assert result == {"start": "2026-07-05", "end": "2026-08-04"}
+
+
+def test_calculate_statement_cycle_day_not_yet_occurred_rolls_back_a_month():
+    # Statement day 25, today is the 20th - the 25th hasn't happened yet this
+    # month, so we're still in the cycle that started last month.
+    result = calculate_statement_cycle(25, date(2026, 7, 20))
+    assert result == {"start": "2026-06-25", "end": "2026-07-24"}
+
+
+def test_calculate_statement_cycle_clamps_day_31_in_a_30_day_month():
+    result = calculate_statement_cycle(31, date(2026, 9, 15))
+    assert result == {"start": "2026-08-31", "end": "2026-09-29"}
+
+
+def test_calculate_statement_cycle_clamps_in_february_leap_year():
+    result = calculate_statement_cycle(30, date(2028, 2, 15))
+    assert result == {"start": "2028-01-30", "end": "2028-02-28"}
+
+
+def test_calculate_statement_cycle_clamps_in_february_non_leap_year():
+    result = calculate_statement_cycle(30, date(2026, 2, 15))
+    assert result == {"start": "2026-01-30", "end": "2026-02-27"}
+
+
+def test_calculate_statement_cycle_unset_day_falls_back_to_fifteen():
+    assert calculate_statement_cycle(None, date(2026, 7, 20)) == calculate_statement_cycle(15, date(2026, 7, 20))
+    assert calculate_statement_cycle(0, date(2026, 7, 20)) == calculate_statement_cycle(15, date(2026, 7, 20))
+
+
+def test_calculate_statement_cycle_crosses_year_boundary():
+    # Statement day 20, today is Jan 5 - hasn't occurred yet this month, rolls
+    # back to December of the PREVIOUS year.
+    result = calculate_statement_cycle(20, date(2026, 1, 5))
+    assert result == {"start": "2025-12-20", "end": "2026-01-19"}

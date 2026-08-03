@@ -270,7 +270,29 @@ export interface Liability {
   remaining_tenure?: number;
   remaining_interest?: number;
   progress?: number;
+  // Derived live from the transactions ledger (Credit Card liabilities only) —
+  // see compute_real_cycle_spend_total in main.py. has_spend_transactions gates
+  // the manual-vs-derived fallback: a card with a manually-entered
+  // current_statement_spend but no logged Spend transactions keeps showing the
+  // manual figure instead of silently dropping to 0.
+  real_cycle_spend_total?: number;
+  has_spend_transactions?: boolean;
+  cycle_start?: string;
+  cycle_end?: string;
+  statement_spend_adjustment?: number;
   [key: string]: any; // Dynamic fields
+}
+
+export interface SpendBreakdownCategory {
+  category_name: string;
+  amount: number;
+}
+
+export interface SpendBreakdown {
+  cycle_start: string;
+  cycle_end: string;
+  total: number;
+  by_category: SpendBreakdownCategory[];
 }
 
 export interface Income {

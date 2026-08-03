@@ -329,6 +329,12 @@ def get_init_data():
                 if details_row:
                     d["credit_card_details"] = dict(details_row)
                     d.update({k: v for k, v in dict(details_row).items() if k != "liability_id"})
+                real_spend = compute_real_cycle_spend_total(cursor, d["id"], d.get("statement_date"))
+                d["real_cycle_spend_total"] = real_spend["total"]
+                d["has_spend_transactions"] = real_spend["has_any_ever"]
+                d["cycle_start"] = real_spend["cycle_start"]
+                d["cycle_end"] = real_spend["cycle_end"]
+                d["statement_spend_adjustment"] = real_spend["adjustment_amount"]
             # Add dynamic tenure and progress math if it is a reducing balance loan
             if d.get("outstanding", 0.0) > 0 and d.get("interest_rate", 0.0) > 0 and d.get("emi", 0.0) > 0:
                 rem_n = calc.calculate_remaining_tenure(d["outstanding"], d["interest_rate"], d["emi"])
@@ -547,9 +553,18 @@ def normalize_legacy_transaction_payload(payload: dict):
     elif ttype in ('EMI', 'Prepayment'):
         source_type = 'Account'
         source_id = acc_id
-        dest_type = 'None'
+        dest_type = 'Liability'
         dest_id = rel_id
         new_type = ttype
+    elif ttype == 'Spend':
+        # A credit card charge: no cash account is touched at the moment of a
+        # swipe (unlike EMI/Prepayment, which pay down the card from a real
+        # Account) — it purely increases what's owed on the card.
+        source_type = 'None'
+        source_id = None
+        dest_type = 'Liability'
+        dest_id = rel_id
+        new_type = 'Spend'
 
     payload["source_ref_type"] = source_type
     payload["source_ref_id"] = source_id
@@ -557,7 +572,25 @@ def normalize_legacy_transaction_payload(payload: dict):
     payload["dest_ref_id"] = dest_id
     payload["type"] = new_type
 
-def adjust_double_entry_balances(cursor, t_type: str, amount: float, source_type: str, source_id: int, dest_type: str, dest_id: int, operation: str = "add"):
+# Human-readable label for the one synthetic 'Spend' transaction per credit
+# card representing "spend I haven't logged individually this cycle" (see
+# put_credit_card_details and init_db()'s one-time migration of legacy
+# current_statement_spend values). Display/lookup convenience only — the
+# balance exemption itself is enforced via the real is_balance_exempt column
+# (transactions.is_balance_exempt), NOT by matching this string. An earlier
+# version tried exact-matching this free-text notes value instead, which was
+# unsafe two ways: (1) editing the marker row's own Notes text could silently
+# un-exempt it mid-edit, and (2) if any row's stored notes ever happened to
+# equal this string, every future edit/delete of that row would incorrectly
+# skip reverting its real balance impact, permanently. is_balance_exempt is a
+# real column the generic entity CRUD route never writes unless the caller's
+# payload explicitly includes it — and the Transactions Ledger UI never does
+# for any transaction type — so a normal user edit structurally cannot change
+# it, closing both failure modes at the source instead of requiring every
+# call site to carefully reason about which of "old" vs "new" text to trust.
+STATEMENT_SPEND_ADJUSTMENT_NOTE = "Manual statement spend adjustment"
+
+def adjust_double_entry_balances(cursor, t_type: str, amount: float, source_type: str, source_id: int, dest_type: str, dest_id: int, operation: str = "add", is_balance_exempt=False):
     """
     Adjust balances of assets and liabilities based on double-entry transaction specs.
     (Account balances are derived dynamically from transaction history, so they are not stored/updated).
@@ -565,21 +598,65 @@ def adjust_double_entry_balances(cursor, t_type: str, amount: float, source_type
     """
     if not source_type and not dest_type:
         return
-        
+
     factor = 1.0 if operation == "add" else -1.0
     t_type_lower = t_type.lower()
-    
+
     # 1. Update Asset values
     if source_type == 'Asset' and source_id:
         cursor.execute("UPDATE assets SET current_value = current_value - ? WHERE id = ?", (amount * factor, source_id))
     if dest_type == 'Asset' and dest_id:
         cursor.execute("UPDATE assets SET current_value = current_value + ? WHERE id = ?", (amount * factor, dest_id))
-        
-    # 2. Update Liability outstanding
-    if t_type_lower in ['emi', 'prepayment'] and dest_id:
+
+    # 2. Update Liability outstanding. EMI/Prepayment pay it down; Spend (a new
+    # charge) is the only transaction type that increases it — except a row
+    # flagged is_balance_exempt (the statement-spend-adjustment marker; see its
+    # constant's docstring above), which is permanently exempt.
+    if dest_type == 'Liability' and dest_id and not is_balance_exempt:
         cursor.execute("SELECT id FROM liabilities WHERE id = ?", (dest_id,))
         if cursor.fetchone():
-            cursor.execute("UPDATE liabilities SET outstanding = outstanding - ? WHERE id = ?", (amount * factor, dest_id))
+            if t_type_lower in ('emi', 'prepayment'):
+                cursor.execute("UPDATE liabilities SET outstanding = outstanding - ? WHERE id = ?", (amount * factor, dest_id))
+            elif t_type_lower == 'spend':
+                cursor.execute("UPDATE liabilities SET outstanding = outstanding + ? WHERE id = ?", (amount * factor, dest_id))
+
+def compute_real_cycle_spend_total(cursor, liability_id: int, statement_date) -> dict:
+    """
+    Sums 'Spend' transactions against this card within its current billing
+    cycle (see calc.calculate_statement_cycle) — computed fresh on every call,
+    no cached/stored total. has_any_ever gates the manual-vs-derived fallback
+    in the frontend: a card with a pre-existing manually-entered
+    current_statement_spend and zero logged Spend transactions must keep
+    showing its old value, not silently drop to 0.
+    """
+    cycle = calc.calculate_statement_cycle(statement_date, date.today())
+    cursor.execute("""
+        SELECT COALESCE(SUM(amount), 0.0) AS total FROM transactions
+        WHERE type = 'Spend' AND dest_ref_type = 'Liability' AND dest_ref_id = ?
+          AND transaction_date >= ? AND transaction_date <= ?
+    """, (liability_id, cycle["start"], cycle["end"]))
+    total = cursor.fetchone()["total"]
+    cursor.execute(
+        "SELECT 1 FROM transactions WHERE type = 'Spend' AND dest_ref_type = 'Liability' AND dest_ref_id = ? LIMIT 1",
+        (liability_id,)
+    )
+    has_any_ever = cursor.fetchone() is not None
+    # The one marked adjustment transaction's own amount, separate from the full
+    # cycle total (which also includes any other real logged Spend rows) — this
+    # is what the "Statement Spend Adjustment" form field should prefill with,
+    # not the aggregate.
+    cursor.execute("""
+        SELECT amount FROM transactions
+        WHERE dest_ref_type = 'Liability' AND dest_ref_id = ? AND type = 'Spend'
+          AND is_balance_exempt = 1
+    """, (liability_id,))
+    adj_row = cursor.fetchone()
+    adjustment_amount = float(adj_row["amount"]) if adj_row else 0.0
+    return {
+        "total": round(total, 2), "has_any_ever": has_any_ever,
+        "cycle_start": cycle["start"], "cycle_end": cycle["end"],
+        "adjustment_amount": adjustment_amount,
+    }
 
 def record_capital_gains_realization(cursor, asset_id: int, transaction_id: int, sale_value: float, sale_date: str):
     """
@@ -720,6 +797,11 @@ def create_entity(entity_type: str, payload: dict):
 
         if entity_type == "transactions":
             normalize_legacy_transaction_payload(payload)
+            # is_balance_exempt is never a caller-settable field — it's only ever
+            # written internally by put_credit_card_details's adjustment marker.
+            # Strip it from any incoming payload so a spoofed/spread payload can't
+            # create a transaction that silently skips its balance impact.
+            payload.pop("is_balance_exempt", None)
 
         # Preprocess custom fields and map expected dates for Goals
         if entity_type == "goals" and "target_amount" in payload and "current_amount" in payload and "monthly_contribution" in payload:
@@ -729,9 +811,9 @@ def create_entity(entity_type: str, payload: dict):
                 float(payload.get("monthly_contribution", 0.0))
             )
             payload["expected_completion"] = comp["expected_date"]
-            
+
         standard_params = serialize_entity_payload(cursor, entity_type, payload)
-        
+
         columns = list(standard_params.keys())
         placeholders = [f":{c}" for c in columns]
         query = f"INSERT INTO {entity_type} ({', '.join(columns)}) VALUES ({', '.join(placeholders)})"
@@ -755,7 +837,8 @@ def create_entity(entity_type: str, payload: dict):
                 int(standard_params.get("source_ref_id")) if standard_params.get("source_ref_id") is not None else None,
                 standard_params.get("dest_ref_type"),
                 int(standard_params.get("dest_ref_id")) if standard_params.get("dest_ref_id") is not None else None,
-                "add"
+                "add",
+                bool(standard_params.get("is_balance_exempt"))
             )
             if standard_params.get("type") == "Sell" and standard_params.get("source_ref_type") == "Asset" and standard_params.get("source_ref_id"):
                 record_capital_gains_realization(
@@ -841,6 +924,11 @@ def update_entity(entity_type: str, id: int, payload: dict):
             # double-entry columns BEFORE the revert/reapply cycle, otherwise the old
             # impact is reverted but the reapply below sees no refs and does nothing.
             normalize_legacy_transaction_payload(payload)
+            # is_balance_exempt is never a caller-settable field (see create_entity)
+            # — strip it so a payload can't flip a row's exemption status directly,
+            # which would corrupt the NEXT edit's revert/reapply (both of which
+            # trust old.get("is_balance_exempt") as the row's true stored value).
+            payload.pop("is_balance_exempt", None)
             # Revert old balances first
             cursor.execute("SELECT * FROM transactions WHERE id = ?", (id,))
             old_row = cursor.fetchone()
@@ -854,17 +942,18 @@ def update_entity(entity_type: str, id: int, payload: dict):
                     int(old.get("source_ref_id")) if old.get("source_ref_id") is not None else None,
                     old.get("dest_ref_type"),
                     int(old.get("dest_ref_id")) if old.get("dest_ref_id") is not None else None,
-                    "revert"
+                    "revert",
+                    bool(old.get("is_balance_exempt"))
                 )
 
         standard_params = serialize_entity_payload(cursor, entity_type, payload)
-        
+
         set_clauses = [f"{c} = :{c}" for c in standard_params.keys()]
         standard_params["id"] = id
         query = f"UPDATE {entity_type} SET {', '.join(set_clauses)} WHERE id = :id"
-        
+
         cursor.execute(query, standard_params)
-        
+
         if entity_type == "transactions":
             adjust_double_entry_balances(
                 cursor,
@@ -874,7 +963,14 @@ def update_entity(entity_type: str, id: int, payload: dict):
                 int(standard_params.get("source_ref_id")) if standard_params.get("source_ref_id") is not None else None,
                 standard_params.get("dest_ref_type"),
                 int(standard_params.get("dest_ref_id")) if standard_params.get("dest_ref_id") is not None else None,
-                "add"
+                "add",
+                # is_balance_exempt from `old` (the pre-edit row), not
+                # standard_params: the generic Ledger's payload never includes this
+                # column at all (it's not an editable form field), so
+                # standard_params wouldn't have it regardless — the UPDATE above
+                # also never touches it for the same reason, meaning `old`'s value
+                # is guaranteed to still be this row's true current value here.
+                bool(old.get("is_balance_exempt")) if old_row else False
             )
 
         if entity_type == "assets":
@@ -920,9 +1016,10 @@ def delete_entity(entity_type: str, id: int):
                     int(old.get("source_ref_id")) if old.get("source_ref_id") is not None else None,
                     old.get("dest_ref_type"),
                     int(old.get("dest_ref_id")) if old.get("dest_ref_id") is not None else None,
-                    "revert"
+                    "revert",
+                    bool(old.get("is_balance_exempt"))
                 )
-                
+
         if entity_type == "assets":
             cursor.execute("DELETE FROM goal_holdings WHERE asset_id = ?", (id,))
 
@@ -990,6 +1087,73 @@ def put_credit_card_details(id: int, details: CreditCardDetailsSchema):
     try:
         cursor.execute("SELECT liability_id FROM credit_card_details WHERE liability_id = ?", (id,))
         exists = cursor.fetchone()
+        payload = details.dict(exclude_unset=True) if exists else details.dict()
+
+        # current_statement_spend is no longer written to the column (real spend is
+        # now derived from the transactions ledger — see compute_real_cycle_spend_total
+        # and get_init_data). It's instead a "spend I haven't logged individually this
+        # cycle" adjustment, mapped onto one dated 'Spend' transaction flagged
+        # is_balance_exempt=1 (same create/update/delete-when-zeroed pattern as
+        # accounts' opening_balance). Editing it refreshes the transaction's date
+        # to today, so it keeps counting toward whichever cycle is currently open.
+        # Popped from `payload` unconditionally so the column is never written.
+        #
+        # This marker transaction NEVER affects liabilities.outstanding — enforced
+        # centrally in adjust_double_entry_balances via the is_balance_exempt
+        # column, not by sign-flipping logic here. Earlier versions of this code
+        # tried making outstanding move in one direction here and the opposite in
+        # db.py's one-time legacy-value migration (unsound: the two couldn't agree
+        # on how much was "already applied" once a migration-created row was later
+        # edited here), and later tried identifying the marker by exact-matching
+        # its free-text notes (unsound: editing the Notes field in the generic
+        # Ledger could silently change a row's exemption status). is_balance_exempt
+        # is a real column the generic Ledger route never writes, so a normal edit
+        # structurally cannot flip it — removing the inconsistency instead of
+        # trying to track it.
+        adjustment_provided = "current_statement_spend" in payload
+        adjustment_raw = payload.pop("current_statement_spend", None)
+        if adjustment_provided:
+            new_amount = float(adjustment_raw or 0.0)
+            cursor.execute("""
+                SELECT id, amount FROM transactions
+                WHERE dest_ref_type = 'Liability' AND dest_ref_id = ? AND type = 'Spend'
+                  AND is_balance_exempt = 1
+            """, (id,))
+            existing_adj = cursor.fetchone()
+            today_str = date.today().isoformat()
+            if existing_adj is None and new_amount > 0.0:
+                cursor.execute("""
+                    INSERT INTO transactions (source_ref_type, source_ref_id, dest_ref_type, dest_ref_id, type, amount, transaction_date, notes, is_balance_exempt)
+                    VALUES ('None', NULL, 'Liability', ?, 'Spend', ?, ?, ?, 1)
+                """, (id, new_amount, today_str, STATEMENT_SPEND_ADJUSTMENT_NOTE))
+            elif existing_adj is not None and new_amount > 0.0:
+                # Only bump the date when the amount actually changed. The dedicated
+                # Credit Cards modal resubmits this field on every save (even ones
+                # only touching unrelated fields like lounge visits), and re-dating
+                # on a no-op resubmit would resurrect an already-cycled-out
+                # adjustment into the currently open cycle — reintroducing the
+                # "baseline double-counts every cycle" bug this dated-row design
+                # exists to avoid.
+                if float(existing_adj["amount"]) != new_amount:
+                    cursor.execute(
+                        "UPDATE transactions SET amount = ?, transaction_date = ? WHERE id = ?",
+                        (new_amount, today_str, existing_adj["id"])
+                    )
+            elif existing_adj is not None and new_amount == 0.0:
+                cursor.execute("DELETE FROM transactions WHERE id = ?", (existing_adj["id"],))
+
+            # The raw column is vestigial once this marker-transaction mechanism
+            # exists — real spend is always read from the ledger (see
+            # compute_real_cycle_spend_total), never from this column. But it must
+            # still be explicitly zeroed on write (not just excluded from the SET
+            # clause), otherwise a legacy non-zero value survives forever: the
+            # frontend's has_spend_transactions ? real_cycle_spend_total :
+            # current_statement_spend fallback would revert to the stale legacy
+            # number the instant the marker transaction has none of its own, and
+            # migration L's `WHERE current_statement_spend > 0` guard would treat
+            # the row as still needing conversion on every future restart.
+            payload["current_statement_spend"] = 0.0
+
         if exists:
             # Only overwrite fields the caller actually sent. The generic Liabilities
             # grid (EntityGrid.tsx) PUTs a partial payload (credit_limit/statement_balance/
@@ -998,14 +1162,13 @@ def put_credit_card_details(id: int, details: CreditCardDetailsSchema):
             # silently wipe category_rules_json/milestone_rules_json/redemption_partners_json/
             # base_points/base_spend/etc. back to '[]'/0, destroying whatever was configured
             # via the dedicated Credit Cards screen.
-            payload = details.dict(exclude_unset=True)
             if payload:
                 set_clauses = [f"{c} = :{c}" for c in payload.keys()]
                 payload["id"] = id
                 cursor.execute(f"UPDATE credit_card_details SET {', '.join(set_clauses)} WHERE liability_id = :id", payload)
         else:
             # New row: every column needs a real value, not just whatever the caller sent.
-            payload = details.dict()
+            payload["current_statement_spend"] = 0.0
             payload["liability_id"] = id
             columns = list(payload.keys())
             placeholders = [f":{c}" for c in columns]
@@ -1019,6 +1182,42 @@ def put_credit_card_details(id: int, details: CreditCardDetailsSchema):
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.get("/api/liabilities/{id}/spend-breakdown")
+def get_spend_breakdown(id: int):
+    """
+    Per-category spend within the credit card's currently-open billing cycle,
+    computed live from the transactions ledger — see compute_real_cycle_spend_total
+    for the matching aggregate total surfaced in /api/init. Deliberately its own
+    on-demand endpoint rather than baked into /api/init (same precedent as the
+    Annual Review generator): only needed when a user actually opens a card's
+    detail view, not on every app-wide refresh.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT statement_date FROM credit_card_details WHERE liability_id = ?", (id,))
+        details_row = cursor.fetchone()
+        statement_date = details_row["statement_date"] if details_row else None
+        cycle = calc.calculate_statement_cycle(statement_date, date.today())
+        cursor.execute("""
+            SELECT c.name AS category_name, COALESCE(SUM(t.amount), 0.0) AS amount
+            FROM transactions t
+            LEFT JOIN categories c ON t.category_id = c.id
+            WHERE t.type = 'Spend' AND t.dest_ref_type = 'Liability' AND t.dest_ref_id = ?
+              AND t.transaction_date >= ? AND t.transaction_date <= ?
+            GROUP BY c.name
+            ORDER BY amount DESC
+        """, (id, cycle["start"], cycle["end"]))
+        by_category = [{"category_name": row["category_name"] or "Uncategorized", "amount": round(row["amount"], 2)} for row in cursor.fetchall()]
+        return {
+            "cycle_start": cycle["start"],
+            "cycle_end": cycle["end"],
+            "total": round(sum(r["amount"] for r in by_category), 2),
+            "by_category": by_category,
+        }
     finally:
         conn.close()
 

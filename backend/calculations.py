@@ -1,5 +1,6 @@
 import math
-from datetime import datetime, date
+import calendar
+from datetime import datetime, date, timedelta
 from typing import Optional
 import numpy as np
 
@@ -665,12 +666,50 @@ def compare_tax_regimes(taxable_income_old: float, taxable_income_new: float, ag
 # Both a user's owned cards (liabilities + credit_card_details) and Card
 # Library reference variants (card_variants) share the same category_rules_
 # json/milestone_rules_json/redemption_partners_json shape by design, so both
-# can be normalized into one common dict and scored identically. There is no
-# per-transaction category spend data anywhere in Artha, so reward value is
-# always a projection against a hypothetical assumed annual spend, never a
-# real historical figure for library cards, and only a partial real figure
-# (current statement spend) for owned cards.
+# can be normalized into one common dict and scored identically. Card Library
+# variants have no real spend data at all — reward value there is always a
+# projection against a hypothetical assumed annual spend. Owned cards now have
+# a real per-category 'Spend' transaction ledger (see calculate_statement_cycle
+# below and get_init_data/spend-breakdown in main.py), so current_spend can be
+# backed by real current-cycle totals — but resolve_reward_rate itself still
+# only takes one aggregate current_spend figure; it doesn't (yet) enforce a
+# category rule's groupLabel as a real pooled ceiling across categories, since
+# that's a distinct, separately-reviewable change to a user-facing number.
 # ---------------------------------------------------------------------------
+
+def calculate_statement_cycle(statement_date: Optional[int], as_of: date) -> dict:
+    """
+    Given a credit card's statement_date (day-of-month, 1-31) and a reference
+    date, returns the {start, end} (ISO date strings) of the billing cycle
+    containing as_of. Clamps to each month's actual length (so day 31 in a
+    30-day month, or day 29-31 in February, falls back to that month's last
+    day) and correctly walks back a month when statement_date hasn't occurred
+    yet this month. No stored cycle-anchor and no scheduled reset anywhere in
+    Artha — this is computed fresh from statement_date on every call.
+    """
+    day = int(statement_date) if statement_date else 15
+    day = max(1, min(31, day))
+
+    def clamped(year: int, month: int) -> date:
+        last_day = calendar.monthrange(year, month)[1]
+        return date(year, month, min(day, last_day))
+
+    def shift_month(year: int, month: int, delta: int):
+        idx = (year * 12 + (month - 1)) + delta
+        return idx // 12, (idx % 12) + 1
+
+    this_month_date = clamped(as_of.year, as_of.month)
+
+    if as_of >= this_month_date:
+        start = this_month_date
+        ny, nm = shift_month(as_of.year, as_of.month, 1)
+        end = clamped(ny, nm) - timedelta(days=1)
+    else:
+        py, pm = shift_month(as_of.year, as_of.month, -1)
+        start = clamped(py, pm)
+        end = this_month_date - timedelta(days=1)
+
+    return {"start": start.isoformat(), "end": end.isoformat()}
 
 def resolve_reward_rate(category_rules: list, milestone_rules: list, current_spend: float,
                          hypothetical_amount: float, base_points: float, base_spend: float,

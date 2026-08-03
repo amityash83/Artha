@@ -3,7 +3,7 @@ import {
   CreditCard as CardIcon, Plus, Edit2, Trash2, ShieldAlert,
   X, Sparkles
 } from 'lucide-react';
-import { InitData, CategoryMultiplierRule, MilestoneThresholdRule, RedemptionPartnerRatio, CapRule } from '../types';
+import { InitData, CategoryMultiplierRule, MilestoneThresholdRule, RedemptionPartnerRatio, CapRule, SpendBreakdown } from '../types';
 import { API_BASE_URL } from '../config';
 import { useModalA11y } from '../hooks/useModalA11y';
 import { CardLibraryTab } from './creditcards/CardLibraryTab';
@@ -17,6 +17,22 @@ interface CreditCardsProps {
 }
 
 const CAP_PERIODS: CapRule['period'][] = ['daily', 'monthly', 'quarterly', 'statement_cycle', 'annual'];
+
+// Reward-rule categories are sourced from data.categories (entity_type 'Expense') so
+// the same vocabulary a card charge is tagged with in the Ledger is the one a
+// category multiplier rule matches against — one taxonomy, not two independently
+// maintained lists. These are cosmetic overrides of the plain category name only,
+// falling back to the raw name for any category not listed here.
+const CATEGORY_DISPLAY_LABELS: Record<string, string> = {
+  'General': 'General / Retail',
+  'Dining': 'Dining & Food Delivery',
+  'Travel': 'Flights, Hotels & Travel',
+  'Grocery': 'Grocery & Supermarkets',
+  'Utility': 'Electricity & Utilities',
+  'Fuel': 'Fuel Station',
+  'Rent': 'Rent Payment',
+  'Online Shopping': 'Online Shopping (Amazon/Flipkart)',
+};
 
 // Popular Premium Cards Preset Templates
 const PRESETS = [
@@ -113,6 +129,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
   // Modals & Overlay forms
   const [modalOpen, setModalOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<any | null>(null);
+  const [spendBreakdown, setSpendBreakdown] = useState<SpendBreakdown | null>(null);
   const modalRef = useModalA11y(modalOpen, () => setModalOpen(false));
   const [deletingCardId, setDeletingCardId] = useState<number | null>(null);
   
@@ -253,7 +270,10 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
     // Advanced Rewards structures
     setBasePoints(card.base_points || 1);
     setBaseSpend(card.base_spend || 100);
-    setCurrentStatementSpend(card.current_statement_spend || 0);
+    // The one marked adjustment transaction's own amount — NOT the raw (now
+    // vestigial, unwritten) current_statement_spend column, and not the full
+    // derived cycle total either (which also includes other real logged spend).
+    setCurrentStatementSpend(card.statement_spend_adjustment || 0);
 
     // Parse category multipliers, milestones and partners from database JSON strings
     try {
@@ -270,10 +290,16 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
 
     setActiveModalTab('general');
     setModalOpen(true);
+    setSpendBreakdown(null);
+    fetch(`${API_BASE_URL}/api/liabilities/${card.id}/spend-breakdown`)
+      .then(res => res.json())
+      .then(setSpendBreakdown)
+      .catch(() => setSpendBreakdown(null));
   };
 
   const handleOpenAdd = () => {
     setEditingCard(null);
+    setSpendBreakdown(null);
     setName('');
     setLenderId('');
     setOutstanding(0);
@@ -530,8 +556,11 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
       }
 
       // 3. Check for Step-up Threshold Milestone Multipliers
-      // Uses Statement Spend + simulated spend to see if milestone rate triggers
-      const currentStmtSpend = Number(meta.current_statement_spend || 0);
+      // Uses Statement Spend + simulated spend to see if milestone rate triggers.
+      // Prefer the real ledger-derived cycle total once any Spend transaction has
+      // ever been logged for this card; current_statement_spend is otherwise the
+      // last-known manual figure (0 for a card that's never used either path).
+      const currentStmtSpend = Number(meta.has_spend_transactions ? meta.real_cycle_spend_total : (meta.current_statement_spend || 0));
       const projectedSpendTotal = currentStmtSpend + calcAmount;
 
       let resolvedPointsRate = basePts;
@@ -877,7 +906,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                       {/* Statement Spend & Statement Day Info */}
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', borderTop: '1px solid var(--border-glass)', paddingTop: '10px' }}>
                         <span style={{ color: 'var(--text-secondary)' }}>Current Statement Spend</span>
-                        <strong style={{ color: '#60a5fa' }}>{formatCurrency(meta.current_statement_spend || 0)}</strong>
+                        <strong style={{ color: '#60a5fa' }}>{formatCurrency(meta.has_spend_transactions ? meta.real_cycle_spend_total : (meta.current_statement_spend || 0))}</strong>
                       </div>
 
                       {/* Reward Points and Yield Calculation */}
@@ -1063,14 +1092,9 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                   value={calcCategory}
                   onChange={e => setCalcCategory(e.target.value)}
                 >
-                  <option value="General">General / Retail</option>
-                  <option value="Dining">Dining &amp; Food Delivery</option>
-                  <option value="Travel">Flights, Hotels &amp; Travel</option>
-                  <option value="Grocery">Grocery &amp; Supermarkets</option>
-                  <option value="Utility">Electricity &amp; Utilities</option>
-                  <option value="Fuel">Fuel Station</option>
-                  <option value="Rent">Rent Payment</option>
-                  <option value="Online Shopping">Online Shopping (Amazon/Flipkart)</option>
+                  {categories.filter(c => c.entity_type === 'Expense').map(c => (
+                    <option key={c.id} value={c.name}>{CATEGORY_DISPLAY_LABELS[c.name] || c.name}</option>
+                  ))}
                 </select>
               </div>
 
@@ -1353,10 +1377,37 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                       <input id="cc-point-value" type="number" step="0.01" className="form-input" value={pointValue} onChange={e => setPointValue(Number(e.target.value))} />
                     </div>
                     <div>
-                      <label className="form-label" htmlFor="cc-current-statement-spend">Current Statement Spend (INR)</label>
+                      <label className="form-label" htmlFor="cc-current-statement-spend">Statement Spend Adjustment (INR)</label>
                       <input id="cc-current-statement-spend" type="number" className="form-input" value={currentStatementSpend} onChange={e => setCurrentStatementSpend(Number(e.target.value))} />
+                      <p style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                        For spend you haven't logged individually in the Transactions Ledger this cycle —
+                        combined with any logged Card Spend transactions for the total below. This only
+                        affects the spend total/reward calculations, never Outstanding Balance (the General
+                        tab) — update that separately if this reflects new debt.
+                      </p>
                     </div>
                   </div>
+
+                  {editingCard && (
+                    <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                        Current cycle ({editingCard.cycle_start} to {editingCard.cycle_end}), from the ledger:
+                      </span>
+                      <span style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                        {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(editingCard.real_cycle_spend_total || 0)}
+                      </span>
+                      {spendBreakdown && spendBreakdown.by_category.length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '6px' }}>
+                          {spendBreakdown.by_category.map((row, idx) => (
+                            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                              <span>{row.category_name}</span>
+                              <span>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(row.amount)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                     <div>
@@ -1393,14 +1444,9 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                     <div>
                       <label className="form-label" htmlFor="cc-new-cat-name" style={{ fontSize: '10px' }}>Category</label>
                       <select id="cc-new-cat-name" className="form-input" style={{ fontSize: '11px', padding: '4px' }} value={newCatName} onChange={e => setNewCatName(e.target.value)}>
-                        <option value="General">General / Retail</option>
-                        <option value="Dining">Dining</option>
-                        <option value="Travel">Travel</option>
-                        <option value="Grocery">Grocery</option>
-                        <option value="Utility">Utility</option>
-                        <option value="Fuel">Fuel</option>
-                        <option value="Rent">Rent</option>
-                        <option value="Online Shopping">Online Shopping</option>
+                        {categories.filter(c => c.entity_type === 'Expense').map(c => (
+                          <option key={c.id} value={c.name}>{CATEGORY_DISPLAY_LABELS[c.name] || c.name}</option>
+                        ))}
                       </select>
                     </div>
 

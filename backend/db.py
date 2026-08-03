@@ -568,17 +568,55 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        source_ref_type TEXT CHECK(source_ref_type IN ('Account', 'Asset', 'None')),
+        source_ref_type TEXT CHECK(source_ref_type IN ('Account', 'Asset', 'Liability', 'None')),
         source_ref_id INTEGER,
-        dest_ref_type TEXT CHECK(dest_ref_type IN ('Account', 'Asset', 'None')),
+        dest_ref_type TEXT CHECK(dest_ref_type IN ('Account', 'Asset', 'Liability', 'None')),
         dest_ref_id INTEGER,
-        type TEXT NOT NULL CHECK(type IN ('Credit', 'Debit', 'Transfer', 'Buy', 'Sell', 'Investment', 'Redemption', 'EMI', 'Prepayment')),
+        type TEXT NOT NULL CHECK(type IN ('Credit', 'Debit', 'Transfer', 'Buy', 'Sell', 'Investment', 'Redemption', 'EMI', 'Prepayment', 'Spend')),
         amount REAL NOT NULL CHECK(amount > 0.0),
         transaction_date TEXT NOT NULL,
         notes TEXT,
-        linked_goal_id INTEGER REFERENCES goals(id)
+        linked_goal_id INTEGER REFERENCES goals(id),
+        category_id INTEGER REFERENCES categories(id),
+        is_balance_exempt INTEGER NOT NULL DEFAULT 0
     )
     """)
+
+    # transactions gained a category FK (spend categorization for Debit/Credit/Spend
+    # rows) and an is_balance_exempt flag after the normalized schema shipped — add
+    # them in place for databases created before the columns existed. No CHECK
+    # involved, so plain ALTERs suffice (unlike the type/ref-type CHECK expansion
+    # further below, which requires a full table rebuild since SQLite can't alter
+    # a CHECK in place).
+    #
+    # is_balance_exempt marks the one synthetic 'Spend' row per credit card used
+    # by the "Statement Spend Adjustment" mechanism (see put_credit_card_details
+    # and adjust_double_entry_balances) — it must NEVER affect liabilities.
+    # outstanding. This is deliberately a real column instead of matching on the
+    # free-text `notes` field: the generic entity CRUD route (create_entity/
+    # update_entity/serialize_entity_payload) only ever writes columns present in
+    # the caller's payload, and the Transactions Ledger UI never sends this field
+    # for any transaction type — so a normal user edit structurally cannot change
+    # it, unlike `notes`, which the Ledger freely exposes as an editable field. An
+    # earlier version of this exemption keyed off exact-match against `notes`
+    # text, which turned out to be unsafe in two ways: (1) editing the marker
+    # row's own Notes text could silently un-exempt it mid-edit, and (2) once a
+    # row's stored notes happened to equal the marker string (however that
+    # happened), every future edit/delete of that row would incorrectly skip
+    # reverting its real balance impact, permanently. A column the UI never
+    # writes closes both failure modes at the source rather than requiring every
+    # call site to carefully reason about which of "old" vs "new" notes to trust.
+    try:
+        cursor.execute("PRAGMA table_info('transactions')")
+        tx_cols_precheck = [col['name'] for col in cursor.fetchall()]
+        if tx_cols_precheck and 'category_id' not in tx_cols_precheck:
+            cursor.execute("ALTER TABLE transactions ADD COLUMN category_id INTEGER REFERENCES categories(id)")
+            print("[Migration] Added category_id column to transactions.")
+        if tx_cols_precheck and 'is_balance_exempt' not in tx_cols_precheck:
+            cursor.execute("ALTER TABLE transactions ADD COLUMN is_balance_exempt INTEGER NOT NULL DEFAULT 0")
+            print("[Migration] Added is_balance_exempt column to transactions.")
+    except Exception as e:
+        print("[Migration Warning] transactions category_id/is_balance_exempt column migration error:", e)
 
     # Rewards Tables
     cursor.execute("""
@@ -884,6 +922,54 @@ def init_db():
     except Exception as e:
         print("[Migration Warning] transactions CHECK expansion failed:", e)
 
+    # Expand transactions CHECKs again to accept a 'Spend' type (a credit card charge
+    # that INCREASES liabilities.outstanding — the only transaction type that does;
+    # EMI/Prepayment are the only other ledger entries touching outstanding, and they
+    # decrease it) and a first-class 'Liability' ref-type. EMI/Prepayment previously
+    # targeted a liability only via an untyped bypass (dest_ref_type='None' with a bare
+    # dest_ref_id) since 'Liability' was never a legal ref-type value — backfill their
+    # dest_ref_type to 'Liability' in this same rebuild (the only way to touch a CHECK
+    # in SQLite is a full rebuild, so doing this alongside the 'Spend' addition is
+    # nearly free and avoids two different untyped/typed conventions for the same
+    # physical mutation existing side by side). category_id/is_balance_exempt
+    # already exist on the table by this point (added earlier, unconditionally,
+    # above) so they're carried through unchanged here — this rebuild only
+    # touches the CHECK-constrained columns.
+    try:
+        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='transactions'")
+        tx_sql_row = cursor.fetchone()
+        if tx_sql_row and "'Spend'" not in tx_sql_row['sql']:
+            print("[Migration] Expanding transactions CHECKs for Spend/Liability, backfilling EMI/Prepayment dest_ref_type...")
+            cursor.execute("""
+            CREATE TABLE transactions_checkfix2 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_ref_type TEXT CHECK(source_ref_type IN ('Account', 'Asset', 'Liability', 'None')),
+                source_ref_id INTEGER,
+                dest_ref_type TEXT CHECK(dest_ref_type IN ('Account', 'Asset', 'Liability', 'None')),
+                dest_ref_id INTEGER,
+                type TEXT NOT NULL CHECK(type IN ('Credit', 'Debit', 'Transfer', 'Buy', 'Sell', 'Investment', 'Redemption', 'EMI', 'Prepayment', 'Spend')),
+                amount REAL NOT NULL CHECK(amount > 0.0),
+                transaction_date TEXT NOT NULL,
+                notes TEXT,
+                linked_goal_id INTEGER REFERENCES goals(id),
+                category_id INTEGER REFERENCES categories(id),
+                is_balance_exempt INTEGER NOT NULL DEFAULT 0
+            )
+            """)
+            cursor.execute("""
+            INSERT INTO transactions_checkfix2
+                (id, source_ref_type, source_ref_id, dest_ref_type, dest_ref_id, type, amount, transaction_date, notes, linked_goal_id, category_id, is_balance_exempt)
+            SELECT id, source_ref_type, source_ref_id,
+                   CASE WHEN type IN ('EMI', 'Prepayment') AND dest_ref_type = 'None' THEN 'Liability' ELSE dest_ref_type END,
+                   dest_ref_id, type, amount, transaction_date, notes, linked_goal_id, category_id, is_balance_exempt
+            FROM transactions
+            """)
+            cursor.execute("DROP TABLE transactions")
+            cursor.execute("ALTER TABLE transactions_checkfix2 RENAME TO transactions")
+            print("[Migration] transactions Spend/Liability CHECK expansion complete.")
+    except Exception as e:
+        print("[Migration Warning] transactions Spend/Liability CHECK expansion failed:", e)
+
     cursor.execute("PRAGMA foreign_keys = ON")
 
 
@@ -950,13 +1036,20 @@ def init_db():
         ('Income', 'Rental', None),
         ('Income', 'Dividend', None),
         ('Income', 'Interest', None),
-        # Expenses
+        # Expenses. Grocery/Fuel/Travel/Utility double as the credit card reward
+        # engine's spend categories (category_rules_json matches by this same name)
+        # — General/Dining/Rent/Online Shopping are seeded here for that reason,
+        # not because they're typical monthly-budget categories on their own.
         ('Expense', 'Grocery', None),
         ('Expense', 'Fuel', None),
         ('Expense', 'Education', None),
         ('Expense', 'Travel', None),
         ('Expense', 'Utility', None),
         ('Expense', 'EMI', None),
+        ('Expense', 'General', None),
+        ('Expense', 'Dining', None),
+        ('Expense', 'Rent', None),
+        ('Expense', 'Online Shopping', None),
     ]
 
     for entity_type, name, fields in default_categories:
@@ -1970,6 +2063,58 @@ def init_db():
             print(f"[Migration] Backfilled property_rental_ledger for {len(prop_rows)} propert(y/ies).")
     except Exception as e:
         print("[Migration Warning] property_rental_ledger backfill error:", e)
+
+    # L. Convert existing manually-typed current_statement_spend values into a dated
+    # 'Spend' ledger transaction, one per card, so the newly-derived cycle-spend
+    # total (see get_init_data/put_credit_card_details in main.py) starts from the
+    # same number the user already had instead of silently resetting to 0. This must
+    # be a DATED transaction, not a permanent always-summed baseline (unlike
+    # accounts.opening_balance, which correctly sums from inception): current_statement_
+    # spend was a rolling PER-CYCLE figure, so a baseline that counted every cycle
+    # forever would double-count on every subsequent statement. Dating it "today"
+    # means it naturally falls out of the derived cycle window once the cycle rolls
+    # over, exactly like any real Spend row would. Guarded on the notes marker so
+    # this never re-fires; requires 'Spend'/'Liability' to already be legal (runs
+    # after the CHECK-expansion migration above), and is_balance_exempt to already
+    # exist (added unconditionally near the top of this function).
+    try:
+        cursor.execute("SELECT liability_id, current_statement_spend FROM credit_card_details WHERE current_statement_spend > 0")
+        baseline_rows = cursor.fetchall()
+        converted = 0
+        for row in baseline_rows:
+            cursor.execute("""
+                SELECT 1 FROM transactions WHERE dest_ref_type = 'Liability' AND dest_ref_id = ?
+                  AND is_balance_exempt = 1
+            """, (row['liability_id'],))
+            if not cursor.fetchone():
+                # A raw INSERT — is_balance_exempt=1 permanently exempts this row
+                # from the normal 'Spend' contract of increasing liabilities.
+                # outstanding, enforced centrally in adjust_double_entry_balances
+                # (backend/main.py). It exists purely to feed the derived
+                # spend-total/breakdown; outstanding is, and remains, whatever
+                # the user already maintains it as. notes is set for human
+                # readability only — the exemption itself never depends on it.
+                cursor.execute("""
+                    INSERT INTO transactions (source_ref_type, source_ref_id, dest_ref_type, dest_ref_id, type, amount, transaction_date, notes, is_balance_exempt)
+                    VALUES ('None', NULL, 'Liability', ?, 'Spend', ?, ?, 'Manual statement spend adjustment', 1)
+                """, (row['liability_id'], row['current_statement_spend'], datetime.now().strftime('%Y-%m-%d')))
+                converted += 1
+            # Zero the legacy column once its value has been converted (or was
+            # already converted in an earlier run) — it must never again be a
+            # candidate for this WHERE current_statement_spend > 0 guard, whether
+            # or not the marker transaction it produced is later edited/deleted
+            # via the dedicated endpoint or the generic Ledger. Without this, a
+            # marker deleted directly via the generic Ledger route (which has no
+            # reason to know about this column) would be silently resurrected by
+            # this exact migration on the next restart.
+            cursor.execute(
+                "UPDATE credit_card_details SET current_statement_spend = 0 WHERE liability_id = ?",
+                (row['liability_id'],)
+            )
+        if converted:
+            print(f"[Migration] Converted manual current_statement_spend into dated Spend transactions for {converted} card(s).")
+    except Exception as e:
+        print("[Migration Warning] current_statement_spend baseline conversion error:", e)
 
     conn.commit()
     conn.close()
