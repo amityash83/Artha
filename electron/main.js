@@ -125,8 +125,13 @@ function createWindow() {
     height: 900,
     icon: windowIcon,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
+      // The UI is a plain web app: no Node access in the page. Desktop-only features
+      // go through the small API in preload.js (window.artha), per Electron's
+      // security guidelines.
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true
     },
     title: "Artha",
     autoHideMenuBar: true,
@@ -199,6 +204,7 @@ function triggerAutoBackup(trigger, callback) {
 // IPC Channel to show native Save / Open File dialogs
 ipcMain.handle('select-db-file', async (event, mode) => {
   if (!mainWindow) return null;
+  if (mode !== 'create' && mode !== 'open') return null;
   
   const options = {
     title: mode === 'create' ? 'Create New Database File' : 'Open Existing Database File',

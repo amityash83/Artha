@@ -23,6 +23,7 @@
     },
     "files": [
       "main.js",
+      "preload.js",
       "web/**/*",
       "package.json"
     ],

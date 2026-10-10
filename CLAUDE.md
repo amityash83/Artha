@@ -63,7 +63,10 @@ The repo is a monorepo of three parts. `frontend/` + `backend/` make up the web 
 Electron (electron/main.js)
   ├─ spawns Python backend as a sidecar subprocess (venv python in dev, PyInstaller-built binary in prod — main.exe on Windows, extensionless main on macOS/Linux; electron/main.js branches on process.platform)
   ├─ dev: loads http://localhost:5173 (Vite)  |  prod: loads web/index.html (frontend/dist, copied in by scripts/copy-web.mjs)
-  └─ IPC: native save/open dialogs for picking a SQLite db file
+  └─ IPC: native save/open dialogs for picking a SQLite db file, exposed to the page only through
+     electron/preload.js (contextBridge -> window.artha). The renderer runs with nodeIntegration off,
+     contextIsolation + sandbox on; frontend code reaches desktop features via frontend/src/platform.ts,
+     never require('electron'), so the same UI runs unchanged in a plain browser.
 
 React/TS frontend (frontend/src/)
   └─ talks to backend purely over HTTP: fetch calls to API_BASE_URL (frontend/src/config.ts, hardcoded 127.0.0.1:8000)

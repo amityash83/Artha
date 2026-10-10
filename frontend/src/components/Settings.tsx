@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, Database, Plus, Trash2, Edit2, Check, X } from 'lucide-react';
 import { API_BASE_URL } from '../config';
+import { isDesktop, selectDatabaseFile } from '../platform';
 import { InfoTooltip } from './InfoTooltip';
 import { KnowledgeArticle } from '../types';
 import { ArthaMark } from './branding/ArthaMark';
@@ -521,15 +522,14 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
   };
 
   const handleSelectDatabase = async (mode: 'open' | 'create') => {
-    const electron = (window as any).require ? (window as any).require('electron') : null;
-    if (!electron) {
+    if (!isDesktop()) {
       if (showToast) showToast("Database switching is only supported inside the Desktop application wrapper.", "info");
       else alert("Database switching is only supported inside the Desktop application wrapper.");
       return;
     }
 
     try {
-      const selectedPath = await electron.ipcRenderer.invoke('select-db-file', mode);
+      const selectedPath = await selectDatabaseFile(mode);
       if (!selectedPath) return; // Cancelled
 
       const res = await fetch(`${API_BASE_URL}/api/settings/database`, {
