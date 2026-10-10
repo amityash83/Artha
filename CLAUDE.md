@@ -81,7 +81,9 @@ FastAPI backend (backend/)
   ├─ tax/              — income-tax engine (engine.py, 14-step old/new regime computation with an audit line per figure),
   │                      driven ONLY by versioned per-FY rule sets in tax/rules/*.json (no slab/limit literals in code — a test enforces it);
   │                      nps.py / payroll.py / waterfall.py build NPS scenarios, before/after payslips and the savings waterfall
-  │                      by re-running the engine (never by per-rupee shortcuts)
+  │                      by re-running the engine (never by per-rupee shortcuts). Optional month-by-month entry (inputs.monthly,
+  │                      12 months Apr..Mar, actual/projected): when enabled, normalize_inputs derives every annual figure from the
+  │                      months (apply_monthly_totals), HRA is computed per month, and each regime result gains a monthly TDS projection
   └─ ai/               — AI Assistant: providers.py (Ollama / OpenAI-compatible / Anthropic behind get_provider()),
                          context.py (builds explain/ask prompt context from the DB); imported lazily inside the AI routes in main.py
 ```

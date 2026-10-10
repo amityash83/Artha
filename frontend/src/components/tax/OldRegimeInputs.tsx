@@ -60,10 +60,20 @@ export const OldRegimeInputs: React.FC<PlannerChildProps> = ({ inputs, result, u
         title="House Rent Allowance"
         subtitle={<>Old regime only. Exempt amount is the least of three figures, over the months you paid rent. {sectionLabel(hraItem)} <VerificationBadge level={hraItem?.verification} /></>}
       >
+        {inputs.monthly?.enabled && (
+          <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+            Month-by-month entry is on: rent comes from the "Rent paid" row of the grid on the Salary &amp; CTC tab, and the
+            exemption is worked out for each month separately (below).
+          </div>
+        )}
         <div style={fieldGrid}>
-          <NumberField id="hra-rent" label="Rent paid per month" value={inputs.hra.rent_paid_monthly} onChange={(v) => update('hra.rent_paid_monthly', v)} />
-          <NumberField id="hra-months" label="Months rent was paid" value={inputs.hra.months_rented} min={0} max={12}
-            onChange={(v) => update('hra.months_rented', Math.max(0, Math.min(12, Math.round(v))))} />
+          {!inputs.monthly?.enabled && (
+            <>
+              <NumberField id="hra-rent" label="Rent paid per month" value={inputs.hra.rent_paid_monthly} onChange={(v) => update('hra.rent_paid_monthly', v)} />
+              <NumberField id="hra-months" label="Months rent was paid" value={inputs.hra.months_rented} min={0} max={12}
+                onChange={(v) => update('hra.months_rented', Math.max(0, Math.min(12, Math.round(v))))} />
+            </>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
             <label htmlFor="hra-city" className="form-label" style={{ fontSize: '12px' }}>City you rent in</label>
             <input id="hra-city" className="form-input" style={{ padding: '8px 10px', fontSize: '13px' }} list="hra-metro-cities"
@@ -78,7 +88,27 @@ export const OldRegimeInputs: React.FC<PlannerChildProps> = ({ inputs, result, u
         <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
           HRA received ({formatINR(inputs.salary.hra || 0)}) and basic + DA come from the Salary & CTC tab.
         </div>
-        {old?.hra && (
+        {old?.hra?.computed_monthly && old.hra.per_month && (
+          <div style={{ overflowX: 'auto' }}>
+            <table className="custom-table" style={{ marginTop: 0 }}>
+              <thead><tr><th>Month</th><th style={{ textAlign: 'right' }}>Rent paid</th><th>City</th><th>Limited by</th><th style={{ textAlign: 'right' }}>Exempt</th></tr></thead>
+              <tbody>
+                {old.hra.per_month.map((m) => (
+                  <tr key={m.label}>
+                    <td>{m.label}</td>
+                    <td style={{ textAlign: 'right' }}>{formatINR(m.rent_paid)}</td>
+                    <td>{m.metro ? 'Metro' : 'Non-metro'}</td>
+                    <td style={{ fontSize: '12px' }}>{m.binding_component ? HRA_COMPONENT_LABELS[m.binding_component] : 'No rent or no HRA'}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--text-primary)' }}>{formatINR(m.exemption)}</td>
+                  </tr>
+                ))}
+                <tr><td colSpan={4} style={{ fontWeight: 700, color: 'var(--text-primary)' }}>HRA exemption for the year</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)' }}>{formatINR(old.hra.exemption)}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+        {old?.hra && !old.hra.computed_monthly && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
             {Object.entries(old.hra.components).map(([key, amount]) => {
               const binding = old.hra!.binding_component === key;

@@ -73,6 +73,15 @@ export const PlannerOverview: React.FC<PlannerChildProps> = ({ result, inputs, p
         <Kpi label="Monthly tax saving" value={formatINR(Math.abs(cmp.monthly_savings_old_minus_new))} better="higher" sub="Annual ÷ 12 (average)" />
         <Kpi label="Monthly in-hand: old regime" value={formatINR(oldR.monthly_average.in_hand_salary)} better="higher" sub="Average, after payroll deductions and tax" />
         <Kpi label="Monthly in-hand: new regime" value={formatINR(newR.monthly_average.in_hand_salary)} better="higher" sub="Average, after payroll deductions and tax" />
+        {(() => {
+          const view = result.regimes[inputs.profile.selected_regime ?? cmp.best_regime].monthly;
+          return view ? (
+            <Kpi label="TDS still to be deducted this year" value={formatINR(view.tax_still_due)}
+              sub={view.projected_months
+                ? `${formatINR(view.suggested_tds_per_remaining_month)} / month over ${view.projected_months} remaining month(s)`
+                : view.expected_refund ? `Refund expected: ${formatINR(view.expected_refund)}` : 'All months are actual'} />
+          ) : null;
+        })()}
         <Kpi label="Annual employer NPS (current)" value={formatINR(employerNps)} sub={employerNps ? `${formatINR(employerNps / 12)} / month, not paid as cash` : 'None entered'} />
         {payslip ? (
           <>

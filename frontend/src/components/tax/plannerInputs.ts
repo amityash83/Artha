@@ -1,4 +1,4 @@
-import { TaxOptimization, TaxPlannerInputs } from '../../types';
+import { TaxMonthInput, TaxOptimization, TaxPlannerInputs } from '../../types';
 
 // Starting values from the Tax Planner spec's sample payroll. They are user data, not
 // tax rules: every one is editable, and no tax threshold or limit lives in the UI.
@@ -10,6 +10,7 @@ export const DEFAULT_PLANNER_INPUTS: TaxPlannerInputs = {
   salary_monthly: {
     basic: 225188, da: 0, hra: 90075, special_allowance: 135113, bonus: 0, incentives: 0, other_taxable_allowances: 0,
   },
+  monthly: null,
   employer_contributions: { pf: 0, nps: 0, superannuation: 0 },
   payroll_deductions: { employee_epf: 36000, vpf: 0, employee_esic: 0, professional_tax: 0, other: 0 },
   hra: { rent_paid_monthly: 0, months_rented: 12 },
@@ -35,6 +36,51 @@ export const DEFAULT_PLANNER_INPUTS: TaxPlannerInputs = {
 };
 
 export const MONTHS = 12;
+
+/** "2026-27" -> ["Apr 2026", ..., "Mar 2027"] (Indian financial year order). */
+export function fyMonthLabels(financialYear: string): string[] {
+  const start = parseInt(financialYear.slice(0, 4), 10) || new Date().getFullYear();
+  const names = ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
+  return names.map((n, i) => `${n} ${i < 9 ? start : start + 1}`);
+}
+
+const twelfth = (v: number) => Math.round((v || 0) / MONTHS * 100) / 100;
+
+/** Twelve equal projected months from the annual (CTC) figures: the starting point for the grid. */
+export function monthsFromAnnual(inputs: TaxPlannerInputs, financialYear: string): TaxMonthInput[] {
+  const labels = fyMonthLabels(financialYear);
+  const rented = Math.max(0, Math.min(MONTHS, inputs.hra.months_rented || 0));
+  return labels.map((label, i) => ({
+    label,
+    status: 'projected',
+    salary: Object.fromEntries(Object.entries(inputs.salary).map(([k, v]) => [k, inputs.salary_monthly?.[k] ?? twelfth(v)])),
+    payroll_deductions: Object.fromEntries(Object.entries(inputs.payroll_deductions).map(([k, v]) => [k, twelfth(v)])),
+    employer_contributions: Object.fromEntries(Object.entries(inputs.employer_contributions).map(([k, v]) => [k, twelfth(v)])),
+    tds: null,
+    rent_paid: i < rented ? inputs.hra.rent_paid_monthly || 0 : 0,
+    metro: null,
+  }));
+}
+
+/** Annual figures from the months (used when switching back to annual entry, so nothing is lost). */
+export function annualFromMonths(inputs: TaxPlannerInputs): TaxPlannerInputs {
+  const months = inputs.monthly?.months ?? [];
+  const sum = (pick: (m: TaxMonthInput) => Record<string, number>) => {
+    const out: Record<string, number> = {};
+    months.forEach((m) => Object.entries(pick(m)).forEach(([k, v]) => { out[k] = (out[k] || 0) + (v || 0); }));
+    return out;
+  };
+  const rents = months.map((m) => m.rent_paid).filter((r) => r > 0);
+  return {
+    ...inputs,
+    salary: { ...inputs.salary, ...sum((m) => m.salary) },
+    salary_monthly: null,
+    payroll_deductions: { ...inputs.payroll_deductions, ...sum((m) => m.payroll_deductions) },
+    employer_contributions: { ...inputs.employer_contributions, ...sum((m) => m.employer_contributions) },
+    hra: { rent_paid_monthly: rents.length ? rents.reduce((a, b) => a + b, 0) / rents.length : 0, months_rented: rents.length },
+    prepaid: { ...inputs.prepaid, tds: months.filter((m) => m.status === 'actual').reduce((t, m) => t + (m.tds || 0), 0) },
+  };
+}
 
 export function getIn(obj: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((node, key) => (node && typeof node === 'object' ? (node as Record<string, unknown>)[key] : undefined), obj);

@@ -526,6 +526,7 @@ export interface TaxPlannerInputs {
   };
   salary: Record<string, number>;
   salary_monthly: Record<string, number> | null;
+  monthly: TaxMonthlyInput | null;
   employer_contributions: Record<string, number>;
   payroll_deductions: Record<string, number>;
   hra: { rent_paid_monthly: number; months_rented: number };
@@ -534,6 +535,44 @@ export interface TaxPlannerInputs {
   capital_gains: Record<string, number>;
   deductions: { '80C': Record<string, number> } & Record<string, number | boolean | Record<string, number>>;
   prepaid: { tds: number; advance_tax: number };
+}
+
+// One payslip month (April..March) in month-by-month mode.
+export interface TaxMonthInput {
+  label: string;
+  status: 'actual' | 'projected';
+  salary: Record<string, number>;
+  payroll_deductions: Record<string, number>;
+  employer_contributions: Record<string, number>;
+  tds: number | null;
+  rent_paid: number;
+  metro: boolean | null;
+}
+
+export interface TaxMonthlyInput {
+  enabled: boolean;
+  months: TaxMonthInput[];
+}
+
+export interface TaxMonthlyView {
+  months: {
+    label: string;
+    status: 'actual' | 'projected';
+    gross_cash: number;
+    payroll_deductions: number;
+    tds: number;
+    tds_basis: 'actual' | 'projected' | 'missing';
+    in_hand: number;
+    employer_nps: number;
+  }[];
+  actual_months: number;
+  projected_months: number;
+  tds_paid_to_date: number;
+  tax_still_due: number;
+  suggested_tds_per_remaining_month: number;
+  expected_refund: number;
+  missing_tds_months: string[];
+  method: string;
 }
 
 export interface TaxAuditLine {
@@ -558,6 +597,8 @@ export interface TaxWarning {
 }
 
 export interface TaxHraDetail {
+  computed_monthly?: boolean;
+  per_month?: { label: string; exemption: number; binding_component: string | null; metro: boolean; rent_paid: number }[];
   exemption: number;
   components: { actual_hra_received: number; rent_paid_minus_pct_of_salary: number; pct_of_salary: number };
   binding_component: string | null;
@@ -602,6 +643,7 @@ export interface TaxRegimeComputation {
   monthly_average: { tax: number; in_hand_salary: number; note: string };
   in_hand_salary_annual: number;
   payroll_deductions_total: number;
+  monthly: TaxMonthlyView | null;
   audit: TaxAuditLine[];
 }
 

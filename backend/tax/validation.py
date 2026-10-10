@@ -43,9 +43,25 @@ def input_warnings(inp: dict, rules: dict, results: Dict[str, dict]) -> List[dic
                     f"80C '{item_key}' ({item_value:,.0f}) equals payroll {payroll_key}. Payroll EPF/VPF is already "
                     f"counted towards 80C automatically; remove it from the 80C list if it is the same contribution."))
 
+    monthly = inp.get("monthly") if inp.get("monthly") and inp["monthly"]["enabled"] else None
+    if monthly:
+        missing = [m["label"] for m in monthly["months"] if m["status"] == "actual" and m["tds"] is None]
+        if missing:
+            warnings.append(_warning(
+                "monthly_tds_missing",
+                "Months marked actual have no TDS entered (" + ", ".join(missing) + "); they count as zero TDS paid."))
+        if not any(m["status"] == "actual" for m in monthly["months"]):
+            warnings.append(_warning(
+                "monthly_all_projected",
+                "Every month is a projection. Mark months you've been paid for as actual and enter their payslip figures "
+                "to track TDS against the year's tax.", "info"))
+
     selected = inp["profile"]["selected_regime"]
     prepaid = inp["prepaid"]["tds"] + inp["prepaid"]["advance_tax"]
-    if selected and prepaid:
+    # With projected months left, TDS paid so far is meant to be below the year's tax;
+    # the monthly view reports what is still due instead.
+    has_projection = bool(monthly and any(m["status"] == "projected" for m in monthly["months"]))
+    if selected and prepaid and not has_projection:
         liability = results[selected]["total_tax"]
         if liability and abs(prepaid - liability) > liability * TDS_RECONCILIATION_TOLERANCE:
             gap = liability - prepaid

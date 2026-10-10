@@ -21,7 +21,7 @@ import copy
 import math
 from typing import Dict, List, Optional
 
-from backend.tax.hra import calculate_hra_exemption, is_metro_city
+from backend.tax.hra import calculate_hra_exemption, calculate_hra_exemption_monthly, is_metro_city
 
 RESIDENTIAL_STATUSES = ("resident", "rnor", "non_resident")
 EMPLOYER_TYPES = ("private", "government")
@@ -48,6 +48,12 @@ DEFAULT_INPUTS = {
         "bonus": 0.0, "incentives": 0.0, "other_taxable_allowances": 0.0,
     },
     "salary_monthly": None,          # optional monthly figures, only for reconciliation checks
+    # Optional month-by-month entry (April..March). When enabled, the annual salary,
+    # payroll and employer figures, rent and TDS paid are derived from the 12 months;
+    # see _normalize_monthly. Shape: {"enabled": bool, "months": [12 x month]}, month =
+    # {"label", "status": "actual"|"projected", "salary": {}, "payroll_deductions": {},
+    #  "employer_contributions": {}, "tds": number|null, "rent_paid": number, "metro": bool|null}
+    "monthly": None,
     "employer_contributions": {"pf": 0.0, "nps": 0.0, "superannuation": 0.0},
     "payroll_deductions": {
         "employee_epf": 0.0, "vpf": 0.0, "employee_esic": 0.0, "professional_tax": 0.0, "other": 0.0,
@@ -137,7 +143,7 @@ def normalize_inputs(raw: Optional[dict]) -> dict:
         raise TaxInputError(f"Unknown input section(s): {', '.join(sorted(unknown))}")
 
     for section, values in inp.items():
-        if not isinstance(values, dict):
+        if not isinstance(values, dict) or section == "monthly":  # validated by _normalize_monthly
             continue
         for key, value in values.items():
             if (section, key) in _NON_MONEY_KEYS:
@@ -183,7 +189,74 @@ def normalize_inputs(raw: Optional[dict]) -> dict:
         if not isinstance(inp["salary_monthly"], dict):
             raise TaxInputError("salary_monthly must be an object")
         inp["salary_monthly"] = {k: _as_money(v, f"salary_monthly.{k}") for k, v in inp["salary_monthly"].items()}
+    _normalize_monthly(inp)
     return inp
+
+
+MONTH_STATUSES = ("actual", "projected")
+
+
+def _normalize_monthly(inp: dict) -> None:
+    """Validates the optional month-by-month entry and, when enabled, makes it the source
+    of the annual figures the rest of the engine uses."""
+    raw = inp.get("monthly")
+    if not raw:
+        inp["monthly"] = None
+        return
+    if not isinstance(raw, dict):
+        raise TaxInputError("monthly must be an object")
+    months_raw = raw.get("months") or []
+    if not isinstance(months_raw, list) or len(months_raw) != MONTHS_PER_YEAR:
+        raise TaxInputError("monthly.months must list 12 months (April to March)")
+    months = []
+    for i, m in enumerate(months_raw):
+        where = f"monthly.months[{i}]"
+        if not isinstance(m, dict):
+            raise TaxInputError(f"{where} must be an object")
+        status = m.get("status") or "projected"
+        if status not in MONTH_STATUSES:
+            raise TaxInputError(f"{where}.status must be one of {MONTH_STATUSES}")
+        salary = {k: _as_money(v, f"{where}.salary.{k}") for k, v in (m.get("salary") or {}).items()}
+        payroll = _merge(DEFAULT_INPUTS["payroll_deductions"], m.get("payroll_deductions"), f"{where}.payroll_deductions", False)
+        employer = _merge(DEFAULT_INPUTS["employer_contributions"], m.get("employer_contributions"), f"{where}.employer_contributions", False)
+        tds = m.get("tds")
+        metro = m.get("metro")
+        if metro not in (None, True, False):
+            raise TaxInputError(f"{where}.metro must be true, false or null")
+        months.append({
+            "label": str(m.get("label") or f"Month {i + 1}"),
+            "status": status,
+            "salary": salary,
+            "payroll_deductions": {k: _as_money(v, f"{where}.payroll_deductions.{k}") for k, v in payroll.items()},
+            "employer_contributions": {k: _as_money(v, f"{where}.employer_contributions.{k}") for k, v in employer.items()},
+            "tds": None if tds in (None, "") else _as_money(tds, f"{where}.tds"),
+            "rent_paid": _as_money(m.get("rent_paid"), f"{where}.rent_paid"),
+            "metro": metro,
+        })
+    enabled = bool(raw.get("enabled"))
+    inp["monthly"] = {"enabled": enabled, "months": months}
+    if enabled:
+        apply_monthly_totals(inp)
+
+
+def apply_monthly_totals(inp: dict) -> None:
+    """Annual salary/payroll/employer figures, rent and TDS paid, from the months."""
+    months = inp["monthly"]["months"]
+    keys = set(DEFAULT_INPUTS["salary"])
+    for m in months:
+        keys.update(m["salary"])
+    inp["salary"] = {k: sum(m["salary"].get(k, 0.0) for m in months) for k in keys}
+    for section in ("payroll_deductions", "employer_contributions"):
+        inp[section] = {k: sum(m[section][k] for m in months) for k in DEFAULT_INPUTS[section]}
+    inp["prepaid"]["tds"] = sum(m["tds"] or 0.0 for m in months if m["status"] == "actual")
+    rented = [m["rent_paid"] for m in months if m["rent_paid"] > 0]
+    inp["hra"]["months_rented"] = len(rented)
+    inp["hra"]["rent_paid_monthly"] = sum(rented) / len(rented) if rented else 0.0
+    inp["salary_monthly"] = None
+
+
+def monthly_enabled(inp: dict) -> bool:
+    return bool(inp.get("monthly") and inp["monthly"]["enabled"])
 
 
 # ---------------------------------------------------------------------------
@@ -413,15 +486,24 @@ def compute_regime(regime: str, inp: dict, rules: dict) -> dict:
     hra_rules = reg["hra"]["value"]
     if hra_rules["allowed"]:
         metro = profile["metro"] if profile["metro"] is not None else is_metro_city(profile["city"], hra_rules)
-        hra_detail = calculate_hra_exemption(
-            salary["hra"], basic_da, inp["hra"]["rent_paid_monthly"], inp["hra"]["months_rented"], metro, hra_rules)
+        if monthly_enabled(inp):
+            # Month by month: rent and salary can change during the year, so the least-of-
+            # three test is applied to each month separately and summed.
+            hra_detail = calculate_hra_exemption_monthly(inp["monthly"]["months"], metro, hra_rules)
+        else:
+            hra_detail = calculate_hra_exemption(
+                salary["hra"], basic_da, inp["hra"]["rent_paid_monthly"], inp["hra"]["months_rented"], metro, hra_rules)
         if salary["hra"] or inp["hra"]["rent_paid_monthly"]:
             c = hra_detail["components"]
-            audit.add(2, "hra_exemption", "HRA exemption", hra_detail["exemption"],
-                      "least of: HRA received {:,.0f}; rent - {}% of salary {:,.0f}; {}% of salary {:,.0f}".format(
-                          c["actual_hra_received"], hra_rules["rent_excess_over_salary_pct"],
-                          c["rent_paid_minus_pct_of_salary"], hra_detail["metro_or_non_metro_pct"],
-                          c["pct_of_salary"]),
+            formula = ("sum over {} rented month(s) of the least of: HRA received; rent - {}% of salary; "
+                       "metro/non-metro % of salary (each month's own figures)".format(
+                           hra_detail["months_rented"], hra_rules["rent_excess_over_salary_pct"])
+                       if hra_detail.get("computed_monthly") else
+                       "least of: HRA received {:,.0f}; rent - {}% of salary {:,.0f}; {}% of salary {:,.0f}".format(
+                           c["actual_hra_received"], hra_rules["rent_excess_over_salary_pct"],
+                           c["rent_paid_minus_pct_of_salary"], hra_detail["metro_or_non_metro_pct"],
+                           c["pct_of_salary"]))
+            audit.add(2, "hra_exemption", "HRA exemption", hra_detail["exemption"], formula,
                       "rule", rule_ref=f"{rp}.hra", inputs={"metro": metro, "months_rented": hra_detail["months_rented"]})
         exemptions += hra_detail["exemption"]
     elif salary["hra"]:
@@ -709,9 +791,53 @@ def compute_regime(regime: str, inp: dict, rules: dict) -> dict:
             "note": "Annual figures divided by 12; actual payroll TDS is usually uneven across months.",
         },
         "in_hand_salary_annual": round(in_hand_annual, 2),
+        "monthly": monthly_breakdown(inp, total_tax) if monthly_enabled(inp) else None,
         "payroll_deductions_total": round(payroll_total, 2),
         "audit": audit.lines,
         "warnings": warnings,
+    }
+
+
+def monthly_breakdown(inp: dict, total_tax: float) -> dict:
+    """
+    Per-month cash view plus a TDS projection, the way an employer spreads TDS: whatever
+    annual tax is still due after TDS already deducted (actual months) and advance tax is
+    divided equally across the remaining (projected) months.
+    """
+    months = inp["monthly"]["months"]
+    actual_tds = sum(m["tds"] or 0.0 for m in months if m["status"] == "actual")
+    projected = [m for m in months if m["status"] == "projected"]
+    still_due = max(total_tax - actual_tds - inp["prepaid"]["advance_tax"], 0.0)
+    per_projected_month = still_due / len(projected) if projected else 0.0
+    rows = []
+    for m in months:
+        gross = sum(m["salary"].values())
+        deductions = sum(m["payroll_deductions"].values())
+        if m["status"] == "actual":
+            tds, basis = (m["tds"], "actual") if m["tds"] is not None else (0.0, "missing")
+        else:
+            tds, basis = per_projected_month, "projected"
+        rows.append({
+            "label": m["label"],
+            "status": m["status"],
+            "gross_cash": round(gross, 2),
+            "payroll_deductions": round(deductions, 2),
+            "tds": round(tds, 2),
+            "tds_basis": basis,
+            "in_hand": round(gross - deductions - tds, 2),
+            "employer_nps": round(m["employer_contributions"]["nps"], 2),
+        })
+    over_deducted = max(actual_tds + inp["prepaid"]["advance_tax"] - total_tax, 0.0)
+    return {
+        "months": rows,
+        "actual_months": len(months) - len(projected),
+        "projected_months": len(projected),
+        "tds_paid_to_date": round(actual_tds, 2),
+        "tax_still_due": round(still_due, 2),
+        "suggested_tds_per_remaining_month": round(per_projected_month, 2),
+        "expected_refund": round(over_deducted, 2),
+        "missing_tds_months": [m["label"] for m in months if m["status"] == "actual" and m["tds"] is None],
+        "method": "Tax still due after TDS already deducted and advance tax, spread equally over the remaining months.",
     }
 
 

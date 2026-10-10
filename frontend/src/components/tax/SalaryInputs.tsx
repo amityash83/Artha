@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { TaxInputField } from '../../types';
 import type { PlannerChildProps } from './TaxPlanner';
-import { MONTHS } from './plannerInputs';
+import { annualFromMonths, MONTHS, monthsFromAnnual } from './plannerInputs';
+import { MonthlySalaryGrid } from './MonthlySalaryGrid';
 import { fieldGrid, formatINR, NumberField, Pill, Section, SelectField } from './taxUi';
 
 const cellInput: React.CSSProperties = { padding: '6px 8px', fontSize: '13px', textAlign: 'right', width: '100%', minWidth: '110px' };
@@ -98,7 +99,24 @@ const MoneyTable: React.FC<{ caption: string; children: React.ReactNode; totals?
 
 const slug = (label: string) => label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
 
-export const SalaryInputs: React.FC<PlannerChildProps> = ({ inputs, update, metadata }) => {
+export const SalaryInputs: React.FC<PlannerChildProps> = ({ inputs, update, metadata, result, financialYear }) => {
+  const monthlyOn = Boolean(inputs.monthly?.enabled);
+  const setMode = (mode: 'annual' | 'monthly') => {
+    if (mode === 'monthly' && !monthlyOn) {
+      const earlier = inputs.monthly?.months?.length === MONTHS ? inputs.monthly.months : null;
+      // Annual figures may have changed since the months were last used: let the user choose.
+      const reuse = earlier && window.confirm(
+        'Use your earlier month-by-month entries?\n\nOK: keep them (any annual changes made since are ignored).\nCancel: start again from the current annual figures.');
+      const months = reuse && earlier ? earlier : monthsFromAnnual(inputs, financialYear);
+      update('monthly', { enabled: true, months });
+    } else if (mode === 'annual' && monthlyOn) {
+      // Carry the months' totals into the annual fields so nothing entered is lost.
+      const a = annualFromMonths(inputs);
+      (['salary', 'salary_monthly', 'payroll_deductions', 'employer_contributions', 'hra'] as const).forEach((k) => update(k, a[k]));
+      update('prepaid.tds', a.prepaid.tds);
+      update('monthly', { ...inputs.monthly!, enabled: false });
+    }
+  };
   const [newComponent, setNewComponent] = useState('');
   const known = new Set(metadata.salary_components.map((f) => f.key));
   const customFields: TaxInputField[] = Object.keys(inputs.salary)
@@ -154,6 +172,28 @@ export const SalaryInputs: React.FC<PlannerChildProps> = ({ inputs, update, meta
         </div>
       </Section>
 
+      <Section title="How do you want to enter salary?"
+        subtitle={monthlyOn
+          ? 'Month by month: enter each payslip (actual) and expected months (projected). Bonuses, raises, rent and TDS can differ by month; the year is the total.'
+          : 'Annual (CTC): one figure per component for the year. Switch to month by month if your pay varies (quarterly or performance bonus, a mid-year raise, joining mid-year).'}>
+        <div role="radiogroup" aria-label="Salary entry mode" style={{ display: 'flex', gap: '8px' }}>
+          {(['annual', 'monthly'] as const).map((mode) => {
+            const active = (mode === 'monthly') === monthlyOn;
+            return (
+              <button key={mode} role="radio" aria-checked={active} onClick={() => setMode(mode)} className={active ? 'btn btn-primary' : 'btn btn-secondary'}
+                style={{ padding: '6px 14px', fontSize: '12.5px' }}>
+                {mode === 'annual' ? 'Annual (CTC)' : 'Month by month'}
+              </button>
+            );
+          })}
+        </div>
+      </Section>
+
+      {monthlyOn ? (
+        <MonthlySalaryGrid inputs={inputs} financialYear={financialYear} metadata={metadata} result={result}
+          setMonths={(months) => update('monthly', { enabled: true, months })} />
+      ) : (
+      <>
       <Section title="Salary structure" subtitle="Enter either column; the other is calculated. Annual is what's taxed. Monthly figures are kept as entered so rounding against the annual amount is visible.">
         <MoneyTable caption="Salary components" totals={{ monthly: salaryMonthlyTotal, annual: salaryAnnualTotal }}>
           {salaryFields.map((f) => (
@@ -182,6 +222,8 @@ export const SalaryInputs: React.FC<PlannerChildProps> = ({ inputs, update, meta
       <Section title="Employer contributions" subtitle="Paid by your employer into retirement accounts, not as cash. How NPS is funded (restructured from CTC or added on top) is modelled in the Corporate NPS optimiser (Phase 3).">
         <MoneyTable caption="Employer contributions">{simpleRows('employer_contributions', metadata.employer_contributions)}</MoneyTable>
       </Section>
+      </>
+      )}
 
       <Section title="Other income" subtitle="Annual amounts.">
         <div style={fieldGrid}>
@@ -198,7 +240,15 @@ export const SalaryInputs: React.FC<PlannerChildProps> = ({ inputs, update, meta
 
       <Section title="Tax already paid" subtitle="Used to work out tax still payable or refundable.">
         <div style={fieldGrid}>
-          <NumberField id="tp-tds" label="TDS deducted this year" value={inputs.prepaid.tds} onChange={(v) => update('prepaid.tds', v)} />
+          {monthlyOn
+            ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                <span className="form-label" style={{ fontSize: '12px' }}>TDS deducted so far</span>
+                <strong style={{ fontSize: '14px', color: 'var(--text-primary)', padding: '8px 0' }}>{formatINR(result?.inputs.prepaid.tds ?? 0)}</strong>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Total of the actual months' TDS in the grid above.</span>
+              </div>
+            )
+            : <NumberField id="tp-tds" label="TDS deducted this year" value={inputs.prepaid.tds} onChange={(v) => update('prepaid.tds', v)} />}
           <NumberField id="tp-advance" label="Advance tax paid" value={inputs.prepaid.advance_tax} onChange={(v) => update('prepaid.advance_tax', v)} />
         </div>
       </Section>

@@ -16,7 +16,9 @@ aggregate retirement cap come from the rule set via the engine and are flagged.
 import copy
 from typing import List, Optional
 
-from backend.tax.engine import MONTHS_PER_YEAR, TaxInputError, compute, normalize_inputs
+from backend.tax.engine import (
+    MONTHS_PER_YEAR, TaxInputError, apply_monthly_totals, compute, monthly_enabled, normalize_inputs,
+)
 
 DEFAULT_LEVELS_PCT = (0, 5, 10, 12, 14)
 FUNDING_METHODS = ("restructure", "over_ctc")
@@ -39,6 +41,8 @@ def apply_employer_nps(inp: dict, target_annual: float, funding: str, restructur
     """
     if funding not in FUNDING_METHODS:
         raise TaxInputError(f"funding must be one of {FUNDING_METHODS}")
+    if monthly_enabled(inp):
+        return _apply_employer_nps_monthly(inp, target_annual, funding, restructure_from)
     new = copy.deepcopy(inp)
     current = inp["employer_contributions"]["nps"]
     notes: List[str] = []
@@ -65,6 +69,55 @@ def apply_employer_nps(inp: dict, target_annual: float, funding: str, restructur
                 f"Restructuring from '{restructure_from}' also changes the HRA and NPS salary base; "
                 f"employer PF, if linked to basic, is not recalculated.")
     new["employer_contributions"]["nps"] = contribution
+    return {"inputs": new, "contribution": contribution, "feasible": feasible, "notes": notes}
+
+
+def _apply_employer_nps_monthly(inp: dict, target_annual: float, funding: str, restructure_from: str) -> dict:
+    """
+    Month-by-month input: the annual figures are re-derived from the months on every
+    computation, so the change is made to the months themselves. Restructuring moves the
+    change out of each month in proportion to that month's share of the source component
+    (a bonus month gives up more); over-CTC spreads the contribution evenly.
+    """
+    new = copy.deepcopy(inp)
+    months = new["monthly"]["months"]
+    current = sum(m["employer_contributions"]["nps"] for m in months)
+    notes: List[str] = []
+    feasible = True
+    contribution = target_annual
+    if funding == "restructure":
+        if restructure_from not in new["salary"]:
+            raise TaxInputError(f"Unknown salary component '{restructure_from}' to restructure from")
+        available = sum(m["salary"].get(restructure_from, 0.0) for m in months)
+        delta = target_annual - current
+        if delta > available:
+            feasible = False
+            notes.append(
+                f"Restructuring needs {delta:,.0f} a year from '{restructure_from}', which only has {available:,.0f} "
+                f"across the year; capped at what is available.")
+            delta = available
+            contribution = current + delta
+        for m in months:
+            if delta >= 0:
+                # Raising NPS: take it from each month in proportion to its source amount
+                # (a bonus month gives up more), so no month's source can go negative.
+                share = m["salary"].get(restructure_from, 0.0) / available if available else 1.0 / MONTHS_PER_YEAR
+            else:
+                # Lowering NPS: give it back in proportion to each month's existing NPS,
+                # so no month's NPS can go negative.
+                share = m["employer_contributions"]["nps"] / current if current else 1.0 / MONTHS_PER_YEAR
+            moved = delta * share
+            # max(): float rounding must not leave a tiny negative, which validation rejects
+            m["salary"][restructure_from] = max(m["salary"].get(restructure_from, 0.0) - moved, 0.0)
+            m["employer_contributions"]["nps"] = max(m["employer_contributions"]["nps"] + moved, 0.0)
+        if restructure_from in BASE_LINKED_COMPONENTS and delta:
+            notes.append(
+                f"Restructuring from '{restructure_from}' also changes the HRA and NPS salary base; "
+                f"employer PF, if linked to basic, is not recalculated.")
+    else:
+        for m in months:
+            m["employer_contributions"]["nps"] = target_annual / MONTHS_PER_YEAR
+    apply_monthly_totals(new)
     return {"inputs": new, "contribution": contribution, "feasible": feasible, "notes": notes}
 
 

@@ -50,6 +50,7 @@ export interface PlannerChildProps {
   result: TaxComputeResult | null;
   update: (path: string, value: unknown) => void;
   metadata: TaxInputMetadata;
+  financialYear: string;
   payslip?: TaxPayslipResult | null;
 }
 
@@ -155,7 +156,7 @@ export const TaxPlanner: React.FC<TaxPlannerProps> = ({ showToast, onOpenRules }
     setResult(null);
     setFinancialYear(fy);
   };
-  const childProps: PlannerChildProps = { inputs, result, update, metadata };
+  const childProps: PlannerChildProps = { inputs, result, update, metadata, financialYear };
   const optProps = { inputs, financialYear, metadata, optimization, setOptimization };
 
   return (
