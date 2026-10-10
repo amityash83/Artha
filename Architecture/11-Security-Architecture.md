@@ -49,13 +49,24 @@ not a one-column special case — see the gap inventory below.
 
 ## Backups
 
-`/api/backup/create`, `/api/backup/restore`, `/api/backup/list`, and
-auto-backup on Electron window open/close (`/api/backup/auto-run`) all
-work via plain `shutil.copy2()` file copies of the SQLite database — no
-encryption, no compression, no integrity checksum. A backup file is
-exactly as protected (or unprotected) as the live database. Old
-auto-backups are pruned by count (`backup_count_limit`, default 10), not
-by age.
+Logic lives in `backend/backups.py`; `/api/backup/create`, `/restore`, `/list`,
+`/details` and `/auto-run` are thin routes over it.
+
+- **When:** the backend backs up at startup, before `init_db()` runs migrations, on
+  every platform (desktop, web, Docker). Electron additionally triggers one on window
+  close. An automatic backup is skipped when the database hasn't changed since the
+  newest backup, so frequent restarts (dev reload) don't evict older copies.
+- **How:** SQLite's online backup API (consistent even while the app has the database
+  open), written to a `.partial` name and renamed when complete.
+- **Where:** settings' `custom_backup_dir` when it exists, else `<db dir>/backups`; create,
+  list, restore and pruning all use that same folder.
+- **Restore:** the name must be a bare `.db` file in that folder (no paths); the file must
+  pass `PRAGMA integrity_check`; the current database is saved as `pre_restore_*` first;
+  then `init_db()` re-applies migrations to the restored data.
+- **Retention:** `auto_*` and `pre_restore_*` copies are pruned by count
+  (`backup_count_limit`, default 10), not by age. Manual `backup_*` copies are never pruned.
+- **Protection:** none beyond the live database's: no encryption or compression. A backup
+  file is exactly as protected (or unprotected) as the database itself.
 
 ## Secrets
 

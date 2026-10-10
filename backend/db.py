@@ -2191,6 +2191,32 @@ def init_db():
     except Exception as e:
         print("[Migration Warning] current_statement_spend baseline conversion error:", e)
 
+    # Liability owners: the loan forms used to send a free-text "owner" (stored in
+    # metadata_json) while liabilities.owner_id silently defaulted to 1. Where that text
+    # names a person, move it onto owner_id and drop the key; unmatched text is left as it
+    # was. Idempotent: rows without an "owner" key are skipped.
+    try:
+        people = {}
+        for r in cursor.execute("SELECT id, name FROM people ORDER BY id").fetchall():
+            people.setdefault(r['name'].strip().lower(), r['id'])  # same name twice: the earliest person
+        moved = 0
+        for row in cursor.execute("SELECT id, metadata_json FROM liabilities WHERE metadata_json LIKE ?", ('%"owner"%',)).fetchall():
+            try:
+                meta = json.loads(row['metadata_json'] or '{}')
+            except ValueError:
+                continue
+            text = meta.get('owner')
+            person = people.get(text.strip().lower()) if isinstance(text, str) else None
+            if person is None:
+                continue
+            del meta['owner']
+            cursor.execute("UPDATE liabilities SET owner_id = ?, metadata_json = ? WHERE id = ?", (person, json.dumps(meta), row['id']))
+            moved += 1
+        if moved:
+            print(f"[Migration] Set the owner of {moved} liabilit{'y' if moved == 1 else 'ies'} from the old free-text owner field.")
+    except Exception as e:
+        print("[Migration Warning] liability owner migration error:", e)
+
     conn.commit()
     conn.close()
 

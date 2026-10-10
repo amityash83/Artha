@@ -22,8 +22,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.9: the oldest the code supports (the local dev venv); 3.12: what the packaged builds use.
-        python: ['3.9', '3.12']
+        # 3.12: what the packaged builds and the local dev venv use.
+        python: ['3.12']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

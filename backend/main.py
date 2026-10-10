@@ -7,6 +7,7 @@ import math
 import uuid
 from datetime import datetime, date
 from typing import List, Optional
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Header, Depends
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +15,7 @@ from pydantic import BaseModel
 
 from backend.db import get_db_connection, init_db, get_db_path, get_db_dir
 import backend.calculations as calc
+import backend.backups as backups
 import backend.tax.engine as tax_engine
 import backend.tax.rules_loader as tax_rules
 import backend.tax.rule_store as tax_store
@@ -42,7 +44,19 @@ def require_api_secret(x_artha_api_secret: str = Header(default="")):
     if not secrets.compare_digest(x_artha_api_secret, API_SECRET):
         raise HTTPException(status_code=401, detail="Invalid or missing API secret")
 
-app = FastAPI(title="Artha API", dependencies=[Depends(require_api_secret)])
+@asynccontextmanager
+async def lifespan(_app):
+    # Back up first (every platform: desktop, web, Docker), so a migration can never be the
+    # only copy of the data; skipped when nothing changed since the last backup.
+    try:
+        backups.auto_backup("open")
+    except Exception as e:  # a failed backup must not stop the app from starting
+        print("[Backup] Startup backup failed:", e)
+    # Schema/migrations run once at startup, before the first request.
+    init_db()
+    yield
+
+app = FastAPI(title="Artha API", dependencies=[Depends(require_api_secret)], lifespan=lifespan)
 
 def _parse_allowed_origins() -> list:
     raw = os.environ.get("ARTHA_ALLOWED_ORIGINS", "").strip()
@@ -74,10 +88,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize database on startup
-@app.on_event("startup")
-def startup_event():
-    init_db()
+def default_owner_id(cursor) -> int:
+    """Owner for a record created without one (e.g. from the Credit Cards screen): the
+    Primary Owner, else the first person, else 1 for an empty people table."""
+    row = cursor.execute("""SELECT id FROM people ORDER BY CASE role WHEN 'Primary Owner' THEN 0 ELSE 1 END, id LIMIT 1""").fetchone()
+    return row["id"] if row else 1
 
 def get_table_columns(cursor, table_name: str) -> list:
     cursor.execute(f"PRAGMA table_info({table_name})")
@@ -799,12 +814,10 @@ def create_entity(entity_type: str, payload: dict):
     cursor = conn.cursor()
     try:
         initial_balance = 0.0
+        if entity_type in ("accounts", "assets", "liabilities") and not payload.get("owner_id"):
+            payload["owner_id"] = default_owner_id(cursor)
         if entity_type == "accounts":
-            payload["owner_id"] = payload.get("owner_id", 1)
             initial_balance = float(payload.pop("current_balance", 0.0))
-
-        if entity_type in ("assets", "liabilities"):
-            payload["owner_id"] = payload.get("owner_id", 1)
 
         if entity_type == "transactions":
             normalize_legacy_transaction_payload(payload)
@@ -1098,7 +1111,7 @@ def put_credit_card_details(id: int, details: CreditCardDetailsSchema):
     try:
         cursor.execute("SELECT liability_id FROM credit_card_details WHERE liability_id = ?", (id,))
         exists = cursor.fetchone()
-        payload = details.dict(exclude_unset=True) if exists else details.dict()
+        payload = details.model_dump(exclude_unset=True) if exists else details.model_dump()
 
         # current_statement_spend is no longer written to the column (real spend is
         # now derived from the transactions ledger — see compute_real_cycle_spend_total
@@ -1169,7 +1182,7 @@ def put_credit_card_details(id: int, details: CreditCardDetailsSchema):
             # Only overwrite fields the caller actually sent. The generic Liabilities
             # grid (EntityGrid.tsx) PUTs a partial payload (credit_limit/statement_balance/
             # statement_date/due_date/annual_fee/reward_points/point_value only) — a full
-            # .dict() would fill in every omitted field from this schema's defaults and
+            # .model_dump() would fill in every omitted field from this schema's defaults and
             # silently wipe category_rules_json/milestone_rules_json/redemption_partners_json/
             # base_points/base_spend/etc. back to '[]'/0, destroying whatever was configured
             # via the dedicated Credit Cards screen.
@@ -1269,7 +1282,7 @@ def create_card_variant(variant: CardVariantSchema):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        payload = variant.dict()
+        payload = variant.model_dump()
         payload["is_seeded"] = 0
         columns = list(payload.keys())
         placeholders = [f":{c}" for c in columns]
@@ -1293,7 +1306,7 @@ def update_card_variant(id: int, variant: CardVariantSchema):
         cursor.execute("SELECT id FROM card_variants WHERE id = ?", (id,))
         if not cursor.fetchone():
             raise HTTPException(status_code=404, detail="Card variant not found")
-        payload = variant.dict()
+        payload = variant.model_dump()
         payload["id"] = id
         # Editing a starter-catalogue card makes it the user's own copy: is_seeded
         # drops to 0 so "Starter Catalogue" in the UI always means untouched shipped
@@ -1419,7 +1432,7 @@ def put_insurance_details(id: int, details: InsuranceDetailsSchema):
     try:
         cursor.execute("SELECT asset_id FROM insurance_details WHERE asset_id = ?", (id,))
         exists = cursor.fetchone()
-        payload = details.dict()
+        payload = details.model_dump()
         if exists:
             set_clauses = [f"{c} = :{c}" for c in payload.keys()]
             payload["id"] = id
@@ -3249,91 +3262,37 @@ async def import_mmex_csv(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail="Parsing error: " + str(e))
 
-# --- Database Backup & Restore ---
+# --- Database Backup & Restore (logic in backend/backups.py) ---
+def _backup_call(fn, *args):
+    try:
+        return fn(*args)
+    except backups.BackupError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+
 @app.post("/api/backup/create")
 def create_backup():
-    try:
-        backup_dir = os.path.join(get_db_dir(), "backups")
-        os.makedirs(backup_dir, exist_ok=True)
-        backup_file = os.path.join(backup_dir, f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db")
-        shutil.copy2(get_db_path(), backup_file)
-        return {"status": "success", "backup_file": backup_file}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    made = _backup_call(backups.create_backup, "manual")
+    return {"status": "success", **made}
 
 @app.post("/api/backup/restore")
 def restore_backup(backup_name: str = Form(...)):
-    try:
-        backup_file = os.path.join(get_db_dir(), "backups", backup_name)
-        if not os.path.exists(backup_file):
-            raise HTTPException(status_code=404, detail="Backup file not found")
-        shutil.copy2(backup_file, get_db_path())
-        return {"status": "success"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return _backup_call(backups.restore_backup, backup_name)
 
 @app.get("/api/backup/list")
 def list_backups():
-    backup_dir = os.path.join(get_db_dir(), "backups")
-    if not os.path.exists(backup_dir):
-        return []
-    files = [f for f in os.listdir(backup_dir) if f.endswith(".db")]
-    files.sort(reverse=True)
-    return files
+    # Names only, newest first (Settings.tsx); details at /api/backup/details.
+    return [b["name"] for b in backups.list_backups()]
+
+@app.get("/api/backup/details")
+def list_backup_details():
+    return {"folder": backups.backup_dir(), "backups": backups.list_backups()}
 
 @app.api_route("/api/backup/auto-run", methods=["GET", "POST"])
 def auto_run_backup(trigger: str = "open"):
-    from backend.db import load_settings, save_settings
-    settings = load_settings()
-    
-    # Read settings config with defaults matching MMEx style
-    backup_on_open = settings.get("backup_on_open", True)
-    backup_on_close = settings.get("backup_on_close", True)
-    backup_count_limit = settings.get("backup_count_limit", 10)
-    custom_backup_dir = settings.get("custom_backup_dir", "")
-    
-    if trigger == "open" and not backup_on_open:
-        return {"status": "skipped", "reason": "backup_on_open disabled"}
-    if trigger == "close" and not backup_on_close:
-        return {"status": "skipped", "reason": "backup_on_close disabled"}
-        
+    # Called by Electron while the window closes: report failures in the body (200), never
+    # as an error status, so quitting is never held up by a failed backup.
     try:
-        if custom_backup_dir and os.path.exists(custom_backup_dir):
-            backup_dir = custom_backup_dir
-        else:
-            backup_dir = os.path.join(get_db_dir(), "backups")
-            
-        os.makedirs(backup_dir, exist_ok=True)
-        
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"auto_{trigger}_{timestamp}.db"
-        backup_file = os.path.join(backup_dir, filename)
-        
-        shutil.copy2(get_db_path(), backup_file)
-        
-        # Purge oldest automatic backups if they exceed the count limit
-        auto_backups = []
-        for f in os.listdir(backup_dir):
-            if f.startswith("auto_") and f.endswith(".db"):
-                f_path = os.path.join(backup_dir, f)
-                auto_backups.append((f_path, os.path.getmtime(f_path)))
-                
-        auto_backups.sort(key=lambda x: x[1])
-        
-        deleted_count = 0
-        while len(auto_backups) > backup_count_limit:
-            oldest_file, _ = auto_backups.pop(0)
-            try:
-                os.remove(oldest_file)
-                deleted_count += 1
-            except Exception as e:
-                print("Failed to delete old backup:", e)
-                
-        return {
-            "status": "success", 
-            "backup_file": backup_file, 
-            "purged": deleted_count
-        }
+        return backups.auto_backup(trigger)
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -4068,6 +4027,6 @@ def simulate_cash_flow(req: CashFlowSimulationRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    init_db()
+    # init_db() runs in the lifespan, after the startup backup.
     uvicorn.run(app, host="127.0.0.1", port=8000)
 

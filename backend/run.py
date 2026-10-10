@@ -6,11 +6,10 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.main import app
-from backend.db import init_db
 
 if __name__ == "__main__":
     import uvicorn
-    init_db()
+    # init_db() runs in main.py's lifespan, after the startup backup.
     port = int(os.environ.get("ARTHA_BACKEND_PORT", "8000"))
     # Disable reload in production/packaged mode
     uvicorn.run(app, host="127.0.0.1", port=port)

@@ -161,7 +161,7 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-    triggerAutoBackup('open');
+    // The on-open backup is taken by the backend itself at startup (backend/backups.py).
   });
 
   let isQuitting = false;

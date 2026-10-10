@@ -148,7 +148,7 @@ request rather than a pre-existing documented gap:
   pure functions, `init_db()` migration idempotency, and two
   `TestClient` API smoke tests (`backend/tests/`) — not yet
   comprehensive. Wired into CI in 2026-10 (`.github/workflows/tests.yml`:
-  pytest on Python 3.9 and 3.12, plus the frontend typecheck/build).
+  pytest on Python 3.12, plus the frontend typecheck/build).
 - **Docker image CI pipeline** (`.github/workflows/docker-build.yml`):
   builds and pushes `backend`/`frontend` images to GHCR on push to
   `main` and `v*` tags. Separate from the desktop-packaging pipeline

@@ -129,7 +129,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         standardFields['due_date'] = 'number';
         standardFields['annual_fee'] = 'number';
         standardFields['status'] = 'select_status';
-        standardFields['owner'] = 'text';
+        standardFields['owner_id'] = 'person_select';
       } else {
         standardFields['lender_institution_id'] = 'institution_select';
         standardFields['outstanding'] = 'number';
@@ -137,7 +137,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         standardFields['emi'] = 'number';
         standardFields['tenure_months'] = 'number';
         standardFields['status'] = 'select_status';
-        standardFields['owner'] = 'text';
+        standardFields['owner_id'] = 'person_select';
         if (isHomeLoan) {
           standardFields['linked_asset_id'] = 'property_select';
         }

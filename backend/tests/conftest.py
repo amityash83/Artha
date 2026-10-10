@@ -17,6 +17,9 @@ def test_db_path(tmp_path, monkeypatch):
     """
     fake_path = str(tmp_path / "test_finance.db")
     monkeypatch.setattr(db, "get_db_path", lambda: fake_path)
+    # Settings (backup options, custom backup folder) too: a test must never read or write
+    # the developer's real ~/.financeos/settings.json.
+    monkeypatch.setattr(db, "SETTINGS_PATH", str(tmp_path / "settings.json"))
     return fake_path
 
 
