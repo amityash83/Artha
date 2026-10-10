@@ -8,6 +8,7 @@
     "electron"
   ],
   "scripts": {
+    "artha": "node scripts/artha.mjs",
     "dev:backend": "node scripts/backend.mjs --reload",
     "dev:frontend": "npm run dev -w frontend",
     "dev:electron": "npm run dev -w electron",

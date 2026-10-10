@@ -5,23 +5,28 @@ const { spawn } = require('child_process');
 let mainWindow = null;
 let pyProc = null;
 
-// Dev only: pick up ports from the optional repo-root .env (see .env.example), the same
-// file scripts/backend.mjs, frontend/vite.config.mts and start.sh read. Packaged builds
-// don't ship the scripts/ folder and use the defaults below.
+// Ports. Dev: shared defaults/overrides from scripts/load-env.cjs (repo-root .env), the
+// same as the CLI, Vite and the backend launcher. Packaged: the bundled backend always
+// runs on 8000 (the web build bakes that in), unless overridden by env vars.
+let BACKEND_PORT = process.env.ARTHA_BACKEND_PORT || '8000';
+let FRONTEND_PORT = process.env.ARTHA_FRONTEND_PORT || '5173';
 if (!app.isPackaged) {
   try {
-    require('../scripts/load-env.cjs').loadRootEnv();
+    const env = require('../scripts/load-env.cjs');
+    env.loadRootEnv();
+    ({ backend: BACKEND_PORT, frontend: FRONTEND_PORT } = env.devPorts());
   } catch (err) {
-    console.warn('Could not load .env:', err.message);
+    console.warn('Could not load dev port settings:', err.message);
   }
 }
 
-// Configurable so multiple environments (or other local projects) can avoid port
-// collisions without editing code — see CLAUDE.md's "Backend port/URL" note.
-const BACKEND_PORT = process.env.ARTHA_BACKEND_PORT || '8000';
-const FRONTEND_PORT = process.env.ARTHA_FRONTEND_PORT || '5173';
-
 function startBackend() {
+  // The dev CLI (scripts/artha.mjs) runs and supervises the backend itself and says so,
+  // so the window doesn't start a second one that would just fail on the busy port.
+  if (process.env.ARTHA_EXTERNAL_BACKEND === '1') {
+    console.log(`Using the backend already running on port ${BACKEND_PORT}.`);
+    return;
+  }
   const isDev = !app.isPackaged;
   const isWin = process.platform === 'win32';
   let pythonBin = 'python';
@@ -71,7 +76,13 @@ function startBackend() {
   console.log(`Database directory set to: ${dbDir}`);
 
   // Inherit environment variables and inject FINANCE_DB_DIR
-  const env = { ...process.env, FINANCE_DB_DIR: dbDir };
+  const env = {
+    ...process.env,
+    FINANCE_DB_DIR: dbDir,
+    ARTHA_BACKEND_PORT: BACKEND_PORT,
+    // Dev: the window loads the Vite server, so the backend must allow that origin (CORS).
+    ARTHA_FRONTEND_PORT: FRONTEND_PORT,
+  };
 
   // Start FastAPI using Uvicorn (dev) or direct standalone executable (packaged)
   let args = [];

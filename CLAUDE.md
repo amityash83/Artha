@@ -20,17 +20,19 @@ pip install -r backend/requirements.txt
 pip install pyinstaller
 npm install                         # installs both npm workspaces (frontend, electron) from the root
 
-# Local development
-./start.sh / ./stop.sh              # macOS/Linux: backend :8010 + Vite :5183 + Electron window, logs in .run/
-npm start                           # any OS: backend + Vite + Electron via concurrently (ports 8000/5173)
-npm run dev:web                     # web app only: backend + Vite, no Electron
+# Local development: one CLI, identical on every OS (logic in scripts/artha.mjs)
+./artha start [desktop|web]         # macOS/Linux; Windows: .\artha.ps1 / artha.cmd; anywhere: npm run artha -- <cmd>
+./artha stop | restart | status [--json] | logs [backend|frontend|desktop] [-f]
+./artha build [web|backend|all] | package [mac|win|linux]
+./start.sh / ./stop.sh              # aliases for ./artha start / stop
+npm start / npm run dev:web         # foreground alternative via concurrently (Ctrl+C stops); same ports
 
 # Frontend only (workspace "frontend")
-npm run dev:frontend                # vite, http://localhost:5173
+npm run dev:frontend                # vite, http://localhost:5183
 npm run build:frontend              # tsc typecheck + vite build to frontend/dist/
 
 # Backend only (reload server)
-npm run dev:backend                 # scripts/backend.mjs: venv uvicorn backend.main:app --reload on 127.0.0.1:8000 (any OS)
+npm run dev:backend                 # scripts/backend.mjs: venv uvicorn backend.main:app --reload on 127.0.0.1:8010 (any OS)
 venv/bin/python backend/run.py      # manual sanity-check run, prints startup tracebacks directly (venv\Scripts\python on Windows)
 
 # Production packaging (PyInstaller backend + electron-builder), per platform:
@@ -62,7 +64,7 @@ The repo is a monorepo of three parts. `frontend/` + `backend/` make up the web 
 ```
 Electron (electron/main.js)
   ├─ spawns Python backend as a sidecar subprocess (venv python in dev, PyInstaller-built binary in prod — main.exe on Windows, extensionless main on macOS/Linux; electron/main.js branches on process.platform)
-  ├─ dev: loads http://localhost:5173 (Vite)  |  prod: loads web/index.html (frontend/dist, copied in by scripts/copy-web.mjs)
+  ├─ dev: loads http://localhost:5183 (Vite)  |  prod: loads web/index.html (frontend/dist, copied in by scripts/copy-web.mjs)
   └─ IPC: native save/open dialogs for picking a SQLite db file, exposed to the page only through
      electron/preload.js (contextBridge -> window.artha). The renderer runs with nodeIntegration off,
      contextIsolation + sandbox on; frontend code reaches desktop features via frontend/src/platform.ts,
@@ -126,7 +128,9 @@ Shipped rule files are read-only at runtime. Users edit their own copies, stored
 
 ### Backend port/URL
 
-Default is `127.0.0.1:8000` (backend) / `5173` (Vite). `ARTHA_BACKEND_PORT`/`ARTHA_FRONTEND_PORT` override them, from the shell or from an optional git-ignored repo-root `.env` (see `.env.example`), which every dev entry point reads: `start.sh` (defaults `8010`/`5183` to avoid colliding with other local projects), `scripts/backend.mjs`, `frontend/vite.config.mts` and `electron/main.js` (dev only, via `scripts/load-env.cjs`). `frontend/src/config.ts`'s `API_BASE_URL` is baked in at build time by `frontend/vite.config.mts`'s `define`: the dev server follows `ARTHA_BACKEND_PORT`, but **production builds always use 8000** (the port the packaged desktop app starts its bundled backend on) unless `VITE_API_BASE_URL` is set explicitly, as the Docker build does. That stops a dev-only port in `.env` from being baked into a desktop package.
+Dev defaults are **8010 (backend) / 5183 (Vite) on every OS and entry point**, defined once in `scripts/load-env.cjs` (`DEV_DEFAULT_PORTS`), deliberately not 8000/5173 because the packaged desktop app always runs its bundled backend on 8000. `ARTHA_BACKEND_PORT`/`ARTHA_FRONTEND_PORT` override them, from the shell or from an optional git-ignored repo-root `.env` (see `.env.example`), which every dev entry point reads via `load-env.cjs`: the `artha` CLI, `scripts/backend.mjs`, `frontend/vite.config.mts` and `electron/main.js` (dev only). `frontend/src/config.ts`'s `API_BASE_URL` is baked in at build time by `frontend/vite.config.mts`'s `define`: the dev server follows the dev backend port, but **production builds always use 8000** unless `VITE_API_BASE_URL` is set explicitly, as the Docker build does. That stops a dev-only port in `.env` from being baked into a desktop package.
+
+The `artha` CLI (`scripts/artha.mjs`) is the supported way to run the dev stack: it records one pid + log per service in `.run/`, checks identity by response content (not just "port answered"), refuses to start over a port another app holds, and on `stop` only signals its recorded pids (process groups / `taskkill /t`) plus this repo's own untracked python/node/electron processes. It never kills by port. In desktop mode it sets `ARTHA_EXTERNAL_BACKEND=1` so `electron/main.js` reuses the CLI's backend instead of spawning a second one.
 
 ### Docker/web auth & CORS (opt-in, no-op for desktop)
 

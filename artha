@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# Artha dev control for macOS/Linux. Same commands as .\artha.ps1 / artha.cmd on Windows;
+# the logic lives in scripts/artha.mjs. Run "./artha help" for the list.
+exec node "$(dirname "$0")/scripts/artha.mjs" "$@"

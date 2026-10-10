@@ -80,9 +80,11 @@ pip install -r backend/requirements.txt
 pip install pyinstaller
 npm install
 
-npm start                       # any OS: Vite + FastAPI + Electron, all at once
-npm run dev:web                 # web app only (Vite + FastAPI), no Electron
-# macOS/Linux: ./start.sh and ./stop.sh (dev convenience only, not packaging)
+./artha start                   # backend + web UI + desktop window (Windows: .\artha.ps1 start)
+./artha start web               # web app only, open http://localhost:5183
+./artha status                  # what's running, URLs, database, logs, builds
+./artha stop                    # also: restart, logs [-f], build, package
+# ./start.sh and ./stop.sh still work as aliases
 ```
 
 Requires [Node.js](https://nodejs.org/) v22.12+ and [Python](https://www.python.org/) v3.12+.

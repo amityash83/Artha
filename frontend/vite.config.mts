@@ -6,8 +6,12 @@ import react from '@vitejs/plugin-react';
 // another project's server on the same default ports (see CLAUDE.md, start.sh). They
 // can be set in the repo-root .env, shared with the backend, Electron and start.sh.
 const require = createRequire(import.meta.url);
+// Dev ports come from scripts/load-env.cjs (shared with the CLI, backend and Electron).
+let devPorts = { backend: process.env.ARTHA_BACKEND_PORT || '8010', frontend: process.env.ARTHA_FRONTEND_PORT || '5183' };
 try {
-  require('../scripts/load-env.cjs').loadRootEnv();
+  const env = require('../scripts/load-env.cjs');
+  env.loadRootEnv();
+  devPorts = env.devPorts();
 } catch {
   // Not available in every build context (e.g. a minimal Docker build); env vars still apply.
 }
@@ -18,7 +22,7 @@ const DESKTOP_BACKEND_PORT = '8000';
 export default defineConfig(({ command }) => {
   // Dev server: follow ARTHA_BACKEND_PORT (start.sh / .env). Production build: the
   // desktop default, unless VITE_API_BASE_URL is set explicitly (the Docker/web build).
-  const backendPort = command === 'serve' ? (process.env.ARTHA_BACKEND_PORT || DESKTOP_BACKEND_PORT) : DESKTOP_BACKEND_PORT;
+  const backendPort = command === 'serve' ? devPorts.backend : DESKTOP_BACKEND_PORT;
   return {
   plugins: [react()],
   base: './',
@@ -39,7 +43,7 @@ export default defineConfig(({ command }) => {
     outDir: 'dist'
   },
   server: {
-    port: Number(process.env.ARTHA_FRONTEND_PORT) || 5173,
+    port: Number(devPorts.frontend),
     strictPort: true
   }
   };

@@ -30,4 +30,23 @@ function loadRootEnv() {
   return loaded;
 }
 
-module.exports = { loadRootEnv, ROOT };
+// Dev-time defaults for every platform and entry point (the CLI, npm scripts, Vite,
+// Electron dev mode). Deliberately not 8000/5173: the packaged desktop app always runs
+// its own backend on 8000, and common framework ports clash with other local projects.
+const DEV_DEFAULT_PORTS = { backend: '8010', frontend: '5183' };
+
+/** Effective dev ports: shell / .env overrides, else the defaults above. Call after loadRootEnv(). */
+function devPorts() {
+  return {
+    backend: process.env.ARTHA_BACKEND_PORT || DEV_DEFAULT_PORTS.backend,
+    frontend: process.env.ARTHA_FRONTEND_PORT || DEV_DEFAULT_PORTS.frontend,
+  };
+}
+
+/** CORS allowlist for the dev frontend, unless ARTHA_ALLOWED_ORIGINS is set explicitly. */
+function devAllowedOrigins(frontendPort) {
+  return process.env.ARTHA_ALLOWED_ORIGINS
+    || `http://localhost:${frontendPort},http://127.0.0.1:${frontendPort}`;
+}
+
+module.exports = { loadRootEnv, ROOT, DEV_DEFAULT_PORTS, devPorts, devAllowedOrigins };

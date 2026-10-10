@@ -71,12 +71,14 @@ If you want to run and test changes interactively:
 1. Open PowerShell in `D:\AI\Antigravity`.
 2. Run the start script:
    ```powershell
-   npm start
+   .\artha.ps1 start
    ```
    **What this does under the hood:**
-   - Starts Vite to compile and hot-reload React assets on `http://localhost:5173`.
-   - Boots the Python FastAPI server in reload mode on `http://127.0.0.1:8000`.
-   - Spawns the Electron browser shell window.
+   - Boots the Python FastAPI server on `http://127.0.0.1:8010`.
+   - Starts Vite to compile and hot-reload React assets on `http://localhost:5183`.
+   - Opens the Electron desktop window.
+   - `.\artha.ps1 status` shows what's running, the URLs, database and logs; `.\artha.ps1 stop` stops it all.
+     The same commands work on macOS/Linux as `./artha …`.
 3. The active database location is resolved dynamically. By default, the app initializes the database file at `D:\AI\Antigravity\data\finance.db`, but you can customize or open separate files at runtime inside the "Integrations & Backups" tab.
 
 ---
