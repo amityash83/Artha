@@ -58,12 +58,14 @@ def input_warnings(inp: dict, rules: dict, results: Dict[str, dict]) -> List[dic
     flagged = {}
     for regime_result in results.values():
         for line in regime_result["audit"]:
-            if line.get("verification") in ("unverified", "assumption") and line.get("rule_ref"):
+            if line.get("verification") in ("unverified", "assumption", "user_entered") and line.get("rule_ref"):
                 flagged.setdefault(line["rule_ref"], line["verification"])
-    for rule_ref, level in sorted(flagged.items()):
+    for level in sorted(set(flagged.values())):
+        refs = sorted(ref for ref, lvl in flagged.items() if lvl == level)
         warnings.append(_warning(
             f"rule_{level}",
-            f"This result uses a rule marked '{level}' in rule set {rules['rule_set_id']}: {rule_ref}.", "info"))
+            f"This result uses {len(refs)} rule(s) marked '{level}' in rule set {rules['rule_set_id']}: "
+            + ", ".join(refs) + ".", "info"))
 
     if any(line.get("verification") == "secondary_source"
            for regime_result in results.values() for line in regime_result["audit"]):

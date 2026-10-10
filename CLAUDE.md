@@ -106,7 +106,13 @@ The active DB path is not fixed — resolution order is: `~/.financeos/settings.
 
 Thresholds like emergency fund target, high-interest loan ROI cutoff, prepayment liquidity buffer, insurance renewal alert window live in the `financial_rules` table (editable via `/api/rules`) but `decision_engine.py` and `calculations.py` fall back to hardcoded defaults if a rule is absent/disabled. See [hardcoded_vs_dynamic.md](hardcoded_vs_dynamic.md) for the authoritative list of which values are DB-driven vs. hardcoded in Python/TSX — check it before assuming a threshold is configurable.
 
-**Income tax is the exception**: slabs, rebates, surcharge, cess and deduction limits are not in `financial_rules` but in `backend/tax/rules/<rule_set_id>.json`, one file per financial year, each item tagged with a `verification` level and its legacy/new-Act section. The old Taxation keys in `financial_rules` (`section_80c_limit`, `standard_deduction_salaried`, etc.) are still seeded but unused (their descriptions say so). Adding a year means adding a rule file, not editing code. The files are bundled into the PyInstaller binary via `--add-data` in `package.json`'s `build:backend*` scripts, so a new data directory under `backend/` needs the same treatment.
+**Income tax is the exception**: slabs, rebates, surcharge, cess and deduction limits are not in `financial_rules` but in `backend/tax/rules/<rule_set_id>.json`, one file per financial year, each item tagged with a `verification` level and its legacy/new-Act section. The old Taxation keys in `financial_rules` (`section_80c_limit`, `standard_deduction_salaried`, etc.) are still seeded but unused (their descriptions say so). Adding a year means adding a rule file, not editing code. The files are bundled into the PyInstaller binary via `--add-data` in `package.json`'s `build:backend*` scripts (`backend/tax/rules` and `backend/tax/metadata`), so a new data directory under `backend/` needs the same treatment.
+
+Shipped rule files are read-only at runtime. Users edit their own copies, stored in the DB by `backend/tax/rule_store.py`:
+- **Tables:** `tax_rule_sets` holds one immutable row per version. `tax_rule_set_selection` maps each FY to the set it uses; with no row, the shipped set applies.
+- **Resolution:** compute, the profile estimate and scenarios all go through `rule_store.resolve()`, never `rules_loader.load_rule_set()` directly, so a user's selection is honoured.
+- **Provenance:** any value a user changes is force-tagged `verification: "user_entered"`.
+- **Scenarios:** saved scenarios (`tax_scenarios`) snapshot the rule set id, version and content hash. A rule set that scenarios reference can only be archived, not deleted.
 
 ### Backend port/URL
 

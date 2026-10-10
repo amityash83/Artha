@@ -10,13 +10,16 @@ to where it came from and how confident we are in it.
 Validation is strict and runs on load: a malformed rule file raises RuleSetError
 rather than producing a quietly-wrong tax figure.
 """
+import hashlib
 import json
 import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional
 
-VERIFICATION_LEVELS = ("verified", "secondary_source", "unverified", "assumption")
+# user_entered: set automatically on any item a user changed in their own rule set
+# (see rule_store.py) — it is never valid in a shipped file.
+VERIFICATION_LEVELS = ("verified", "secondary_source", "unverified", "assumption", "user_entered")
 
 REQUIRED_TOP_LEVEL = (
     "rule_set_id", "version", "financial_year", "assessment_year", "act",
@@ -38,19 +41,30 @@ class RuleSetError(ValueError):
     pass
 
 
-def _rules_dir() -> Path:
+def _data_dir(name: str) -> Path:
     # In a PyInstaller build, data files added via --add-data land under sys._MEIPASS
     # mirroring their source path; __file__-relative usually resolves there too, but
-    # fall back explicitly in case it doesn't.
-    here = Path(__file__).resolve().parent / "rules"
+    # fall back explicitly in case it doesn't. Every directory read here must also be
+    # listed in package.json's build:backend* --add-data flags.
+    here = Path(__file__).resolve().parent / name
     if here.is_dir():
         return here
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
-        frozen = Path(meipass) / "backend" / "tax" / "rules"
+        frozen = Path(meipass) / "backend" / "tax" / name
         if frozen.is_dir():
             return frozen
-    raise RuleSetError(f"Tax rules directory not found (looked in {here})")
+    raise RuleSetError(f"Tax data directory '{name}' not found (looked in {here})")
+
+
+def _rules_dir() -> Path:
+    return _data_dir("rules")
+
+
+@lru_cache(maxsize=None)
+def load_input_metadata() -> dict:
+    """Tax Planner input-field metadata (labels, groups, help) — not year-specific."""
+    return json.loads((_data_dir("metadata") / "input_fields.json").read_text(encoding="utf-8"))
 
 
 def _check_item(item, path: str) -> None:
@@ -132,11 +146,27 @@ def _load_file(path: Path) -> dict:
     return rules
 
 
+def content_hash(rules: dict) -> str:
+    """Stable fingerprint of a rule set's content, recorded with every saved scenario."""
+    canonical = json.dumps(rules, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _has_user_entered(node) -> bool:
+    if isinstance(node, dict):
+        if node.get("verification") == "user_entered":
+            return True
+        return any(_has_user_entered(v) for v in node.values())
+    return False
+
+
 @lru_cache(maxsize=None)
 def _all_rule_sets() -> Dict[str, dict]:
     by_fy = {}
     for path in sorted(_rules_dir().glob("*.json")):
         rules = _load_file(path)
+        if _has_user_entered(rules):
+            raise RuleSetError(f"{path.name}: shipped rule sets may not contain 'user_entered' items")
         fy = rules["financial_year"]
         if fy in by_fy:
             raise RuleSetError(f"two rule sets claim financial year {fy}")
@@ -144,8 +174,13 @@ def _all_rule_sets() -> Dict[str, dict]:
     return by_fy
 
 
+def shipped_rule_sets() -> Dict[str, dict]:
+    """Shipped (read-only) rule sets keyed by rule_set_id."""
+    return {r["rule_set_id"]: r for r in _all_rule_sets().values()}
+
+
 def list_rule_sets() -> List[dict]:
-    """Summary of every available rule set, newest financial year first."""
+    """Summary of every shipped rule set, newest financial year first."""
     out = []
     for fy, r in sorted(_all_rule_sets().items(), reverse=True):
         out.append({
@@ -157,6 +192,7 @@ def list_rule_sets() -> List[dict]:
             "effective_from": r["effective_from"],
             "effective_to": r["effective_to"],
             "status_note": r.get("status_note"),
+            "content_hash": content_hash(r),
         })
     return out
 

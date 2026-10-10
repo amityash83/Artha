@@ -1,0 +1,55 @@
+{
+  "description": "Field metadata for the Tax Planner input forms. Not financial-year specific (limits and eligibility come from the selected rule set). 'path' is the engine input path (see backend/tax/engine.py DEFAULT_INPUTS). 'rule_key' links a deduction to the rule set's regimes.<regime>.deductions.value.allowed list, so the UI can show which regimes allow it.",
+  "salary_components": [
+    {"key": "basic", "label": "Basic Salary", "kind": "basic", "help": "Base for HRA, employer NPS and PF calculations."},
+    {"key": "da", "label": "Dearness Allowance (forming part of retirement benefits)", "kind": "da", "help": "Counts with basic for the HRA and NPS salary base."},
+    {"key": "hra", "label": "House Rent Allowance (HRA)", "kind": "hra", "help": "Partly exempt in the old regime if you pay rent."},
+    {"key": "special_allowance", "label": "Special Allowance", "kind": "cash"},
+    {"key": "bonus", "label": "Performance Bonus", "kind": "cash", "variable": true},
+    {"key": "incentives", "label": "Incentives", "kind": "cash", "variable": true},
+    {"key": "other_taxable_allowances", "label": "Other Taxable Allowances", "kind": "cash"}
+  ],
+  "payroll_deductions": [
+    {"key": "employee_epf", "label": "Employee EPF", "help": "Counted towards 80C automatically in the old regime."},
+    {"key": "vpf", "label": "Voluntary Provident Fund", "help": "Counted towards 80C automatically in the old regime."},
+    {"key": "employee_esic", "label": "Employee ESIC"},
+    {"key": "professional_tax", "label": "Professional Tax", "help": "Deductible in the old regime only, up to the rule set's cap."},
+    {"key": "other", "label": "Other Payroll Deductions"}
+  ],
+  "employer_contributions": [
+    {"key": "pf", "label": "Employer PF", "help": "Not part of taxable salary unless PF + NPS + superannuation exceed the aggregate cap."},
+    {"key": "nps", "label": "Employer NPS", "help": "Added to salary, then deductible up to the regime's % of basic + DA (both regimes)."},
+    {"key": "superannuation", "label": "Employer Superannuation"}
+  ],
+  "other_income": [
+    {"key": "interest_savings", "label": "Savings account interest"},
+    {"key": "interest_deposits", "label": "Fixed / recurring deposit interest"},
+    {"key": "dividends", "label": "Dividends"},
+    {"key": "rental_gross", "label": "Gross annual rent received (let-out property)"},
+    {"key": "rental_municipal_tax", "label": "Municipal taxes paid on let-out property"},
+    {"key": "other", "label": "Other income (taxed at slab rates)"}
+  ],
+  "capital_gains": [
+    {"key": "stcg_111a", "label": "Short-term gains on listed equity / equity funds (special rate)"},
+    {"key": "ltcg_112a", "label": "Long-term gains on listed equity / equity funds (special rate, after exemption)"},
+    {"key": "ltcg_112", "label": "Other long-term gains (special rate)"},
+    {"key": "stcg_slab", "label": "Other short-term gains (slab rates)"}
+  ],
+  "deduction_fields": [
+    {"path": "deductions.80C.ppf", "label": "PPF", "group": "80C", "rule_key": "80C"},
+    {"path": "deductions.80C.elss", "label": "ELSS mutual funds", "group": "80C", "rule_key": "80C"},
+    {"path": "deductions.80C.life_insurance", "label": "Life insurance premiums", "group": "80C", "rule_key": "80C"},
+    {"path": "deductions.80C.home_loan_principal", "label": "Home loan principal repayment", "group": "80C", "rule_key": "80C"},
+    {"path": "deductions.80C.tuition_fees", "label": "Children's tuition fees", "group": "80C", "rule_key": "80C"},
+    {"path": "deductions.80C.other", "label": "Other 80C investments", "group": "80C", "rule_key": "80C", "help": "Do not include EPF/VPF here; payroll EPF/VPF is already counted."},
+    {"path": "deductions.employee_nps", "label": "Your own NPS contribution", "group": "NPS", "rule_key": "80CCD1B", "help": "Fills the additional 80CCD(1B) limit first, then the 80C pool."},
+    {"path": "deductions.80D_self_family", "label": "Health insurance: self, spouse, children", "group": "80D", "rule_key": "80D"},
+    {"path": "deductions.80D_parents", "label": "Health insurance: parents", "group": "80D", "rule_key": "80D"},
+    {"path": "deductions.parents_senior", "label": "Parents are senior citizens", "group": "80D", "rule_key": "80D", "type": "boolean"},
+    {"path": "deductions.home_loan_interest_self_occupied", "label": "Home loan interest (self-occupied)", "group": "Home loan", "rule_key": "house_property_loss_setoff_cap"},
+    {"path": "deductions.80E", "label": "Education loan interest", "group": "Other", "rule_key": "80E"},
+    {"path": "deductions.80G_eligible", "label": "Donations (eligible amount)", "group": "Other", "rule_key": "80G", "help": "Enter the eligible deduction after 50%/100% and qualifying limits; the engine does not compute these."},
+    {"path": "deductions.other_old", "label": "Other old-regime deductions", "group": "Other", "rule_key": "other_old", "user_asserted": true},
+    {"path": "deductions.other_new", "label": "Other new-regime deductions (e.g. Agniveer corpus)", "group": "Other", "rule_key": "other_new", "user_asserted": true}
+  ]
+}

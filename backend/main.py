@@ -15,6 +15,8 @@ from backend.db import get_db_connection, init_db, get_db_path, get_db_dir
 import backend.calculations as calc
 import backend.tax.engine as tax_engine
 import backend.tax.rules_loader as tax_rules
+import backend.tax.rule_store as tax_store
+import backend.tax.scenario_store as tax_scenarios
 from backend.decision_engine import generate_recommendations, generate_credit_card_annual_reviews
 
 # Shared-secret auth for the Docker/web deployment path only. Empty/unset (the
@@ -1894,37 +1896,154 @@ def delete_goal_funding_constraint(id: int, category_id: int):
 
 # --- Taxation Router ---
 # Decision-support estimate only, NOT tax advice. All tax math lives in backend/tax/
-# (engine.py), driven by the versioned rule sets in backend/tax/rules/*.json — no
-# slab, limit or rate is read from financial_rules or hardcoded here.
+# (engine.py). Rule sets are either shipped read-only files (backend/tax/rules/*.json)
+# or user-edited copies stored in tax_rule_sets (backend/tax/rule_store.py); no slab,
+# limit or rate is read from financial_rules or hardcoded here.
+
+def _tax_store_call(fn, *args, **kwargs):
+    """Runs a rule/scenario store call on a fresh connection, mapping its errors to HTTP."""
+    conn = get_db_connection()
+    try:
+        return fn(conn, *args, **kwargs)
+    except tax_store.RuleStoreError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+    except tax_engine.TaxInputError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    finally:
+        conn.close()
+
+def _default_financial_year() -> str:
+    return tax_rules.latest_financial_year(calc.get_current_financial_year())
 
 class TaxComputeRequest(BaseModel):
     financial_year: Optional[str] = None
+    rule_set_id: Optional[str] = None
+    rule_set_version: Optional[int] = None
     # Shape is defined once, by backend/tax/engine.py's DEFAULT_INPUTS, and validated
     # by engine.normalize_inputs — not duplicated as a Pydantic schema here.
     inputs: dict = {}
 
-def _resolve_tax_rule_set(financial_year: Optional[str]) -> dict:
-    try:
-        fy = financial_year or tax_rules.latest_financial_year(calc.get_current_financial_year())
-        return tax_rules.load_rule_set(fy)
-    except tax_rules.RuleSetError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.get("/api/tax/rule-sets")
-def get_tax_rule_sets():
-    return tax_rules.list_rule_sets()
-
-@app.get("/api/tax/rule-sets/{financial_year}")
-def get_tax_rule_set(financial_year: str):
-    return _resolve_tax_rule_set(financial_year)
+def _compute_tax(conn, req: TaxComputeRequest) -> dict:
+    fy = req.financial_year or (None if req.rule_set_id else _default_financial_year())
+    rules, meta = tax_store.resolve(conn, fy, req.rule_set_id, req.rule_set_version)
+    result = tax_engine.compute(req.inputs, rules, computed_at=datetime.now().isoformat(timespec="seconds"))
+    result["rule_set"].update({"name": meta["name"], "source": meta["source"], "content_hash": meta["content_hash"]})
+    return result
 
 @app.post("/api/tax/compute")
 def compute_tax(req: TaxComputeRequest):
-    rules = _resolve_tax_rule_set(req.financial_year)
-    try:
-        return tax_engine.compute(req.inputs, rules, computed_at=datetime.now().isoformat(timespec="seconds"))
-    except tax_engine.TaxInputError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+    return _tax_store_call(_compute_tax, req)
+
+@app.get("/api/tax/input-metadata")
+def get_tax_input_metadata():
+    return {**tax_rules.load_input_metadata(), "default_financial_year": _default_financial_year()}
+
+@app.get("/api/tax/rule-sets")
+def get_tax_rule_sets():
+    return _tax_store_call(tax_store.list_rule_sets)
+
+@app.get("/api/tax/rule-sets/{rule_set_id}")
+def get_tax_rule_set(rule_set_id: str, version: Optional[int] = None):
+    def fetch(conn):
+        content, meta = tax_store.get_rule_set(conn, rule_set_id, version)
+        return {"meta": meta, "content": content}
+    return _tax_store_call(fetch)
+
+@app.get("/api/tax/rule-sets/{rule_set_id}/versions")
+def get_tax_rule_set_versions(rule_set_id: str):
+    return _tax_store_call(tax_store.list_versions, rule_set_id)
+
+@app.get("/api/tax/rule-sets/{rule_set_id}/diff")
+def diff_tax_rule_set(rule_set_id: str, version: Optional[int] = None, against_id: Optional[str] = None,
+                      against_version: Optional[int] = None):
+    """Changes from `against` (default: this set's base for v1 or previous version) to this set."""
+    def run(conn):
+        content, meta = tax_store.get_rule_set(conn, rule_set_id, version)
+        if against_id:
+            base, base_meta = tax_store.get_rule_set(conn, against_id, against_version)
+        elif meta["source"] == "user" and meta["version"] > 1:
+            base, base_meta = tax_store.get_rule_set(conn, rule_set_id, meta["version"] - 1)
+        elif meta["based_on_rule_set_id"]:
+            base, base_meta = tax_store.get_rule_set(conn, meta["based_on_rule_set_id"], meta["based_on_version"])
+        else:
+            return {"against": None, "changes": []}
+        return {"against": base_meta, "changes": tax_store.diff_rule_sets(base, content)}
+    return _tax_store_call(run)
+
+class TaxRuleSetCreateRequest(BaseModel):
+    name: str
+    based_on_rule_set_id: Optional[str] = None
+    based_on_version: Optional[int] = None
+    financial_year: Optional[str] = None
+    content: Optional[dict] = None
+    note: Optional[str] = None
+
+@app.post("/api/tax/rule-sets")
+def create_tax_rule_set(req: TaxRuleSetCreateRequest):
+    return _tax_store_call(tax_store.create_rule_set, req.name, req.based_on_rule_set_id, req.based_on_version,
+                           req.content, req.financial_year, req.note)
+
+class TaxRuleSetUpdateRequest(BaseModel):
+    content: dict
+    name: Optional[str] = None
+    note: Optional[str] = None
+
+@app.put("/api/tax/rule-sets/{rule_set_id}")
+def update_tax_rule_set(rule_set_id: str, req: TaxRuleSetUpdateRequest):
+    return _tax_store_call(tax_store.update_rule_set, rule_set_id, req.content, req.note, req.name)
+
+@app.post("/api/tax/rule-sets/{rule_set_id}/archive")
+def archive_tax_rule_set(rule_set_id: str):
+    return _tax_store_call(tax_store.set_status, rule_set_id, "archived")
+
+@app.post("/api/tax/rule-sets/{rule_set_id}/restore")
+def restore_tax_rule_set(rule_set_id: str):
+    return _tax_store_call(tax_store.set_status, rule_set_id, "active")
+
+@app.delete("/api/tax/rule-sets/{rule_set_id}")
+def delete_tax_rule_set(rule_set_id: str):
+    _tax_store_call(tax_store.delete_rule_set, rule_set_id)
+    return {"status": "success"}
+
+class TaxRuleSetSelectionRequest(BaseModel):
+    rule_set_id: Optional[str] = None  # null = use the shipped rule set for the year
+
+@app.put("/api/tax/rule-set-selection/{financial_year}")
+def select_tax_rule_set(financial_year: str, req: TaxRuleSetSelectionRequest):
+    _tax_store_call(tax_store.set_selection, financial_year, req.rule_set_id)
+    return {"status": "success"}
+
+class TaxScenarioRequest(BaseModel):
+    name: str
+    inputs: dict = {}
+    financial_year: Optional[str] = None
+    rule_set_id: Optional[str] = None
+    rule_set_version: Optional[int] = None
+    profile_id: Optional[int] = None
+    notes: Optional[str] = None
+
+@app.get("/api/tax/scenarios")
+def get_tax_scenarios():
+    return _tax_store_call(tax_scenarios.list_scenarios)
+
+@app.get("/api/tax/scenarios/{scenario_id}")
+def get_tax_scenario(scenario_id: int):
+    return _tax_store_call(tax_scenarios.get, scenario_id)
+
+@app.post("/api/tax/scenarios")
+def save_tax_scenario(req: TaxScenarioRequest):
+    fy = req.financial_year or (None if req.rule_set_id else _default_financial_year())
+    return _tax_store_call(tax_scenarios.save, req.name, req.inputs, fy, req.rule_set_id,
+                           req.rule_set_version, req.profile_id, req.notes)
+
+@app.post("/api/tax/scenarios/{scenario_id}/recalculate")
+def recalculate_tax_scenario(scenario_id: int):
+    return _tax_store_call(tax_scenarios.recalculate, scenario_id)
+
+@app.delete("/api/tax/scenarios/{scenario_id}")
+def delete_tax_scenario(scenario_id: int):
+    _tax_store_call(tax_scenarios.delete, scenario_id)
+    return {"status": "success"}
 
 class TaxProfileSchema(BaseModel):
     person_id: int
@@ -2240,7 +2359,7 @@ def get_tax_estimate(id: int):
         if not profile:
             raise HTTPException(status_code=404, detail="Tax profile not found")
         profile = dict(profile)
-        rules = _resolve_tax_rule_set(profile["financial_year"])
+        rules, rule_meta = tax_store.resolve(conn, profile["financial_year"])
         inputs, notes = _tax_profile_to_engine_inputs(cursor, profile, rules)
         computed_at = datetime.now().isoformat(timespec="seconds")
 
@@ -2249,6 +2368,9 @@ def get_tax_estimate(id: int):
         # interplay) is reported separately and added to the estimated total.
         with_gains = tax_engine.compute(inputs, rules, computed_at)
         without_gains = tax_engine.compute({**inputs, "capital_gains": {}}, rules, computed_at)
+        for computed in (with_gains, without_gains):
+            computed["rule_set"].update({"name": rule_meta["name"], "source": rule_meta["source"],
+                                         "content_hash": rule_meta["content_hash"]})
         old, new = without_gains["regimes"]["old"], without_gains["regimes"]["new"]
         recommended = without_gains["comparison"]["best_regime"]
         cg_tax = with_gains["regimes"][recommended]["total_tax"] - without_gains["regimes"][recommended]["total_tax"]
@@ -2287,8 +2409,8 @@ def get_tax_estimate(id: int):
             "computation": without_gains,
             "disclaimer": f"Estimate only, computed under rule set {rules['rule_set_id']} v{rules['version']}. Not tax advice — verify against the current Act and Finance Act before filing.",
         }
-    except tax_rules.RuleSetError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except tax_store.RuleStoreError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
     except tax_engine.TaxInputError as e:
         raise HTTPException(status_code=422, detail=f"Could not map tax profile to engine inputs: {e}")
     except HTTPException:

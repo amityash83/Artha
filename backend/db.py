@@ -566,6 +566,61 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_cgr_asset ON capital_gains_realizations(asset_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_cgr_owner_fy ON capital_gains_realizations(owner_id, financial_year)")
 
+    # User-editable tax rule sets (see backend/tax/rule_store.py). Shipped rule sets are
+    # read-only JSON files bundled with the app; a user's own sets live here so they
+    # travel with the portable database. Each save is a new immutable version row, so a
+    # saved scenario's (rule_set_id, version) always resolves to exactly what it used.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tax_rule_sets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        rule_set_id TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        financial_year TEXT NOT NULL,
+        name TEXT NOT NULL,
+        based_on_rule_set_id TEXT,
+        based_on_version INTEGER,
+        content_json TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),
+        note TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(rule_set_id, version)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tax_rule_sets_fy ON tax_rule_sets(financial_year)")
+
+    # Which rule set applies to a financial year when a computation doesn't name one.
+    # No row = the shipped rule set for that year.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tax_rule_set_selection (
+        financial_year TEXT PRIMARY KEY,
+        rule_set_id TEXT NOT NULL
+    )
+    """)
+
+    # Saved Tax Planner scenarios: immutable snapshots of inputs + the full computed
+    # result (with audit trail) + the exact rule set version and content hash used.
+    # "Recalculate under current rules" writes a new row pointing back via
+    # recalculated_from rather than overwriting history.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tax_scenarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        profile_id INTEGER REFERENCES tax_profiles(id) ON DELETE SET NULL,
+        financial_year TEXT NOT NULL,
+        rule_set_id TEXT NOT NULL,
+        rule_set_version INTEGER NOT NULL,
+        rule_set_hash TEXT NOT NULL,
+        inputs_json TEXT NOT NULL,
+        result_json TEXT NOT NULL,
+        computed_at TEXT NOT NULL,
+        recalculated_from INTEGER REFERENCES tax_scenarios(id) ON DELETE SET NULL,
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tax_scenarios_rule_set ON tax_scenarios(rule_set_id)")
+
     # Transactions (Normalized schema)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS transactions (

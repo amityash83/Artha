@@ -505,3 +505,234 @@ export interface InitData {
   recommendations: Recommendation[];
   cash_flows: MonthlyCashFlow[];
 }
+
+// ---------------------------------------------------------------------------
+// Tax Planner (backend/tax/). Engine inputs are deliberately loosely typed: their
+// shape is owned by backend/tax/engine.py's DEFAULT_INPUTS and described to the UI
+// by /api/tax/input-metadata, so new fields don't need a type change here.
+// ---------------------------------------------------------------------------
+
+export type TaxRegimeKey = 'old' | 'new';
+export type TaxVerification = 'verified' | 'secondary_source' | 'unverified' | 'assumption' | 'user_entered';
+
+export interface TaxPlannerInputs {
+  profile: {
+    age: number;
+    residential_status: 'resident' | 'rnor' | 'non_resident';
+    employer_type: 'private' | 'government';
+    city: string | null;
+    metro: boolean | null;
+    selected_regime: TaxRegimeKey | null;
+  };
+  salary: Record<string, number>;
+  salary_monthly: Record<string, number> | null;
+  employer_contributions: Record<string, number>;
+  payroll_deductions: Record<string, number>;
+  hra: { rent_paid_monthly: number; months_rented: number };
+  exempt_allowances: Record<string, number>;
+  other_income: Record<string, number>;
+  capital_gains: Record<string, number>;
+  deductions: { '80C': Record<string, number> } & Record<string, number | boolean | Record<string, number>>;
+  prepaid: { tds: number; advance_tax: number };
+}
+
+export interface TaxAuditLine {
+  step: number;
+  key: string;
+  label: string;
+  amount: number;
+  formula: string;
+  source: 'input' | 'rule' | 'derived' | 'assumption' | 'user_asserted';
+  rule_ref?: string;
+  verification?: TaxVerification;
+  legacy_section?: string;
+  act_2025_section?: string;
+  inputs?: Record<string, unknown>;
+}
+
+export interface TaxWarning {
+  code: string;
+  severity: 'info' | 'warning';
+  regime: TaxRegimeKey | null;
+  message: string;
+}
+
+export interface TaxHraDetail {
+  exemption: number;
+  components: { actual_hra_received: number; rent_paid_minus_pct_of_salary: number; pct_of_salary: number };
+  binding_component: string | null;
+  metro: boolean;
+  metro_or_non_metro_pct: number;
+  rent_excess_over_salary_pct: number;
+  months_rented: number;
+}
+
+export interface TaxRegimeComputation {
+  regime: TaxRegimeKey;
+  label: string;
+  gross_salary: number;
+  cash_salary: number;
+  salary_exemptions: number;
+  hra: TaxHraDetail | null;
+  standard_deduction: number;
+  professional_tax_deduction: number;
+  taxable_salary: number;
+  house_property_income: number;
+  other_income: number;
+  special_rate_income: number;
+  gross_total_income: number;
+  deductions: Record<string, number>;
+  deductions_total: number;
+  total_income: number;
+  slab_tax: number;
+  special_rate_tax: number;
+  tax_before_rebate: number;
+  rebate: number;
+  tax_after_rebate: number;
+  surcharge_rate_pct: number;
+  surcharge_before_marginal_relief: number;
+  surcharge_marginal_relief: number;
+  surcharge: number;
+  cess: number;
+  total_tax: number;
+  prepaid_taxes: number;
+  balance_payable: number;
+  effective_rate_pct: number;
+  marginal_rate_pct: number;
+  monthly_average: { tax: number; in_hand_salary: number; note: string };
+  in_hand_salary_annual: number;
+  payroll_deductions_total: number;
+  audit: TaxAuditLine[];
+}
+
+export interface TaxRuleSetRef {
+  rule_set_id: string;
+  version: number;
+  financial_year: string;
+  assessment_year: string;
+  act: string;
+  name?: string;
+  source?: 'shipped' | 'user';
+  content_hash?: string;
+}
+
+export interface TaxComputeResult {
+  rule_set: TaxRuleSetRef;
+  computed_at: string | null;
+  regimes: Record<TaxRegimeKey, TaxRegimeComputation>;
+  comparison: {
+    best_regime: TaxRegimeKey;
+    savings_old_minus_new: number;
+    savings_pct_of_old: number | null;
+    monthly_savings_old_minus_new: number;
+    explanation: string;
+  };
+  warnings: TaxWarning[];
+  inputs: TaxPlannerInputs;
+}
+
+export interface TaxRuleSetMeta {
+  rule_set_id: string;
+  version: number;
+  financial_year: string;
+  name: string;
+  source: 'shipped' | 'user';
+  based_on_rule_set_id: string | null;
+  based_on_version: number | null;
+  content_hash: string;
+  status: 'active' | 'archived';
+  note: string | null;
+  created_at: string | null;
+  version_count?: number;
+  applies_to_fy?: boolean;
+  unchanged?: boolean;
+}
+
+// A rule-set item: the leaf unit of a rule set, carrying provenance with its value.
+export interface TaxRuleItem {
+  value: unknown;
+  verification: TaxVerification;
+  source?: string;
+  legacy_section?: string;
+  act_2025_section?: string;
+  note?: string;
+}
+
+export interface TaxRuleSetSource {
+  id: string;
+  title: string;
+  url: string;
+  accessed?: string;
+  official?: boolean;
+}
+
+export interface TaxRuleSetContent {
+  rule_set_id: string;
+  version: number;
+  financial_year: string;
+  assessment_year: string;
+  act: string;
+  name?: string;
+  status_note?: string;
+  sources: TaxRuleSetSource[];
+  regimes: Record<TaxRegimeKey, Record<string, unknown>>;
+  [key: string]: unknown;
+}
+
+export interface TaxRuleSetChange {
+  path: string;
+  before: unknown;
+  after: unknown;
+  added: boolean;
+  removed: boolean;
+}
+
+export interface TaxInputField {
+  key: string;
+  label: string;
+  kind?: string;
+  help?: string;
+  variable?: boolean;
+}
+
+export interface TaxDeductionField {
+  path: string;
+  label: string;
+  group: string;
+  rule_key: string;
+  help?: string;
+  type?: 'boolean';
+  user_asserted?: boolean;
+}
+
+export interface TaxInputMetadata {
+  salary_components: TaxInputField[];
+  payroll_deductions: TaxInputField[];
+  employer_contributions: TaxInputField[];
+  other_income: TaxInputField[];
+  capital_gains: TaxInputField[];
+  deduction_fields: TaxDeductionField[];
+  default_financial_year: string;
+}
+
+export interface TaxScenarioSummary {
+  id: number;
+  name: string;
+  profile_id: number | null;
+  financial_year: string;
+  rule_set_id: string;
+  rule_set_version: number;
+  rule_set_hash: string;
+  computed_at: string;
+  recalculated_from: number | null;
+  notes: string | null;
+  created_at: string;
+  old_total_tax: number;
+  new_total_tax: number;
+  best_regime: TaxRegimeKey;
+}
+
+export interface TaxScenario extends TaxScenarioSummary {
+  inputs: TaxPlannerInputs;
+  result: TaxComputeResult;
+}

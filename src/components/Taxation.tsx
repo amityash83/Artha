@@ -4,6 +4,8 @@ import { InitData, TaxProfile, TaxDeduction, CapitalGainsRealization, TaxEstimat
 import { API_BASE_URL } from '../config';
 import { TaxDeductionsEditor } from './TaxDeductionsEditor';
 import { InfoTooltip } from './InfoTooltip';
+import { TaxPlanner } from './tax/TaxPlanner';
+import { TaxRulesManager } from './tax/TaxRulesManager';
 
 interface TaxationProps {
   data: InitData;
@@ -38,7 +40,8 @@ const emptyProfile = (personId: number): TaxProfile => ({
 export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }) => {
   const { people = [], tax_profiles = [] } = data;
 
-  const [activeSubTab, setActiveSubTab] = useState<'profile' | 'estimate' | 'capital-gains'>('profile');
+  const [activeSubTab, setActiveSubTab] = useState<'planner' | 'profile' | 'estimate' | 'capital-gains' | 'rules'>('planner');
+  const profileTab = activeSubTab === 'profile' || activeSubTab === 'estimate' || activeSubTab === 'capital-gains';
   const [selectedPersonId, setSelectedPersonId] = useState<number | null>(people[0]?.id ?? null);
   const [selectedFY, setSelectedFY] = useState<string>(getCurrentFY());
 
@@ -204,9 +207,9 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <h1 className="page-title">Taxation</h1>
-          <p className="page-subtitle">Estimated tax position by person and financial year — regime comparison, deductions, capital gains.</p>
+          <p className="page-subtitle">Salary tax planner, old vs new regime comparison, deductions, capital gains, and the tax rules behind them.</p>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        {profileTab && people.length > 0 && <div style={{ display: 'flex', gap: '8px' }}>
           <select
             className="form-control"
             style={{ padding: '6px 12px', fontSize: '12px', height: '32px' }}
@@ -227,37 +230,40 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
               <option key={fy} value={fy}>FY {fy}</option>
             ))}
           </select>
-        </div>
+        </div>}
       </div>
 
-      {people.length === 0 ? (
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', gap: '8px', padding: '10px 14px', marginBottom: '20px',
+        background: 'rgba(245, 158, 11, 0.06)', border: '1px solid rgba(245, 158, 11, 0.2)', borderRadius: '10px',
+        fontSize: '11.5px', color: 'var(--text-secondary)', lineHeight: 1.5,
+      }}>
+        <AlertTriangle size={14} style={{ color: 'var(--warning)', flexShrink: 0, marginTop: '1px' }} />
+        <span>Estimates for decision support, not tax advice. Each result names the rule set it used and how far each rule is verified. Check against the current Act and Finance Act before filing.</span>
+      </div>
+
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--border-glass)', marginBottom: '24px', gap: '8px', flexWrap: 'wrap' }}>
+        {(['planner', 'profile', 'estimate', 'capital-gains', 'rules'] as const).map((tab) => (
+          <button
+            key={tab}
+            className={`tab-btn ${activeSubTab === tab ? 'active' : ''}`}
+            onClick={() => setActiveSubTab(tab)}
+            style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === tab ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === tab ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+          >
+            {{ planner: 'Tax Planner', profile: 'Profile & Deductions', estimate: 'Old vs New Estimate', 'capital-gains': 'Capital Gains', rules: 'Tax Rules' }[tab]}
+          </button>
+        ))}
+      </div>
+
+      {activeSubTab === 'planner' && <TaxPlanner showToast={showToast} onOpenRules={() => setActiveSubTab('rules')} />}
+      {activeSubTab === 'rules' && <TaxRulesManager showToast={showToast} />}
+
+      {!profileTab ? null : people.length === 0 ? (
         <div className="glass-panel" style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
           Add a person in Settings before creating a tax profile.
         </div>
       ) : (
         <>
-          <div style={{
-            display: 'flex', alignItems: 'flex-start', gap: '8px', padding: '10px 14px', marginBottom: '20px',
-            background: 'rgba(245, 158, 11, 0.06)', border: '1px solid rgba(245, 158, 11, 0.2)', borderRadius: '10px',
-            fontSize: '11.5px', color: 'var(--text-secondary)', lineHeight: 1.5,
-          }}>
-            <AlertTriangle size={14} style={{ color: 'var(--warning)', flexShrink: 0, marginTop: '1px' }} />
-            <span>Estimate only, based on best-effort modeling of recent Indian tax law. Not tax advice — verify against the current Finance Act before filing.</span>
-          </div>
-
-          <div style={{ display: 'flex', borderBottom: '1px solid var(--border-glass)', marginBottom: '24px', gap: '8px' }}>
-            {(['profile', 'estimate', 'capital-gains'] as const).map((tab) => (
-              <button
-                key={tab}
-                className={`tab-btn ${activeSubTab === tab ? 'active' : ''}`}
-                onClick={() => setActiveSubTab(tab)}
-                style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === tab ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === tab ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
-              >
-                {tab === 'profile' ? 'Profile & Deductions' : tab === 'estimate' ? 'Old vs New Estimate' : 'Capital Gains'}
-              </button>
-            ))}
-          </div>
-
           {activeSubTab === 'profile' && (
             <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
