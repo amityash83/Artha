@@ -83,7 +83,7 @@ Two independent deployment paths exist, sharing the same
    Gatekeeper warning on first launch.
 2. **Web/Docker (secondary, added later)**: `backend/Dockerfile` runs
    the FastAPI backend standalone (bound to `0.0.0.0`, not `127.0.0.1`);
-   `frontend.Dockerfile` builds the React app and serves it via Nginx.
+   `frontend/Dockerfile` builds the React app and serves it via Nginx.
    `docker-compose.yml` wires both together with a named volume for the
    SQLite file. This path drops the Electron shell entirely — the app
    runs in a browser instead. `VITE_API_BASE_URL` (build-time env var,

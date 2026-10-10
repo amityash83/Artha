@@ -25,7 +25,7 @@ services:
   frontend:
     build:
       context: .
-      dockerfile: frontend.Dockerfile
+      dockerfile: frontend/Dockerfile
       args:
         # Browser-facing URL: resolved from the host machine, not container-to-container,
         # since fetch() runs in the user's browser after the page loads.

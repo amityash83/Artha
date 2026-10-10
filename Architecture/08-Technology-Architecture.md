@@ -110,7 +110,7 @@ network.
   `backend/requirements.txt`, runs Uvicorn bound to `0.0.0.0:8000`
   (not `127.0.0.1` — must be reachable from the frontend container),
   `FINANCE_DB_DIR=/data` with a mountable volume.
-- `frontend.Dockerfile`: multi-stage — Node builds the Vite bundle with
+- `frontend/Dockerfile`: multi-stage — Node builds the Vite bundle with
   `VITE_API_BASE_URL` baked in via `--build-arg`, then `nginx:alpine`
   serves the static output.
 - `docker-compose.yml`: wires both together, named volume `artha_data`

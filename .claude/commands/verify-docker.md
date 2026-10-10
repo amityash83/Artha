@@ -20,4 +20,4 @@ Verify Artha's Docker deployment path builds and runs correctly end-to-end, with
 5. Tear down with `docker compose down -v` (the `-v` removes the named volume too, since this is a scratch verification run, not a real deployment — do NOT use `-v` if the user says this is their real data).
 6. Report pass/fail plainly. Do not leave containers, images, or volumes behind on success.
 
-Do not modify `docker-compose.yml`, `backend/Dockerfile`, or `frontend.Dockerfile` as part of this check — if something is broken, report it and stop; fixing it is a separate, explicit task.
+Do not modify `docker-compose.yml`, `backend/Dockerfile`, or `frontend/Dockerfile` as part of this check — if something is broken, report it and stop; fixing it is a separate, explicit task.

@@ -1,6 +1,11 @@
 # Builds and serves the React frontend as a plain web app (no Electron), for
 # the web/Docker deployment path only. The Electron desktop build is untouched
 # and does not use this file.
+#
+# Build context must be the REPO ROOT, not frontend/ (docker-compose.yml and CI do
+# this): npm workspaces need the root package.json/lockfile and electron/package.json,
+# and vite.config.mts reads scripts/load-env.cjs.
+#   docker build -f frontend/Dockerfile .
 FROM node:22-slim AS build
 WORKDIR /app
 
