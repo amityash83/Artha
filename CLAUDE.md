@@ -84,6 +84,8 @@ FastAPI backend (backend/)
   │                      by re-running the engine (never by per-rupee shortcuts). Optional month-by-month entry (inputs.monthly,
   │                      12 months Apr..Mar, actual/projected): when enabled, normalize_inputs derives every annual figure from the
   │                      months (apply_monthly_totals), HRA is computed per month, and each regime result gains a monthly TDS projection
+  │                      sensitivity.py: break-even, NPS-for-target and salary/bonus/basic-share sweeps (bisection over full engine runs);
+  │                      CSV/PDF reports are built client-side (frontend/src/components/tax/reportTables.ts), PDF via the preload's savePdf
   └─ ai/               — AI Assistant: providers.py (Ollama / OpenAI-compatible / Anthropic behind get_provider()),
                          context.py (builds explain/ask prompt context from the DB); imported lazily inside the AI routes in main.py
 ```
@@ -122,7 +124,7 @@ Thresholds like emergency fund target, high-interest loan ROI cutoff, prepayment
 
 **Income tax is the exception**: slabs, rebates, surcharge, cess and deduction limits are not in `financial_rules` but in `backend/tax/rules/<rule_set_id>.json`, one file per financial year, each item tagged with a `verification` level and its legacy/new-Act section. The old Taxation keys in `financial_rules` (`section_80c_limit`, `standard_deduction_salaried`, etc.) are still seeded but unused (their descriptions say so). Adding a year means adding a rule file, not editing code. The files are bundled into the PyInstaller binary via `--add-data` in `package.json`'s `build:backend*` scripts (`backend/tax/rules` and `backend/tax/metadata`), so a new data directory under `backend/` needs the same treatment.
 
-Shipped rule files are read-only at runtime. Users edit their own copies, stored in the DB by `backend/tax/rule_store.py`:
+To add a year, follow `Architecture/Domains/Tax-Rules-Update-Guide.md`. Shipped rule files are read-only at runtime. Users edit their own copies, stored in the DB by `backend/tax/rule_store.py`:
 - **Tables:** `tax_rule_sets` holds one immutable row per version. `tax_rule_set_selection` maps each FY to the set it uses; with no row, the shipped set applies.
 - **Resolution:** compute, the profile estimate and scenarios all go through `rule_store.resolve()`, never `rules_loader.load_rule_set()` directly, so a user's selection is honoured.
 - **Provenance:** any value a user changes is force-tagged `verification: "user_entered"`.

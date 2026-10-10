@@ -244,6 +244,31 @@ ipcMain.handle('select-db-file', async (event, mode) => {
   }
 });
 
+// Save the current page as a PDF (the report view uses print CSS, which printToPDF honours).
+ipcMain.handle('save-pdf', async (event, suggestedName) => {
+  if (!mainWindow) return null;
+  // Only ever a bare file name from the page; never a path it chose.
+  const name = typeof suggestedName === 'string' && /^[\w .()-]{1,120}\.pdf$/i.test(suggestedName)
+    ? suggestedName : 'artha-tax-report.pdf';
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save report as PDF',
+    defaultPath: name,
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  });
+  if (result.canceled || !result.filePath) return null;
+  // The page margins are painted with the window's background colour (dark), so print
+  // on white and restore it afterwards.
+  mainWindow.setBackgroundColor('#ffffff');
+  let pdf;
+  try {
+    pdf = await event.sender.printToPDF({ printBackground: true, pageSize: 'A4' });
+  } finally {
+    mainWindow.setBackgroundColor('#07090e');
+  }
+  require('fs').writeFileSync(result.filePath, pdf);
+  return result.filePath;
+});
+
 app.on('ready', () => {
   startBackend();
   // Wait 1.5 seconds for FastAPI server to boot up before opening React window

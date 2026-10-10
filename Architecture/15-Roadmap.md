@@ -157,6 +157,19 @@ request rather than a pre-existing documented gap:
   earlier session — this pipeline just automates building/publishing
   those images.
 
+- **Tax Planner** (2026-10, `backend/tax/`, `frontend/src/components/tax/`):
+  versioned per-year rule sets with verification levels (Income-tax Act,
+  2025 from FY 2026-27), a 14-step audited engine for both regimes, user-
+  editable rule sets, saved scenarios, a Corporate NPS optimiser, payslip
+  simulator, charts, month-by-month salary entry with TDS projection,
+  break-even/sensitivity analysis, and CSV/PDF reports. See
+  `Domains/Taxation.md`.
+- **Repo restructure and tooling** (2026-10): npm workspaces
+  (`frontend/`, `electron/`, `backend/`), dependency upgrade (React 19,
+  Vite 8, TypeScript 7, Electron 44), a locked-down Electron renderer
+  (preload bridge), and one cross-platform `artha` CLI for
+  start/stop/restart/status/logs/build/package.
+
 ## Explicitly Not Planned
 
 Per `00-Project-Constitution.md`'s Non-Scope: transaction-level

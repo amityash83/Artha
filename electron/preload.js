@@ -8,4 +8,6 @@ contextBridge.exposeInMainWorld('artha', {
   isDesktop: true,
   /** Native open/save dialog for a SQLite file. Resolves to the chosen path, or null if cancelled. */
   selectDbFile: (mode) => ipcRenderer.invoke('select-db-file', mode === 'create' ? 'create' : 'open'),
+  /** Save the current page (print layout) as a PDF via a save dialog. Resolves to the saved path, or null if cancelled. */
+  savePdf: (suggestedName) => ipcRenderer.invoke('save-pdf', typeof suggestedName === 'string' ? suggestedName : null),
 });

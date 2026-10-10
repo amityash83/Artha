@@ -3,7 +3,7 @@ import { TaxRegimeComputation } from '../../types';
 import type { PlannerChildProps } from './TaxPlanner';
 import { EmptyState, formatINR, formatPct, Section } from './taxUi';
 
-interface ComparisonRow {
+export interface ComparisonRow {
   label: string;
   value: (r: TaxRegimeComputation) => number;
   format?: 'money' | 'pct';
@@ -11,7 +11,7 @@ interface ComparisonRow {
   hint?: string;
 }
 
-const ROWS: ComparisonRow[] = [
+export const COMPARISON_ROWS: ComparisonRow[] = [
   { label: 'Gross salary', value: (r) => r.gross_salary },
   { label: 'Salary exemptions', value: (r) => r.salary_exemptions, hint: 'HRA and allowance exemptions' },
   { label: 'Standard deduction', value: (r) => r.standard_deduction },
@@ -72,7 +72,7 @@ export const RegimeComparison: React.FC<PlannerChildProps> = ({ result }) => {
               </tr>
             </thead>
             <tbody>
-              {ROWS.map((row) => {
+              {COMPARISON_ROWS.map((row) => {
                 const o = row.value(oldR);
                 const n = row.value(newR);
                 return (

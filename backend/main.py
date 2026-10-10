@@ -20,6 +20,7 @@ import backend.tax.scenario_store as tax_scenarios
 import backend.tax.nps as tax_nps
 import backend.tax.payroll as tax_payroll
 import backend.tax.waterfall as tax_waterfall
+import backend.tax.sensitivity as tax_sensitivity_mod
 from backend.decision_engine import generate_recommendations, generate_credit_card_annual_reviews
 
 # Shared-secret auth for the Docker/web deployment path only. Empty/unset (the
@@ -1981,6 +1982,33 @@ def tax_payslip(req: TaxPayslipRequest):
                                   req.actual_monthly_tds_before, req.actual_monthly_tds_after, _now_iso())
         out["rule_set"].update({"name": meta["name"], "source": meta["source"]})
         return out
+    return _tax_store_call(run)
+
+class TaxSensitivityRequest(TaxComputeRequest):
+    bonus_month: int = 11  # month-by-month mode: where an extra bonus lands (0 = April ... 11 = March)
+
+@app.post("/api/tax/sensitivity")
+def tax_sensitivity(req: TaxSensitivityRequest):
+    def run(conn):
+        if not 0 <= req.bonus_month <= 11:
+            raise tax_engine.TaxInputError("bonus_month must be 0 (April) to 11 (March)")
+        rules, _meta = _resolve_for(conn, req.financial_year, req.rule_set_id, req.rule_set_version)
+        return tax_sensitivity_mod.sensitivity(req.inputs, rules, req.bonus_month)
+    return _tax_store_call(run)
+
+class TaxNpsTargetRequest(TaxComputeRequest):
+    target_saving: float
+    funding: str = "restructure"
+    restructure_from: str = "special_allowance"
+    regime: str = "best"
+    salary_base_override: Optional[float] = None
+
+@app.post("/api/tax/nps-target")
+def tax_nps_target(req: TaxNpsTargetRequest):
+    def run(conn):
+        rules, _meta = _resolve_for(conn, req.financial_year, req.rule_set_id, req.rule_set_version)
+        return tax_sensitivity_mod.nps_for_target_saving(req.inputs, rules, req.target_saving, req.funding,
+                                                         req.restructure_from, req.regime, req.salary_base_override)
     return _tax_store_call(run)
 
 class TaxWaterfallRequest(TaxComputeRequest):

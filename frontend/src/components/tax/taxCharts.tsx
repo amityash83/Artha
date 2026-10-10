@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import {
-  BarElement, CategoryScale, Chart as ChartJS, ChartData, ChartOptions, Legend, LinearScale, Tooltip,
+  BarElement, CategoryScale, Chart as ChartJS, ChartData, ChartOptions, Legend, LinearScale, LineElement, PointElement, Tooltip,
 } from 'chart.js';
-import { Bar } from 'react-chartjs-2';
+import { Bar, Line } from 'react-chartjs-2';
 import { formatINR } from './taxUi';
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
+ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend);
 
 // Validated with the dataviz palette validator against Artha's dark chart surface
 // (#0d111d): all five slots pass lightness, chroma, CVD (worst adjacent ΔE 8.4),
@@ -146,4 +146,19 @@ export const ChartCard: React.FC<{
 
 export const BarChart: React.FC<{ data: ChartData<'bar'>; options: ChartOptions<'bar'>; label: string }> = ({ data, options, label }) => (
   <Bar data={data} options={options} aria-label={label} role="img" />
+);
+
+/** Line options: same axes, ticks, tooltip and legend as the bar charts, one y-axis. */
+export function lineOptions(fmt: Fmt): ChartOptions<'line'> {
+  const base = barOptions(fmt) as unknown as ChartOptions<'line'>;
+  return { ...base, interaction: { mode: 'index', intersect: false }, scales: { ...base.scales, y: { ...base.scales?.y, beginAtZero: false } } };
+}
+
+/** 2px line with 8px markers, as the dataviz mark specs ask. */
+export function lineDataset(label: string, data: number[], color: string) {
+  return { label, data, borderColor: color, backgroundColor: color, borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0 };
+}
+
+export const LineChart: React.FC<{ data: ChartData<'line'>; options: ChartOptions<'line'>; label: string }> = ({ data, options, label }) => (
+  <Line data={data} options={options} aria-label={label} role="img" />
 );

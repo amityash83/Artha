@@ -435,3 +435,20 @@ h1, h2, h3, h4, h5 {
   width: 100%;
   height: 320px;
 }
+
+/* Printing / PDF export: only the report (.print-root) is printed, on white paper.
+   Electron's printToPDF and the browser's print dialog both use these rules. */
+@page { margin: 12mm; }
+@media print {
+  html, body, #root { background: #fff !important; }
+  body * { visibility: hidden !important; }
+  .print-root, .print-root * { visibility: visible !important; }
+  .print-root {
+    position: absolute; left: 0; top: 0; width: 100%;
+    margin: 0 !important; padding: 0 !important; box-shadow: none !important; border: none !important;
+  }
+  .print-root .no-print { display: none !important; }
+  /* Long tables may span pages; keep each title with its table and never split a row. */
+  .print-root h3, .print-root h3 + p { break-after: avoid; }
+  .print-root tr { break-inside: avoid; }
+}

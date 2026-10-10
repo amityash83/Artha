@@ -6,6 +6,7 @@
 interface ArthaDesktopApi {
   isDesktop: true;
   selectDbFile: (mode: 'open' | 'create') => Promise<string | null>;
+  savePdf: (suggestedName: string) => Promise<string | null>;
 }
 
 declare global {
@@ -15,6 +16,17 @@ declare global {
 }
 
 export const isDesktop = (): boolean => window.artha?.isDesktop === true;
+
+/**
+ * Save the page's print layout as a PDF. Desktop: native save dialog, resolves to the saved
+ * path (null if cancelled). Browser: opens the print dialog (choose "Save as PDF") and
+ * resolves to 'print-dialog'.
+ */
+export async function saveAsPdf(suggestedName: string): Promise<string | null> {
+  if (window.artha) return window.artha.savePdf(suggestedName);
+  window.print();
+  return 'print-dialog';
+}
 
 /** Native file dialog for picking/creating a database file. Desktop only; null if cancelled or unavailable. */
 export async function selectDatabaseFile(mode: 'open' | 'create'): Promise<string | null> {

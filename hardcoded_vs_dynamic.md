@@ -65,3 +65,15 @@ The threshold rules evaluating your financial health dashboard ratios are **Hard
 | **Transactions & Logs** | **Dynamic** | Loaded and calculated from CRUD database tables. |
 | **Cash Flow Auto-Fill Inputs** | **Dynamic** | Aggregates live values from active loans (EMIs), rental properties (income), insurance (premiums), and goals (contributions) dynamically. |
 | **Theme / Styles** | **Hardcoded / Constant** | Theme styling, borders, colors, and layout configurations are fixed via CSS custom variables in [index.css](file:///d:/AI/Antigravity/Artha/src/index.css). |
+
+---
+
+## 6. Income Tax (Tax Planner)
+
+| Data Category | Classification | Description |
+| :--- | :--- | :--- |
+| **Slabs, rebate, surcharge, cess, standard deduction, deduction limits, HRA metro list, employer-NPS limits, special-rate capital gains** | **Dynamic (versioned rule files)** | Per financial year in `backend/tax/rules/*.json`, each value tagged with a verification level and its sections. Never in code: `test_no_financial_thresholds_hardcoded_in_tax_code` fails on any 4+ digit literal in `backend/tax/*.py`. See `Architecture/Domains/Tax-Rules-Update-Guide.md`. |
+| **User rule overrides** | **Dynamic (database)** | Users copy and edit rule sets in the Tax Rules tab (`tax_rule_sets`, versioned); `tax_rule_set_selection` picks the set per year. |
+| **Legacy Taxation keys in `financial_rules`** (`section_80c_limit`, `standard_deduction_salaried`, …) | **Unused** | Still seeded (Knowledge articles reference them) but not read by the tax engine; their descriptions say so. |
+| **NPS scenario levels (0/5/10/12/14%), sensitivity steps** | **Hardcoded (analysis options)** | What-if levels in `nps.py` / `sensitivity.py`, not tax rules; the deductible limits they are checked against come from the rule set. |
+| **Planner sample payroll** | **Hardcoded default (user data)** | Starting values in `frontend/src/components/tax/plannerInputs.ts`; every value is editable. |

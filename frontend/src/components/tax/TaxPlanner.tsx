@@ -14,9 +14,11 @@ import { ScenariosPanel } from './ScenariosPanel';
 import { NpsOptimizer } from './NpsOptimizer';
 import { PayslipSimulator } from './PayslipSimulator';
 import { TaxChartsTab } from './TaxChartsTab';
+import { SensitivityPanel } from './SensitivityPanel';
+import { ReportsPanel } from './ReportsPanel';
 import { useTaxPost } from './useTaxPost';
 
-type PlannerTab = 'overview' | 'salary' | 'old' | 'new' | 'comparison' | 'nps' | 'payslip' | 'charts' | 'computation' | 'scenarios';
+type PlannerTab = 'overview' | 'salary' | 'old' | 'new' | 'comparison' | 'nps' | 'payslip' | 'charts' | 'sensitivity' | 'computation' | 'scenarios' | 'reports';
 
 const TABS: { key: PlannerTab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
@@ -27,8 +29,10 @@ const TABS: { key: PlannerTab; label: string }[] = [
   { key: 'nps', label: 'NPS Optimizer' },
   { key: 'payslip', label: 'Payslip' },
   { key: 'charts', label: 'Charts' },
+  { key: 'sensitivity', label: 'Sensitivity' },
   { key: 'computation', label: 'Computation & Audit' },
   { key: 'scenarios', label: 'Scenarios' },
+  { key: 'reports', label: 'Reports & Export' },
 ];
 
 const COMPUTE_DEBOUNCE_MS = 250;
@@ -199,6 +203,8 @@ export const TaxPlanner: React.FC<TaxPlannerProps> = ({ showToast, onOpenRules }
       {tab === 'nps' && <NpsOptimizer {...optProps} />}
       {tab === 'payslip' && <PayslipSimulator {...optProps} />}
       {tab === 'charts' && <TaxChartsTab {...optProps} result={result} />}
+      {tab === 'sensitivity' && <SensitivityPanel {...optProps} />}
+      {tab === 'reports' && <ReportsPanel {...optProps} result={result} />}
       {tab === 'computation' && <ComputationDetails {...childProps} />}
       {tab === 'scenarios' && (
         <ScenariosPanel

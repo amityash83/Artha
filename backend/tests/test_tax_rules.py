@@ -66,7 +66,8 @@ def _numeric_literals(source: str):
 
 
 @pytest.mark.parametrize("module", ["engine.py", "hra.py", "validation.py", "rules_loader.py", "rule_store.py",
-                                    "scenario_store.py", "nps.py", "payroll.py", "waterfall.py"])
+                                    "scenario_store.py", "nps.py", "payroll.py", "waterfall.py",
+                                    "sensitivity.py"])
 def test_no_financial_thresholds_hardcoded_in_tax_code(module):
     # Financial-year-specific numbers (slab bounds, limits, caps) belong in the rule
     # files. Any numeric literal of 4+ digits in code is almost certainly one.
