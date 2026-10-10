@@ -1,0 +1,179 @@
+"""
+Loads and validates the versioned tax rule sets in backend/tax/rules/*.json.
+
+A rule set is the ONLY place financial-year-specific numbers (slabs, limits, rates,
+thresholds) may live — engine.py reads everything through here. Each leaf "item" is
+{"value": ..., "verification": ...} plus optional provenance (legacy_section,
+act_2025_section, source, note), so every figure the engine uses can be traced back
+to where it came from and how confident we are in it.
+
+Validation is strict and runs on load: a malformed rule file raises RuleSetError
+rather than producing a quietly-wrong tax figure.
+"""
+import json
+import sys
+from functools import lru_cache
+from pathlib import Path
+from typing import Dict, List, Optional
+
+VERIFICATION_LEVELS = ("verified", "secondary_source", "unverified", "assumption")
+
+REQUIRED_TOP_LEVEL = (
+    "rule_set_id", "version", "financial_year", "assessment_year", "act",
+    "effective_from", "effective_to", "sources", "age_bands", "rounding", "cess",
+    "employer_retirement_aggregate_cap", "house_property", "special_rates", "regimes",
+)
+REQUIRED_TOP_LEVEL_ITEMS = (
+    "age_bands", "rounding", "cess", "employer_retirement_aggregate_cap",
+    "house_property", "special_rates",
+)
+REQUIRED_REGIME_ITEMS = (
+    "slabs", "standard_deduction", "rebate", "surcharge", "professional_tax", "hra",
+    "allowance_exemptions", "house_property_loss_setoff_cap", "employer_nps", "deductions",
+)
+REGIMES = ("old", "new")
+
+
+class RuleSetError(ValueError):
+    pass
+
+
+def _rules_dir() -> Path:
+    # In a PyInstaller build, data files added via --add-data land under sys._MEIPASS
+    # mirroring their source path; __file__-relative usually resolves there too, but
+    # fall back explicitly in case it doesn't.
+    here = Path(__file__).resolve().parent / "rules"
+    if here.is_dir():
+        return here
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        frozen = Path(meipass) / "backend" / "tax" / "rules"
+        if frozen.is_dir():
+            return frozen
+    raise RuleSetError(f"Tax rules directory not found (looked in {here})")
+
+
+def _check_item(item, path: str) -> None:
+    if not isinstance(item, dict) or "value" not in item:
+        raise RuleSetError(f"{path}: expected an item object with a 'value' key")
+    if item.get("verification") not in VERIFICATION_LEVELS:
+        raise RuleSetError(f"{path}: verification must be one of {VERIFICATION_LEVELS}, got {item.get('verification')!r}")
+
+
+def _check_brackets(brackets, path: str) -> None:
+    if not isinstance(brackets, list) or not brackets:
+        raise RuleSetError(f"{path}: expected a non-empty list of [upper_bound, rate_pct] pairs")
+    previous = 0
+    for i, pair in enumerate(brackets):
+        if not (isinstance(pair, list) and len(pair) == 2):
+            raise RuleSetError(f"{path}[{i}]: expected [upper_bound, rate_pct]")
+        upper, rate = pair
+        if not isinstance(rate, (int, float)) or rate < 0:
+            raise RuleSetError(f"{path}[{i}]: rate must be a non-negative number")
+        is_last = i == len(brackets) - 1
+        if upper is None:
+            if not is_last:
+                raise RuleSetError(f"{path}[{i}]: only the last bracket may have a null upper bound")
+            continue
+        if not isinstance(upper, (int, float)) or upper <= previous:
+            raise RuleSetError(f"{path}[{i}]: upper bounds must be strictly ascending numbers")
+        previous = upper
+    if brackets[-1][0] is not None:
+        raise RuleSetError(f"{path}: last bracket must have a null (open-ended) upper bound")
+
+
+def _check_tiers(tiers, path: str) -> None:
+    previous = 0
+    for i, pair in enumerate(tiers):
+        if not (isinstance(pair, list) and len(pair) == 2 and all(isinstance(x, (int, float)) for x in pair)):
+            raise RuleSetError(f"{path}[{i}]: expected [threshold, rate_pct]")
+        if pair[0] <= previous:
+            raise RuleSetError(f"{path}[{i}]: thresholds must be strictly ascending")
+        previous = pair[0]
+
+
+def validate_rule_set(rules: dict) -> None:
+    for key in REQUIRED_TOP_LEVEL:
+        if key not in rules:
+            raise RuleSetError(f"missing top-level key '{key}'")
+    for key in REQUIRED_TOP_LEVEL_ITEMS:
+        _check_item(rules[key], key)
+    source_ids = {s.get("id") for s in rules["sources"]}
+    for regime in REGIMES:
+        if regime not in rules["regimes"]:
+            raise RuleSetError(f"missing regime '{regime}'")
+        reg = rules["regimes"][regime]
+        for key in REQUIRED_REGIME_ITEMS:
+            if key not in reg:
+                raise RuleSetError(f"regimes.{regime}: missing '{key}'")
+            _check_item(reg[key], f"regimes.{regime}.{key}")
+            src = reg[key].get("source")
+            if src is not None and src not in source_ids:
+                raise RuleSetError(f"regimes.{regime}.{key}: unknown source id '{src}'")
+        for band, brackets in reg["slabs"]["value"].items():
+            _check_brackets(brackets, f"regimes.{regime}.slabs.{band}")
+        _check_tiers(reg["surcharge"]["value"]["tiers"], f"regimes.{regime}.surcharge.tiers")
+    for band in ("below_60", "60_to_80", "80_plus"):
+        if band not in rules["regimes"]["old"]["slabs"]["value"]:
+            raise RuleSetError(f"regimes.old.slabs: missing age band '{band}'")
+    if "default" not in rules["regimes"]["new"]["slabs"]["value"]:
+        raise RuleSetError("regimes.new.slabs: missing 'default' band")
+
+
+def _load_file(path: Path) -> dict:
+    try:
+        rules = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise RuleSetError(f"{path.name}: invalid JSON ({e})")
+    try:
+        validate_rule_set(rules)
+    except RuleSetError as e:
+        raise RuleSetError(f"{path.name}: {e}")
+    return rules
+
+
+@lru_cache(maxsize=None)
+def _all_rule_sets() -> Dict[str, dict]:
+    by_fy = {}
+    for path in sorted(_rules_dir().glob("*.json")):
+        rules = _load_file(path)
+        fy = rules["financial_year"]
+        if fy in by_fy:
+            raise RuleSetError(f"two rule sets claim financial year {fy}")
+        by_fy[fy] = rules
+    return by_fy
+
+
+def list_rule_sets() -> List[dict]:
+    """Summary of every available rule set, newest financial year first."""
+    out = []
+    for fy, r in sorted(_all_rule_sets().items(), reverse=True):
+        out.append({
+            "rule_set_id": r["rule_set_id"],
+            "version": r["version"],
+            "financial_year": fy,
+            "assessment_year": r["assessment_year"],
+            "act": r["act"],
+            "effective_from": r["effective_from"],
+            "effective_to": r["effective_to"],
+            "status_note": r.get("status_note"),
+        })
+    return out
+
+
+def load_rule_set(financial_year: str) -> dict:
+    rule_sets = _all_rule_sets()
+    if financial_year not in rule_sets:
+        available = ", ".join(sorted(rule_sets))
+        raise RuleSetError(f"No tax rule set for financial year {financial_year} (available: {available})")
+    return rule_sets[financial_year]
+
+
+def latest_financial_year(on_or_before: Optional[str] = None) -> str:
+    """Newest FY with a rule set, optionally restricted to FYs not later than on_or_before."""
+    years = sorted(_all_rule_sets())
+    if on_or_before is not None:
+        years = [y for y in years if y <= on_or_before]
+    if not years:
+        raise RuleSetError("No tax rule sets available")
+    return years[-1]

@@ -1,0 +1,181 @@
+{
+  "rule_set_id": "IN-TY2026-27",
+  "version": 1,
+  "jurisdiction": "IN",
+  "financial_year": "2026-27",
+  "assessment_year": "2027-28",
+  "act": "Income-tax Act, 2025",
+  "effective_from": "2026-04-01",
+  "effective_to": "2027-03-31",
+  "status_note": "First tax year under the Income-tax Act, 2025 (in force from 1 April 2026). Budget 2026 retained FY 2025-26 rates, slabs, surcharge and cess; that retention and the new-Act section numbers are confirmed only from secondary sources so far, hence 'secondary_source'. Re-verify against the Act text, Finance Act 2026 First Schedule and Income-tax Rules 2026 before relying on any figure.",
+  "sources": [
+    {"id": "itd-ay2026-salaried", "title": "Income Tax Department: Salaried Individuals for AY 2026-27", "url": "https://www.incometax.gov.in/iec/foportal/help/individual/return-applicable-1", "accessed": "2026-10-10", "official": true},
+    {"id": "pib-12l-rebate", "title": "PIB: No income tax on annual income up to Rs 12 lakh under new tax regime", "url": "https://www.pib.gov.in/PressReleasePage.aspx?PRID=2098406", "accessed": "2026-10-10", "official": true},
+    {"id": "taxguru-fa2026-rates", "title": "taxguru: Income Tax Rate Chart for AY 2026-27 after Finance Act 2026", "url": "https://taxguru.in/income-tax/complete-income-tax-rate-guide-ay-2026-27-finance-act-2026.html", "accessed": "2026-10-10", "official": false},
+    {"id": "taxguru-ty2026-rates", "title": "taxguru: Income Tax Rates for AY 2026-27 and AY 2027-28", "url": "https://taxguru.in/income-tax/income-tax-rates-ay-2026-27-ay-2027-28.html", "accessed": "2026-10-10", "official": false},
+    {"id": "upstox-rules-2026", "title": "Upstox: Final Income-tax Rules 2026 notified (HRA Rule 279, allowances Rule 280)", "url": "https://upstox.com/news/personal-finance/tax/final-income-tax-rules-2026-notified-hra-to-new-vs-old-regime-what-salaried-employees-must-know/article-191015/", "accessed": "2026-10-10", "official": false},
+    {"id": "bt-80c-123", "title": "Business Today: Section 80C becomes Section 123 from April 1, 2026", "url": "https://www.businesstoday.in/personal-finance/tax/story/income-tax-act-2025-section-80c-becomes-section-123-from-april-1-2026-heres-what-taxpayers-must-know-522120-2026-03-24", "accessed": "2026-10-10", "official": false},
+    {"id": "cleartax-act-2025", "title": "ClearTax: Income Tax Act 2025 key changes and section mapping", "url": "https://cleartax.in/s/income-tax-act-2025", "accessed": "2026-10-10", "official": false},
+    {"id": "nps-124", "title": "Employer NPS deduction under Section 124 (Income-tax Act, 2025)", "url": "https://finlecture.in/indian-tax-system/nps-tax-benefit-fy-2026-27/", "accessed": "2026-10-10", "official": false},
+    {"id": "caalley-pf-2026", "title": "caalley: Budget 2026 PF rule clean-up keeps limits intact", "url": "https://caalley.com/news-updates/budget-2026/budget-2026-pf-rule-clean-up-simplifies-tax-treatment-keeps-limits-intact", "accessed": "2026-10-10", "official": false}
+  ],
+
+  "age_bands": {
+    "value": {"senior_from_age": 60, "super_senior_from_age": 80, "senior_slabs_residents_only": true},
+    "verification": "secondary_source", "source": "taxguru-ty2026-rates"
+  },
+  "rounding": {
+    "value": {"total_income_nearest": 10, "tax_nearest": 10},
+    "verification": "assumption", "legacy_section": "288A / 288B",
+    "note": "Carried over from the 1961 Act; equivalent provision in the 2025 Act not yet confirmed."
+  },
+  "cess": {
+    "value": {"rate_pct": 4},
+    "verification": "secondary_source", "source": "taxguru-ty2026-rates", "legacy_section": "Finance Act (Health and Education Cess)"
+  },
+  "employer_retirement_aggregate_cap": {
+    "value": 750000,
+    "verification": "secondary_source", "source": "caalley-pf-2026", "legacy_section": "17(2)(vii)",
+    "note": "Employer PF + NPS + superannuation above this per year is a taxable perquisite in both regimes. Tax on accretions (17(2)(viia)) is not modelled."
+  },
+  "house_property": {
+    "value": {"standard_deduction_pct": 30},
+    "verification": "secondary_source", "legacy_section": "24(a)", "act_2025_section": "22", "source": "cleartax-act-2025"
+  },
+  "special_rates": {
+    "value": {
+      "stcg_111a_pct": 20,
+      "ltcg_112a_pct": 12.5,
+      "ltcg_112a_exemption": 125000,
+      "ltcg_112_pct": 12.5,
+      "unused_basic_exemption_adjustment_residents": true
+    },
+    "verification": "secondary_source", "legacy_section": "111A / 112A / 112", "source": "taxguru-ty2026-rates"
+  },
+
+  "regimes": {
+    "new": {
+      "label": "New Tax Regime",
+      "slabs": {
+        "value": {"default": [[400000, 0], [800000, 5], [1200000, 10], [1600000, 15], [2000000, 20], [2400000, 25], [null, 30]]},
+        "verification": "secondary_source", "legacy_section": "115BAC(1A)", "source": "taxguru-ty2026-rates",
+        "note": "Same slabs for all ages."
+      },
+      "standard_deduction": {
+        "value": 75000,
+        "verification": "secondary_source", "legacy_section": "16(ia)", "act_2025_section": "19", "source": "cleartax-act-2025"
+      },
+      "rebate": {
+        "value": {"max_amount": 60000, "income_limit": 1200000, "marginal_relief": true, "residents_only": true, "applies_to": ["slab"]},
+        "verification": "secondary_source", "legacy_section": "87A", "act_2025_section": "156",
+        "source": "pib-12l-rebate",
+        "note": "New-Act section reported as 156 by some sources and 157 by others; unconfirmed. Rebate is not available against special-rate income tax."
+      },
+      "surcharge": {
+        "value": {"tiers": [[5000000, 10], [10000000, 15], [20000000, 25]], "special_income_max_pct": 15, "marginal_relief": true},
+        "verification": "secondary_source", "source": "taxguru-ty2026-rates",
+        "note": "New regime surcharge is capped at 25% (no 37% tier)."
+      },
+      "professional_tax": {
+        "value": {"allowed": false, "max": 0},
+        "verification": "secondary_source", "legacy_section": "16(iii)",
+        "note": "Not deductible under the new regime (115BAC)."
+      },
+      "hra": {
+        "value": {"allowed": false},
+        "verification": "secondary_source", "legacy_section": "10(13A)", "source": "upstox-rules-2026"
+      },
+      "allowance_exemptions": {
+        "value": {"allowed": false},
+        "verification": "secondary_source",
+        "note": "Children education / hostel allowance exemptions are old-regime only. A small set of allowances (e.g. conveyance for divyang employees) remain exempt; enter those as user-asserted 'other exempt allowances (new regime)'."
+      },
+      "house_property_loss_setoff_cap": {
+        "value": 0,
+        "verification": "secondary_source", "legacy_section": "24(b) / 71(3A)",
+        "note": "Self-occupied home-loan interest is not deductible, and house-property loss cannot be set off against other heads, under the new regime."
+      },
+      "employer_nps": {
+        "value": {"pct_of_basic_da": {"private": 14, "government": 14}},
+        "verification": "secondary_source", "legacy_section": "80CCD(2)", "act_2025_section": "124", "source": "nps-124"
+      },
+      "deductions": {
+        "value": {"allowed": ["employer_nps", "other_new"]},
+        "verification": "secondary_source",
+        "note": "Chapter VI-A deductions are unavailable under the new regime except employer NPS (and narrow ones like Agniveer corpus, entered as user-asserted 'other')."
+      }
+    },
+
+    "old": {
+      "label": "Old Tax Regime",
+      "slabs": {
+        "value": {
+          "below_60": [[250000, 0], [500000, 5], [1000000, 20], [null, 30]],
+          "60_to_80": [[300000, 0], [500000, 5], [1000000, 20], [null, 30]],
+          "80_plus": [[500000, 0], [1000000, 20], [null, 30]]
+        },
+        "verification": "secondary_source", "source": "taxguru-ty2026-rates",
+        "note": "Senior / super-senior slabs apply to residents only."
+      },
+      "standard_deduction": {
+        "value": 50000,
+        "verification": "secondary_source", "legacy_section": "16(ia)", "act_2025_section": "19"
+      },
+      "rebate": {
+        "value": {"max_amount": 12500, "income_limit": 500000, "marginal_relief": false, "residents_only": true, "applies_to": ["slab", "stcg_111a"]},
+        "verification": "secondary_source", "legacy_section": "87A", "act_2025_section": "156",
+        "note": "New-Act section number unconfirmed (156 vs 157)."
+      },
+      "surcharge": {
+        "value": {"tiers": [[5000000, 10], [10000000, 15], [20000000, 25], [50000000, 37]], "special_income_max_pct": 15, "marginal_relief": true},
+        "verification": "secondary_source", "source": "taxguru-ty2026-rates"
+      },
+      "professional_tax": {
+        "value": {"allowed": true, "max": 2500},
+        "verification": "secondary_source", "legacy_section": "16(iii)", "act_2025_section": "19"
+      },
+      "hra": {
+        "value": {
+          "allowed": true,
+          "metro_pct": 50,
+          "non_metro_pct": 40,
+          "rent_excess_over_salary_pct": 10,
+          "metro_cities": ["Mumbai", "Kolkata", "Delhi", "Chennai", "Hyderabad", "Pune", "Ahmedabad", "Bengaluru"]
+        },
+        "verification": "secondary_source", "legacy_section": "10(13A) / Rule 2A", "act_2025_section": "Schedule III / Rule 279", "source": "upstox-rules-2026",
+        "note": "Income-tax Rules 2026 added Hyderabad, Pune, Ahmedabad and Bengaluru to the 50% list. 'Salary' for HRA = basic + DA forming part of retirement benefits."
+      },
+      "allowance_exemptions": {
+        "value": {
+          "allowed": true,
+          "children_education": {"per_child_per_month": 3000, "max_children": 2},
+          "hostel": {"per_child_per_month": 9000, "max_children": 2}
+        },
+        "verification": "secondary_source", "act_2025_section": "Rule 280", "source": "upstox-rules-2026"
+      },
+      "house_property_loss_setoff_cap": {
+        "value": 200000,
+        "verification": "secondary_source", "legacy_section": "24(b) / 71(3A)", "act_2025_section": "22", "source": "cleartax-act-2025",
+        "note": "Self-occupied home-loan interest cap, and the cap on setting off house-property loss against other heads."
+      },
+      "employer_nps": {
+        "value": {"pct_of_basic_da": {"private": 10, "government": 14}},
+        "verification": "unverified", "legacy_section": "80CCD(2)", "act_2025_section": "124",
+        "note": "Old-regime private-sector limit was 10% under the 1961 Act; whether the 2025 Act harmonised it to 14% is not confirmed."
+      },
+      "deductions": {
+        "value": {
+          "allowed": ["80C", "80CCD1", "80CCD1B", "employer_nps", "80D", "80E", "80G", "80TTA", "80TTB", "other_old"],
+          "80C": {"cap": 150000},
+          "80CCD1": {"pct_of_basic_da": 10},
+          "80CCD1B": {"cap": 50000},
+          "80D": {"self_family": 25000, "self_family_senior": 50000, "parents": 25000, "parents_senior": 50000},
+          "80TTA": {"cap": 10000},
+          "80TTB": {"cap": 50000}
+        },
+        "verification": "secondary_source", "source": "cleartax-act-2025",
+        "note": "80C -> s.123 and 80CCD -> s.124 under the 2025 Act per secondary sources. 80C/80CCC/80CCD(1) share the 80C cap. 80E has no cap. 80G qualifying limits are not computed: enter the eligible amount."
+      }
+    }
+  }
+}

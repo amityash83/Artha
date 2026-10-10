@@ -68,6 +68,8 @@ FastAPI backend (backend/)
   ├─ db.py             — SQLite connection, schema/migrations, settings.json, db path resolution
   ├─ calculations.py   — pure financial math (EMI, XIRR, amortization, tenure/interest projections)
   ├─ decision_engine.py— reads financial_rules + entities, returns recommendation objects
+  ├─ tax/              — income-tax engine (engine.py, 14-step old/new regime computation with an audit line per figure),
+  │                      driven ONLY by versioned per-FY rule sets in tax/rules/*.json (no slab/limit literals in code — a test enforces it)
   └─ ai/               — AI Assistant: providers.py (Ollama / OpenAI-compatible / Anthropic behind get_provider()),
                          context.py (builds explain/ask prompt context from the DB); imported lazily inside the AI routes in main.py
 ```
@@ -103,6 +105,8 @@ The active DB path is not fixed — resolution order is: `~/.financeos/settings.
 ### Financial rules: DB-configurable with hardcoded fallbacks
 
 Thresholds like emergency fund target, high-interest loan ROI cutoff, prepayment liquidity buffer, insurance renewal alert window live in the `financial_rules` table (editable via `/api/rules`) but `decision_engine.py` and `calculations.py` fall back to hardcoded defaults if a rule is absent/disabled. See [hardcoded_vs_dynamic.md](hardcoded_vs_dynamic.md) for the authoritative list of which values are DB-driven vs. hardcoded in Python/TSX — check it before assuming a threshold is configurable.
+
+**Income tax is the exception**: slabs, rebates, surcharge, cess and deduction limits are not in `financial_rules` but in `backend/tax/rules/<rule_set_id>.json`, one file per financial year, each item tagged with a `verification` level and its legacy/new-Act section. The old Taxation keys in `financial_rules` (`section_80c_limit`, `standard_deduction_salaried`, etc.) are still seeded but unused (their descriptions say so). Adding a year means adding a rule file, not editing code. The files are bundled into the PyInstaller binary via `--add-data` in `package.json`'s `build:backend*` scripts, so a new data directory under `backend/` needs the same treatment.
 
 ### Backend port/URL
 

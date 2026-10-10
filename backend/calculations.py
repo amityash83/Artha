@@ -430,33 +430,14 @@ def calculate_monthly_emi(principal: float, annual_roi: float, tenure_months: in
 
 
 # ---------------------------------------------------------------------------
-# Taxation domain
+# Taxation domain helpers
 #
-# Best-effort estimate for decision support only — this is NOT tax advice.
-# Indian income-tax slabs, rebates, and capital-gains rates change with each
-# Union Budget; verify against the current Finance Act before relying on any
-# of the numbers below for real filing decisions. TAX_SLABS holds only the
-# currently-applicable brackets (no multi-year history) — to add a new
-# financial year's brackets without breaking old estimates, restructure this
-# into TAX_SLABS["<FY>"][...] and look up by financial_year at that point.
+# Income-tax computation (slabs, rebate, surcharge, cess, deductions, HRA) lives in
+# backend/tax/, driven by versioned rule sets in backend/tax/rules/*.json. Only
+# year-independent helpers remain here: the current financial year and capital-gains
+# classification/FIFO lot matching, which the tax engine and the Sell-transaction
+# flow both use.
 # ---------------------------------------------------------------------------
-
-TAX_SLABS = {
-    "New": {
-        # (upper_bound_exclusive_or_None, rate_percent) — cumulative brackets, same for all ages
-        "default": [
-            (400000, 0.0), (800000, 5.0), (1200000, 10.0), (1600000, 15.0),
-            (2000000, 20.0), (2400000, 25.0), (None, 30.0),
-        ],
-    },
-    "Old": {
-        "Below60": [(250000, 0.0), (500000, 5.0), (1000000, 20.0), (None, 30.0)],
-        "60to80": [(300000, 0.0), (500000, 5.0), (1000000, 20.0), (None, 30.0)],
-        "Above80": [(500000, 0.0), (1000000, 20.0), (None, 30.0)],
-    },
-}
-CESS_RATE = 4.0  # Health & Education Cess, applied on tax after rebate, both regimes
-
 
 def get_current_financial_year() -> str:
     """
@@ -466,83 +447,6 @@ def get_current_financial_year() -> str:
     if today.month >= 4:
         return f"{today.year}-{str(today.year + 1)[2:]}"
     return f"{today.year - 1}-{str(today.year)[2:]}"
-
-
-def apply_slabs(taxable_income: float, brackets: list) -> float:
-    """
-    Walks a list of (upper_bound_exclusive_or_None, rate_percent) cumulative brackets
-    and returns the total tax before any rebate/cess. taxable_income must be >= 0.
-    """
-    if taxable_income <= 0:
-        return 0.0
-
-    tax = 0.0
-    lower = 0.0
-    for upper, rate in brackets:
-        if upper is None:
-            slab_amount = max(taxable_income - lower, 0.0)
-        else:
-            slab_amount = max(min(taxable_income, upper) - lower, 0.0)
-        tax += slab_amount * (rate / 100.0)
-        if upper is not None and taxable_income <= upper:
-            break
-        lower = upper if upper is not None else lower
-    return tax
-
-
-def calculate_tax_new_regime(taxable_income: float, rebate_threshold: float = 700000.0) -> dict:
-    """
-    New regime: same brackets regardless of age. Section 87A rebate zeroes out tax
-    entirely (not just to the threshold) when taxable_income is within the limit.
-    """
-    taxable_income = max(taxable_income, 0.0)
-    gross_tax = apply_slabs(taxable_income, TAX_SLABS["New"]["default"])
-    rebate = gross_tax if taxable_income <= rebate_threshold else 0.0
-    tax_after_rebate = max(gross_tax - rebate, 0.0)
-    cess = tax_after_rebate * (CESS_RATE / 100.0)
-    total_tax = tax_after_rebate + cess
-    return {
-        "gross_tax": round(gross_tax, 2),
-        "rebate_87a": round(rebate, 2),
-        "cess": round(cess, 2),
-        "total_tax": round(total_tax, 2),
-    }
-
-
-def calculate_tax_old_regime(taxable_income: float, age_band: str = "Below60", rebate_threshold: float = 500000.0) -> dict:
-    """
-    Old regime: brackets vary by age_band ('Below60' / '60to80' / 'Above80').
-    """
-    taxable_income = max(taxable_income, 0.0)
-    brackets = TAX_SLABS["Old"].get(age_band, TAX_SLABS["Old"]["Below60"])
-    gross_tax = apply_slabs(taxable_income, brackets)
-    rebate = gross_tax if taxable_income <= rebate_threshold else 0.0
-    tax_after_rebate = max(gross_tax - rebate, 0.0)
-    cess = tax_after_rebate * (CESS_RATE / 100.0)
-    total_tax = tax_after_rebate + cess
-    return {
-        "gross_tax": round(gross_tax, 2),
-        "rebate_87a": round(rebate, 2),
-        "cess": round(cess, 2),
-        "total_tax": round(total_tax, 2),
-    }
-
-
-def calculate_hra_exemption(basic_salary: float, hra_received: float, rent_paid: float, is_metro: bool,
-                             metro_pct: float = 50.0, nonmetro_pct: float = 40.0) -> float:
-    """
-    Standard three-way minimum: HRA actually received, rent paid minus 10% of basic,
-    and 50%/40% (metro/non-metro) of basic salary. Floors at 0 (no negative exemption).
-    """
-    if basic_salary <= 0 or hra_received <= 0 or rent_paid <= 0:
-        return 0.0
-    pct = metro_pct if is_metro else nonmetro_pct
-    candidates = [
-        hra_received,
-        max(rent_paid - 0.10 * basic_salary, 0.0),
-        basic_salary * (pct / 100.0),
-    ]
-    return round(max(min(candidates), 0.0), 2)
 
 
 def determine_gain_type(purchase_date: str, sale_date: str, asset_category: str) -> str:
@@ -605,58 +509,6 @@ def calculate_capital_gains_for_lots(lots: list, sale_quantity: float, sale_pric
         "ltcg_amount": round(ltcg_amount, 2),
         "unmatched_quantity": round(max(remaining, 0.0), 2),
         "lots_consumed": consumed,
-    }
-
-
-def calculate_capital_gains_tax(stcg_amount: float, ltcg_amount: float, asset_category: str,
-                                 ltcg_exemption: float = 125000.0, stcg_rate: float = 20.0,
-                                 ltcg_rate: float = 12.5) -> dict:
-    """
-    Equity (Stock/Mutual Fund): STCG flat at stcg_rate; LTCG flat at ltcg_rate above
-    an annual exemption. Property/other: LTCG flat at ltcg_rate with no indexation
-    (current-rules simplification); STCG is not taxed here at a flat rate — it must be
-    added to the person's slab-taxed income by the caller (stcg_add_to_slab=True).
-    """
-    is_equity = asset_category in ("Stock", "Mutual Fund")
-    if is_equity:
-        taxable_ltcg = max(ltcg_amount - ltcg_exemption, 0.0)
-        ltcg_tax = taxable_ltcg * (ltcg_rate / 100.0)
-        stcg_tax = max(stcg_amount, 0.0) * (stcg_rate / 100.0)
-        return {
-            "stcg_amount": round(stcg_amount, 2),
-            "ltcg_amount": round(ltcg_amount, 2),
-            "taxable_ltcg": round(taxable_ltcg, 2),
-            "stcg_tax": round(stcg_tax, 2),
-            "ltcg_tax": round(ltcg_tax, 2),
-            "total_tax": round(stcg_tax + ltcg_tax, 2),
-            "stcg_add_to_slab": False,
-        }
-    else:
-        ltcg_tax = max(ltcg_amount, 0.0) * (ltcg_rate / 100.0)
-        return {
-            "stcg_amount": round(stcg_amount, 2),
-            "ltcg_amount": round(ltcg_amount, 2),
-            "taxable_ltcg": round(max(ltcg_amount, 0.0), 2),
-            "stcg_tax": 0.0,
-            "ltcg_tax": round(ltcg_tax, 2),
-            "total_tax": round(ltcg_tax, 2),
-            "stcg_add_to_slab": True,
-        }
-
-
-def compare_tax_regimes(taxable_income_old: float, taxable_income_new: float, age_band: str = "Below60",
-                         rebate_new: float = 700000.0, rebate_old: float = 500000.0) -> dict:
-    """
-    Computes both regimes' liability and recommends the lower one.
-    """
-    old_result = calculate_tax_old_regime(taxable_income_old, age_band, rebate_old)
-    new_result = calculate_tax_new_regime(taxable_income_new, rebate_new)
-    recommended = "Old" if old_result["total_tax"] <= new_result["total_tax"] else "New"
-    return {
-        "old_regime": old_result,
-        "new_regime": new_result,
-        "recommended_regime": recommended,
-        "savings_with_recommended": round(abs(old_result["total_tax"] - new_result["total_tax"]), 2),
     }
 
 

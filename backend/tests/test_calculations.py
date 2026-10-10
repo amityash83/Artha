@@ -5,8 +5,6 @@ from backend.calculations import (
     calculate_monthly_emi,
     calculate_remaining_tenure,
     calculate_xirr,
-    calculate_tax_new_regime,
-    calculate_tax_old_regime,
     determine_gain_type,
     calculate_capital_gains_for_lots,
     resolve_reward_rate,
@@ -46,37 +44,6 @@ def test_calculate_xirr_clean_one_year_return():
 
 def test_calculate_xirr_insufficient_cash_flows_returns_zero():
     assert calculate_xirr([{"date": "2023-01-01", "amount": -100000}]) == 0.0
-
-
-def test_calculate_tax_new_regime_at_rebate_threshold():
-    # Exactly at the 7L threshold: Section 87A rebate zeroes tax entirely
-    result = calculate_tax_new_regime(700000)
-    assert result == {
-        "gross_tax": 15000.0,
-        "rebate_87a": 15000.0,
-        "cess": 0.0,
-        "total_tax": 0.0,
-    }
-
-
-def test_calculate_tax_new_regime_above_rebate_threshold():
-    result = calculate_tax_new_regime(1000000)
-    assert result == {
-        "gross_tax": 40000.0,
-        "rebate_87a": 0.0,
-        "cess": 1600.0,
-        "total_tax": 41600.0,
-    }
-
-
-def test_calculate_tax_old_regime_below60():
-    result = calculate_tax_old_regime(600000, age_band="Below60")
-    assert result == {
-        "gross_tax": 32500.0,
-        "rebate_87a": 0.0,
-        "cess": 1300.0,
-        "total_tax": 33800.0,
-    }
 
 
 def test_determine_gain_type_equity_boundary():

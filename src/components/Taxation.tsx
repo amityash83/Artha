@@ -48,6 +48,7 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
 
   const [estimate, setEstimate] = useState<TaxEstimate | null>(null);
   const [loadingEstimate, setLoadingEstimate] = useState(false);
+  const [estimateError, setEstimateError] = useState<string | null>(null);
 
   const [realizations, setRealizations] = useState<CapitalGainsRealization[]>([]);
 
@@ -154,7 +155,14 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
     try {
       const res = await fetch(`${API_BASE_URL}/api/tax-profiles/${selectedProfile.id}/estimate`);
       const json = await res.json();
+      if (!res.ok) {
+        // e.g. no tax rule set exists for the profile's financial year
+        setEstimate(null);
+        setEstimateError(json?.detail ?? 'Failed to compute estimate');
+        return;
+      }
       setEstimate(json);
+      setEstimateError(null);
     } catch (err) {
       console.error(err);
       showToast?.('Failed to compute estimate', 'error');
@@ -340,7 +348,7 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
                 </div>
               ) : loadingEstimate || !estimate ? (
                 <div className="glass-panel" style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                  {loadingEstimate ? 'Computing estimate...' : 'No estimate loaded yet.'}
+                  {loadingEstimate ? 'Computing estimate...' : (estimateError ?? 'No estimate loaded yet.')}
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -376,7 +384,8 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: 'var(--text-secondary)' }}>
                             <span>Gross Tax: <strong style={{ color: '#e2e8f0' }}>{formatCurrency(r.gross_tax)}</strong></span>
                             <span>Section 87A Rebate: <strong style={{ color: '#e2e8f0' }}>{formatCurrency(r.rebate_87a)}</strong></span>
-                            <span>Cess (4%): <strong style={{ color: '#e2e8f0' }}>{formatCurrency(r.cess)}</strong></span>
+                            <span>Surcharge: <strong style={{ color: '#e2e8f0' }}>{formatCurrency(r.surcharge)}</strong></span>
+                            <span>Health &amp; Education Cess: <strong style={{ color: '#e2e8f0' }}>{formatCurrency(r.cess)}</strong></span>
                             <span style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '6px', marginTop: '2px' }}>
                               Total Tax: <strong style={{ color: '#f8fafc', fontSize: '14px' }}>{formatCurrency(r.total_tax)}</strong>
                             </span>

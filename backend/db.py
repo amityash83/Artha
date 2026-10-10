@@ -8,6 +8,9 @@ SETTINGS_DIR = os.path.join(os.path.expanduser("~"), ".financeos")
 os.makedirs(SETTINGS_DIR, exist_ok=True)
 SETTINGS_PATH = os.path.join(SETTINGS_DIR, "settings.json")
 
+# Prefixed onto the legacy Taxation financial_rules rows' descriptions by init_db().
+TAX_RULE_SUPERSEDED_PREFIX = "[Not used: tax figures now come from the versioned tax rule set for each financial year] "
+
 def load_settings():
     if os.path.exists(SETTINGS_PATH):
         try:
@@ -502,10 +505,9 @@ def init_db():
     # Taxation domain (per-person, per-financial-year tax profile + itemized deductions +
     # realized capital-gains log). Regime/HRA inputs live on tax_profiles; itemized 80C/80D/etc
     # entries are a satellite table since each section bundles multiple concurrent instruments.
-    # Progressive slab brackets are NOT stored here — see calculations.py's TAX_SLABS, since a
-    # multi-bracket table doesn't fit financial_rules' one-value-per-key shape. Only the few
-    # genuinely-scalar, frequently-revised limits (80C cap, 80D caps, standard deduction, 87A
-    # rebate threshold, equity LTCG exemption/rates) live in financial_rules (seeded below).
+    # Tax slabs, limits and rates are NOT stored in the database at all — they live in
+    # versioned per-financial-year rule sets (backend/tax/rules/*.json) read by
+    # backend/tax/engine.py.
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS tax_profiles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1098,11 +1100,10 @@ def init_db():
         VALUES (?, ?, ?, ?, ?, ?)
         """, (rule_key, rule_name, desc, val, cat, enabled))
 
-    # Taxation domain scalar limits. These are a best-effort snapshot of recent Indian
-    # tax law — NOT tax advice, they will go stale as Finance Acts change, which is
-    # exactly why they're editable via Settings > Financial Rules rather than hardcoded.
-    # Progressive slab brackets (which can't be a single value) live in calculations.py's
-    # TAX_SLABS instead.
+    # Legacy Taxation-domain scalar limits. Superseded by the versioned tax rule sets in
+    # backend/tax/rules/*.json: the tax engine no longer reads any of these keys. The rows
+    # are still seeded and kept (not deleted) because knowledge_articles soft-reference
+    # some of them via related_rule_key, and existing installs may have user edits.
     default_tax_rules = [
         ("section_80c_limit", "Section 80C Deduction Limit", "Combined annual cap for 80C investments (PPF/ELSS/life insurance/etc.)", 150000.0, "Taxation", 1),
         ("section_80d_self_limit", "Section 80D Limit (Self/Family, Non-Senior)", "Health insurance premium deduction cap, self/family under 60", 25000.0, "Taxation", 1),
@@ -1123,6 +1124,15 @@ def init_db():
         INSERT OR IGNORE INTO financial_rules (rule_key, rule_name, description, value, category, is_enabled)
         VALUES (?, ?, ?, ?, ?, ?)
         """, (rule_key, rule_name, desc, val, cat, enabled))
+    # Say so on every row, new or existing, so editing one in Settings > Financial Rules
+    # isn't mistaken for changing a tax calculation. Guarded on the prefix so it's a
+    # no-op once applied (and never clobbers a description twice).
+    cursor.execute(f"""
+        UPDATE financial_rules
+        SET description = ? || description
+        WHERE rule_key IN ({", ".join("?" for _ in default_tax_rules)})
+          AND description NOT LIKE ?
+    """, [TAX_RULE_SUPERSEDED_PREFIX] + [r[0] for r in default_tax_rules] + [TAX_RULE_SUPERSEDED_PREFIX + "%"])
 
     # Remove the old hardcoded no_villa_equity rule for existing installs — superseded
     # by the generic goal_funding_constraints table (see below). Naturally idempotent:

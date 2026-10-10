@@ -13,6 +13,8 @@ from pydantic import BaseModel
 
 from backend.db import get_db_connection, init_db, get_db_path, get_db_dir
 import backend.calculations as calc
+import backend.tax.engine as tax_engine
+import backend.tax.rules_loader as tax_rules
 from backend.decision_engine import generate_recommendations, generate_credit_card_annual_reviews
 
 # Shared-secret auth for the Docker/web deployment path only. Empty/unset (the
@@ -1891,13 +1893,38 @@ def delete_goal_funding_constraint(id: int, category_id: int):
         conn.close()
 
 # --- Taxation Router ---
-# Decision-support estimate only, NOT tax advice. See calculations.py's Taxation
-# section docstrings for the slab/rate assumptions and their limitations.
+# Decision-support estimate only, NOT tax advice. All tax math lives in backend/tax/
+# (engine.py), driven by the versioned rule sets in backend/tax/rules/*.json — no
+# slab, limit or rate is read from financial_rules or hardcoded here.
 
-def get_tax_rule_value(cursor, rule_key: str, default: float) -> float:
-    cursor.execute("SELECT value FROM financial_rules WHERE rule_key = ? AND is_enabled = 1", (rule_key,))
-    row = cursor.fetchone()
-    return float(row["value"]) if row else default
+class TaxComputeRequest(BaseModel):
+    financial_year: Optional[str] = None
+    # Shape is defined once, by backend/tax/engine.py's DEFAULT_INPUTS, and validated
+    # by engine.normalize_inputs — not duplicated as a Pydantic schema here.
+    inputs: dict = {}
+
+def _resolve_tax_rule_set(financial_year: Optional[str]) -> dict:
+    try:
+        fy = financial_year or tax_rules.latest_financial_year(calc.get_current_financial_year())
+        return tax_rules.load_rule_set(fy)
+    except tax_rules.RuleSetError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/tax/rule-sets")
+def get_tax_rule_sets():
+    return tax_rules.list_rule_sets()
+
+@app.get("/api/tax/rule-sets/{financial_year}")
+def get_tax_rule_set(financial_year: str):
+    return _resolve_tax_rule_set(financial_year)
+
+@app.post("/api/tax/compute")
+def compute_tax(req: TaxComputeRequest):
+    rules = _resolve_tax_rule_set(req.financial_year)
+    try:
+        return tax_engine.compute(req.inputs, rules, computed_at=datetime.now().isoformat(timespec="seconds"))
+    except tax_engine.TaxInputError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 class TaxProfileSchema(BaseModel):
     person_id: int
@@ -2089,6 +2116,120 @@ def get_capital_gains_realizations(id: int):
     finally:
         conn.close()
 
+# income.frequency is free text in the generic entity form; these are the values the
+# rest of the app uses (see Dashboard.tsx's FREQ_MULTIPLIER).
+INCOME_FREQUENCY_PER_YEAR = {"monthly": 12, "quarterly": 4, "half-yearly": 2, "yearly": 1, "annually": 1, "annual": 1}
+
+def _estimate_capital_gains(cursor, person_id: int) -> dict:
+    """
+    Unrealized gains on this person's Stock/Mutual Fund/Property assets, treating
+    current_value as a hypothetical sale price today (distinct from the realized
+    capital_gains_realizations log). Equity -> 111A/112A, property LTCG -> 112,
+    property STCG -> slab rates.
+    """
+    gains = {"stcg_111a": 0.0, "ltcg_112a": 0.0, "ltcg_112": 0.0, "stcg_slab": 0.0}
+    today_str = date.today().strftime("%Y-%m-%d")
+    cursor.execute("""
+        SELECT a.id, a.current_value, a.cost_price, a.purchase_date, c.name as category_name
+        FROM assets a JOIN categories c ON a.category_id = c.id
+        WHERE a.owner_id = ? AND c.name IN ('Stock', 'Mutual Fund', 'Property')
+    """, (person_id,))
+    for a in cursor.fetchall():
+        if a["category_name"] == "Property":
+            if not a["purchase_date"]:
+                continue
+            gain = max(float(a["current_value"] or 0.0) - float(a["cost_price"] or 0.0), 0.0)
+            key = "ltcg_112" if calc.determine_gain_type(a["purchase_date"], today_str, "Property") == "LTCG" else "stcg_slab"
+            gains[key] += gain
+            continue
+        cursor.execute("SELECT * FROM holding_lots WHERE asset_id = ? ORDER BY purchase_date", (a["id"],))
+        lots = [dict(l) for l in cursor.fetchall()]
+        total_qty = sum(l["quantity"] for l in lots)
+        if not lots or total_qty <= 0:
+            continue
+        cg = calc.calculate_capital_gains_for_lots(
+            lots, total_qty, float(a["current_value"] or 0.0) / total_qty, today_str, a["category_name"])
+        gains["stcg_111a"] += max(cg["stcg_amount"], 0.0)
+        gains["ltcg_112a"] += max(cg["ltcg_amount"], 0.0)
+    return gains
+
+def _tax_profile_to_engine_inputs(cursor, profile: dict, rules: dict) -> tuple:
+    """Maps a stored tax profile (+ household income rows + itemised deductions) onto engine inputs."""
+    notes = []
+
+    salary_total = 0.0
+    other = {"rental_gross": 0.0, "dividends": 0.0, "interest": 0.0, "other": 0.0}
+    cursor.execute("""
+        SELECT i.amount, i.frequency, c.name as category_name
+        FROM income i LEFT JOIN categories c ON i.category_id = c.id
+        WHERE i.taxable = 1
+    """)
+    for row in cursor.fetchall():
+        freq = (row["frequency"] or "Monthly").strip().lower()
+        per_year = INCOME_FREQUENCY_PER_YEAR.get(freq)
+        if per_year is None:
+            per_year = 1
+            notes.append(f"Income frequency '{row['frequency']}' not recognised; treated as an annual amount.")
+        annual = float(row["amount"] or 0.0) * per_year
+        category = row["category_name"]
+        if category in ("Salary", "Bonus"):
+            salary_total += annual
+        elif category == "Rental":
+            other["rental_gross"] += annual
+        elif category == "Dividend":
+            other["dividends"] += annual
+        elif category == "Interest":
+            other["interest"] += annual
+        else:
+            other["other"] += annual
+    other["other"] += float(profile.get("other_income_reported") or 0.0)
+    notes.append("Income is taken from all taxable income rows (income rows have no owner), not just this person's.")
+
+    basic = min(float(profile.get("hra_basic_salary") or 0.0), salary_total)
+    hra = min(float(profile.get("hra_received") or 0.0), salary_total - basic)
+    if float(profile.get("hra_basic_salary") or 0.0) + float(profile.get("hra_received") or 0.0) > salary_total + 0.5:
+        notes.append("Basic + HRA entered on the profile exceed salary income from income rows; capped to salary income.")
+
+    cursor.execute("SELECT section, COALESCE(SUM(amount), 0.0) as total FROM tax_deductions WHERE tax_profile_id = ? GROUP BY section", (profile["id"],))
+    sections = {row["section"]: float(row["total"]) for row in cursor.fetchall()}
+
+    # 80D entries aren't split between self/family and parents on the profile: fill
+    # self/family up to its cap first, the remainder counts as non-senior parents.
+    old_80d = rules["regimes"]["old"]["deductions"]["value"]["80D"]
+    bands = rules["age_bands"]["value"]
+    representative_age = {"Below60": bands["senior_from_age"] - 1, "60to80": bands["senior_from_age"],
+                          "Above80": bands["super_senior_from_age"]}[profile.get("age_band") or "Below60"]
+    self_cap = old_80d["self_family_senior"] if representative_age >= bands["senior_from_age"] else old_80d["self_family"]
+    total_80d = sections.get("80D", 0.0)
+    if total_80d > self_cap:
+        notes.append("80D entries are not split by insured person; the amount above the self/family cap is treated as non-senior parents' premium.")
+
+    savings_interest = min(sections.get("80TTA", 0.0), other["interest"])
+    annual_rent = float(profile.get("hra_rent_paid") or 0.0)
+
+    inputs = {
+        "profile": {"age": representative_age, "metro": bool(profile.get("is_metro_city")),
+                    "selected_regime": (profile.get("regime") or "").lower() or None},
+        "salary": {"basic": basic, "hra": hra, "other_taxable_allowances": salary_total - basic - hra},
+        "hra": {"rent_paid_monthly": annual_rent / 12.0, "months_rented": 12},
+        "other_income": {"rental_gross": other["rental_gross"], "dividends": other["dividends"],
+                         "interest_savings": savings_interest, "interest_deposits": other["interest"] - savings_interest,
+                         "other": other["other"]},
+        "capital_gains": _estimate_capital_gains(cursor, profile["person_id"]),
+        "deductions": {
+            "80C": {"other": sections.get("80C", 0.0)},
+            "employee_nps": sections.get("80CCD1B", 0.0),
+            "80D_self_family": min(total_80d, self_cap),
+            "80D_parents": max(total_80d - self_cap, 0.0),
+            "home_loan_interest_self_occupied": float(profile.get("home_loan_interest_self_occupied") or 0.0) + sections.get("24B", 0.0),
+            "80E": sections.get("80E", 0.0),
+            "80G_eligible": sections.get("80G", 0.0),
+            "other_old": sections.get("Other", 0.0),
+        },
+        "prepaid": {"tds": float(profile.get("tds_deducted") or 0.0), "advance_tax": float(profile.get("advance_tax_paid") or 0.0)},
+    }
+    return inputs, notes
+
 @app.get("/api/tax-profiles/{id}/estimate")
 def get_tax_estimate(id: int):
     conn = get_db_connection()
@@ -2099,120 +2240,57 @@ def get_tax_estimate(id: int):
         if not profile:
             raise HTTPException(status_code=404, detail="Tax profile not found")
         profile = dict(profile)
+        rules = _resolve_tax_rule_set(profile["financial_year"])
+        inputs, notes = _tax_profile_to_engine_inputs(cursor, profile, rules)
+        computed_at = datetime.now().isoformat(timespec="seconds")
 
-        # Configurable limits (financial_rules-backed, hardcoded fallback if absent/disabled)
-        limit_80c = get_tax_rule_value(cursor, "section_80c_limit", 150000.0)
-        limit_80d_self = get_tax_rule_value(cursor, "section_80d_self_limit", 25000.0)
-        limit_80d_parents = get_tax_rule_value(cursor, "section_80d_parents_limit", 25000.0)
-        limit_80d_senior = get_tax_rule_value(cursor, "section_80d_senior_limit", 50000.0)
-        standard_deduction = get_tax_rule_value(cursor, "standard_deduction_salaried", 75000.0)
-        rebate_new = get_tax_rule_value(cursor, "section_87a_rebate_limit_new", 700000.0)
-        rebate_old = get_tax_rule_value(cursor, "section_87a_rebate_limit_old", 500000.0)
-        ltcg_exemption = get_tax_rule_value(cursor, "equity_ltcg_exemption", 125000.0)
-        stcg_rate = get_tax_rule_value(cursor, "equity_stcg_rate", 20.0)
-        ltcg_rate = get_tax_rule_value(cursor, "equity_ltcg_rate", 12.5)
-        property_ltcg_rate = get_tax_rule_value(cursor, "property_ltcg_rate", 12.5)
-        metro_pct = get_tax_rule_value(cursor, "hra_metro_percentage", 50.0)
-        nonmetro_pct = get_tax_rule_value(cursor, "hra_nonmetro_percentage", 40.0)
+        # Unrealized capital gains are a "what if I sold today" figure, so the regime
+        # comparison excludes them; their incremental tax (including any surcharge
+        # interplay) is reported separately and added to the estimated total.
+        with_gains = tax_engine.compute(inputs, rules, computed_at)
+        without_gains = tax_engine.compute({**inputs, "capital_gains": {}}, rules, computed_at)
+        old, new = without_gains["regimes"]["old"], without_gains["regimes"]["new"]
+        recommended = without_gains["comparison"]["best_regime"]
+        cg_tax = with_gains["regimes"][recommended]["total_tax"] - without_gains["regimes"][recommended]["total_tax"]
+        cg = inputs["capital_gains"]
+        recommended_total = without_gains["regimes"][recommended]["total_tax"] + cg_tax
+        prepaid = old["prepaid_taxes"]
 
-        # Gross income: taxable income rows owned by this person
-        cursor.execute("SELECT COALESCE(SUM(amount), 0.0) as total FROM income WHERE taxable = 1")
-        gross_income = float(cursor.fetchone()["total"]) + float(profile.get("other_income_reported") or 0.0)
+        def regime_summary(r: dict) -> dict:
+            return {"gross_tax": r["tax_before_rebate"], "rebate_87a": r["rebate"], "surcharge": r["surcharge"],
+                    "cess": r["cess"], "total_tax": r["total_tax"]}
 
-        # Deductions, capped per-section by the configured limits
-        cursor.execute("SELECT section, COALESCE(SUM(amount), 0.0) as total FROM tax_deductions WHERE tax_profile_id = ? GROUP BY section", (id,))
-        section_totals = {row["section"]: float(row["total"]) for row in cursor.fetchall()}
-        capped_80c = min(section_totals.get("80C", 0.0), limit_80c)
-        senior = profile.get("age_band") != "Below60"
-        capped_80d = min(section_totals.get("80D", 0.0), limit_80d_senior if senior else (limit_80d_self + limit_80d_parents))
-        other_sections = sum(v for k, v in section_totals.items() if k not in ("80C", "80D"))
-        total_deductions = capped_80c + capped_80d + other_sections
-
-        hra_exemption = calc.calculate_hra_exemption(
-            float(profile.get("hra_basic_salary") or 0.0),
-            float(profile.get("hra_received") or 0.0),
-            float(profile.get("hra_rent_paid") or 0.0),
-            bool(profile.get("is_metro_city")),
-            metro_pct, nonmetro_pct
-        )
-
-        # Capital gains: on-the-fly estimate from this person's Stock/Mutual Fund/Property
-        # assets, treating current_value as a hypothetical sale price (unrealized estimate,
-        # distinct from the realized capital_gains_realizations log).
-        cursor.execute("""
-            SELECT a.id, a.current_value, c.name as category_name
-            FROM assets a JOIN categories c ON a.category_id = c.id
-            WHERE a.owner_id = ? AND c.name IN ('Stock', 'Mutual Fund', 'Property')
-        """, (profile["person_id"],))
-        cg_assets = cursor.fetchall()
-        total_stcg = 0.0
-        total_ltcg = 0.0
-        total_cg_tax = 0.0
-        today_str = date.today().strftime("%Y-%m-%d")
-        for a in cg_assets:
-            category = a["category_name"]
-            if category == "Property":
-                cursor.execute("SELECT purchase_date, current_value, cost_price FROM assets WHERE id = ?", (a["id"],))
-                prow = cursor.fetchone()
-                if not prow or not prow["purchase_date"]:
-                    continue
-                gain_type = calc.determine_gain_type(prow["purchase_date"], today_str, "Property")
-                gain = float(prow["current_value"] or 0.0) - float(prow["cost_price"] or 0.0)
-                if gain_type == "LTCG":
-                    total_ltcg += max(gain, 0.0)
-                else:
-                    total_stcg += max(gain, 0.0)
-            else:
-                cursor.execute("SELECT * FROM holding_lots WHERE asset_id = ? ORDER BY purchase_date", (a["id"],))
-                lots = [dict(l) for l in cursor.fetchall()]
-                if not lots:
-                    continue
-                total_qty = sum(l["quantity"] for l in lots)
-                if total_qty <= 0:
-                    continue
-                sale_price_per_unit = float(a["current_value"] or 0.0) / total_qty
-                cg = calc.calculate_capital_gains_for_lots(lots, total_qty, sale_price_per_unit, today_str, category)
-                total_stcg += max(cg["stcg_amount"], 0.0)
-                total_ltcg += max(cg["ltcg_amount"], 0.0)
-
-        cg_tax_equity = calc.calculate_capital_gains_tax(total_stcg, total_ltcg, "Stock", ltcg_exemption, stcg_rate, ltcg_rate)
-        total_cg_tax = cg_tax_equity["total_tax"]
-
-        taxable_income_new = max(gross_income - standard_deduction, 0.0)
-        taxable_income_old = max(gross_income - standard_deduction - total_deductions - hra_exemption -
-                                  float(profile.get("home_loan_interest_self_occupied") or 0.0), 0.0)
-
-        comparison = calc.compare_tax_regimes(
-            taxable_income_old, taxable_income_new, profile.get("age_band", "Below60"),
-            rebate_new, rebate_old
-        )
-        recommended_total_tax = comparison[f"{comparison['recommended_regime'].lower()}_regime"]["total_tax"] + total_cg_tax
-        prepaid = float(profile.get("tds_deducted") or 0.0) + float(profile.get("advance_tax_paid") or 0.0)
-
+        warnings = without_gains["warnings"] + [
+            {"code": "profile_mapping", "severity": "info", "regime": None, "message": n} for n in notes]
         return {
             "financial_year": profile["financial_year"],
-            "gross_income": round(gross_income, 2),
-            "standard_deduction": round(standard_deduction, 2),
-            "total_80c_deductions": round(capped_80c, 2),
-            "total_80d_deductions": round(capped_80d, 2),
-            "other_deductions": round(other_sections, 2),
-            "hra_exemption": round(hra_exemption, 2),
-            "taxable_income_old": round(taxable_income_old, 2),
-            "taxable_income_new": round(taxable_income_new, 2),
-            "capital_gains": {
-                "stcg": round(total_stcg, 2),
-                "ltcg": round(total_ltcg, 2),
-                "tax": round(total_cg_tax, 2),
-            },
-            "old_regime": comparison["old_regime"],
-            "new_regime": comparison["new_regime"],
-            "recommended_regime": comparison["recommended_regime"],
-            "savings_with_recommended": comparison["savings_with_recommended"],
-            "estimated_total_tax": round(recommended_total_tax, 2),
-            "prepaid_taxes": round(prepaid, 2),
-            "estimated_refund_or_due": round(prepaid - recommended_total_tax, 2),
-            "disclaimer": "Estimate only, based on best-effort modeling of recent Indian tax law. Not tax advice — verify against the current Finance Act before filing.",
+            "rule_set": without_gains["rule_set"],
+            "gross_income": old["gross_total_income"],
+            "standard_deduction": old["standard_deduction"],
+            "standard_deduction_new": new["standard_deduction"],
+            "total_80c_deductions": old["deductions"].get("80C", 0.0),
+            "total_80d_deductions": old["deductions"].get("80D", 0.0),
+            "other_deductions": round(old["deductions_total"] - old["deductions"].get("80C", 0.0) - old["deductions"].get("80D", 0.0), 2),
+            "hra_exemption": old["hra"]["exemption"] if old["hra"] else 0.0,
+            "taxable_income_old": old["total_income"],
+            "taxable_income_new": new["total_income"],
+            "capital_gains": {"stcg": round(cg["stcg_111a"] + cg["stcg_slab"], 2),
+                              "ltcg": round(cg["ltcg_112a"] + cg["ltcg_112"], 2), "tax": round(cg_tax, 2)},
+            "old_regime": regime_summary(old),
+            "new_regime": regime_summary(new),
+            "recommended_regime": recommended.capitalize(),
+            "savings_with_recommended": abs(without_gains["comparison"]["savings_old_minus_new"]),
+            "estimated_total_tax": round(recommended_total, 2),
+            "prepaid_taxes": prepaid,
+            "estimated_refund_or_due": round(prepaid - recommended_total, 2),
+            "warnings": warnings,
+            "computation": without_gains,
+            "disclaimer": f"Estimate only, computed under rule set {rules['rule_set_id']} v{rules['version']}. Not tax advice — verify against the current Act and Finance Act before filing.",
         }
+    except tax_rules.RuleSetError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except tax_engine.TaxInputError as e:
+        raise HTTPException(status_code=422, detail=f"Could not map tax profile to engine inputs: {e}")
     except HTTPException:
         raise
     finally:

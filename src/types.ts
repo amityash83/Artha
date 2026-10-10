@@ -383,6 +383,7 @@ export interface CapitalGainsRealization {
 export interface RegimeResult {
   gross_tax: number;
   rebate_87a: number;
+  surcharge: number;
   cess: number;
   total_tax: number;
 }
