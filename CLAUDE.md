@@ -83,7 +83,8 @@ FastAPI backend (backend/)
   │                      nps.py / payroll.py / waterfall.py build NPS scenarios, before/after payslips and the savings waterfall
   │                      by re-running the engine (never by per-rupee shortcuts). Optional month-by-month entry (inputs.monthly,
   │                      12 months Apr..Mar, actual/projected): when enabled, normalize_inputs derives every annual figure from the
-  │                      months (apply_monthly_totals), HRA is computed per month, and each regime result gains a monthly TDS projection
+  │                      months (apply_monthly_totals), HRA is computed per month, and each regime result gains a monthly TDS projection.
+  │                      epf.py suggests Employee EPF from dated EPFO wage ceilings (tax/metadata/epf_rules.json; a mid-month change is split by days)
   │                      sensitivity.py: break-even, NPS-for-target and salary/bonus/basic-share sweeps (bisection over full engine runs);
   │                      CSV/PDF reports are built client-side (frontend/src/components/tax/reportTables.ts), PDF via the preload's savePdf
   └─ ai/               — AI Assistant: providers.py (Ollama / OpenAI-compatible / Anthropic behind get_provider()),

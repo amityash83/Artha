@@ -5,6 +5,7 @@ import { buildRows, GridRow, parseAmount } from './monthlyRows';
 import { formatINR, Pill, Section } from './taxUi';
 import { MONTHS, monthsFromAnnual } from './plannerInputs';
 import { CsvImportDialog } from './CsvImportDialog';
+import { EpfHelper } from './EpfHelper';
 
 const cellInput: React.CSSProperties = {
   width: '92px', padding: '4px 6px', fontSize: '12px', textAlign: 'right', fontVariantNumeric: 'tabular-nums',
@@ -154,6 +155,10 @@ export const MonthlySalaryGrid: React.FC<Props> = ({ inputs, financialYear, meta
             <button className="btn btn-secondary" style={smallBtn} onClick={markActual}>Mark actual</button>
           </div>
         </div>
+        <EpfHelper inputs={inputs} financialYear={financialYear} monthly
+          onApply={(s, scope) => edit((ms) => ms.map((m, i) => (scope === 'all' || m.status === 'projected'
+            ? { ...m, payroll_deductions: { ...m.payroll_deductions, employee_epf: s.months[i].epf } } : m)),
+          `Filled Employee EPF in ${scope === 'all' ? 'every month' : 'the projected months'}${scope === 'projected' && months.some((m) => m.status === 'actual') ? '; actual months keep their payslip figures' : ''}.`)} />
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
           <button className="btn btn-secondary" style={smallBtn} onClick={() => setShowImport(true)}><FileUp size={12} /> Import CSV</button>
           <button className="btn btn-secondary" style={smallBtn} onClick={downloadTemplate}><Download size={12} /> Download as CSV (template)</button>

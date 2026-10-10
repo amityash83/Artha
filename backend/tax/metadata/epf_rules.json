@@ -1,0 +1,37 @@
+{
+  "description": "Employee EPF contribution rules used by the planner's EPF helper. These are EPFO payroll rules, not income-tax rules: they only suggest the Employee EPF figure, which stays an editable input. Dated so a mid-year change (such as a wage ceiling revision) is applied from the day it takes effect.",
+  "employee_rate_pct": {
+    "value": 12,
+    "verification": "secondary_source",
+    "source": "epf-scheme-1952",
+    "note": "Employee share, as a % of EPF wages (basic + DA). Some establishments are notified at 10% (fewer than 20 employees, certain industries); enter your payslip figure if yours differs."
+  },
+  "wage_ceiling_monthly": {
+    "value": [
+      {
+        "from": "2014-09-01",
+        "amount": 15000,
+        "verification": "secondary_source",
+        "source": "gsr-609e-2014",
+        "note": "Statutory wage ceiling raised from 6,500 to 15,000 a month from 1 September 2014."
+      },
+      {
+        "from": "2026-09-17",
+        "amount": 25000,
+        "verification": "secondary_source",
+        "source": "so-5109e-2026",
+        "note": "Raised to 25,000 a month by Gazette notification S.O. 5109(E) of 17 September 2026, effective that day. For September 2026, the old ceiling applies to days 1-16 and the new one to days 17-30. Some payrolls may apply it from October instead; your payslip is authoritative."
+      }
+    ]
+  },
+  "notes": [
+    "EPF wages are taken as basic + DA as entered. Under the Labour Codes, allowances above half of total pay may also count as wages; if your payslip's EPF differs, enter it directly.",
+    "Contributions are rounded to the nearest rupee, as EPFO does.",
+    "In a month when the ceiling changes, the contribution is split by calendar days between the old and new ceilings."
+  ],
+  "sources": [
+    {"id": "epf-scheme-1952", "title": "Employees' Provident Funds Scheme, 1952 and EPF & MP Act, 1952, s.6 (contribution rates)", "official": true},
+    {"id": "gsr-609e-2014", "title": "Ministry of Labour & Employment notification G.S.R. 609(E), 22 August 2014 (wage ceiling 15,000)", "official": true},
+    {"id": "so-5109e-2026", "title": "Ministry of Labour & Employment Gazette notification S.O. 5109(E), 17 September 2026 (wage ceiling 25,000), as reported by caclubindia.com, keka.com and argus-p.com; official text not yet checked", "url": "https://www.caclubindia.com/articles/epf-wage-ceiling-increased-to-rs-25000-from-rs-15000-new-rules-from-17th-september-2026-56352.asp", "accessed": "2026-10-11", "official": false}
+  ]
+}

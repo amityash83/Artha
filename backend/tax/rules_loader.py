@@ -213,3 +213,39 @@ def latest_financial_year(on_or_before: Optional[str] = None) -> str:
     if not years:
         raise RuleSetError("No tax rule sets available")
     return years[-1]
+
+
+@lru_cache(maxsize=None)
+def load_epf_rules() -> dict:
+    """EPFO contribution rules for the EPF helper (dated wage ceilings) — not tax rules."""
+    rules = json.loads((_data_dir("metadata") / "epf_rules.json").read_text(encoding="utf-8"))
+    validate_epf_rules(rules)
+    return rules
+
+
+def validate_epf_rules(rules: dict) -> None:
+    from datetime import date
+    source_ids = {s.get("id") for s in rules.get("sources") or []}
+    _check_item(rules.get("employee_rate_pct"), "employee_rate_pct")
+    rate = rules["employee_rate_pct"]["value"]
+    if not isinstance(rate, (int, float)) or not 0 < rate <= 100:
+        raise RuleSetError("employee_rate_pct must be a percentage above 0")
+    periods = (rules.get("wage_ceiling_monthly") or {}).get("value")
+    if not isinstance(periods, list) or not periods:
+        raise RuleSetError("wage_ceiling_monthly.value must be a non-empty list of {from, amount}")
+    previous = None
+    for i, p in enumerate(periods):
+        where = f"wage_ceiling_monthly.value[{i}]"
+        try:
+            start = date.fromisoformat(p["from"])
+        except (KeyError, TypeError, ValueError):
+            raise RuleSetError(f"{where}.from must be a YYYY-MM-DD date")
+        if previous is not None and start <= previous:
+            raise RuleSetError(f"{where}: periods must be in ascending date order")
+        previous = start
+        if not isinstance(p.get("amount"), (int, float)) or p["amount"] <= 0:
+            raise RuleSetError(f"{where}.amount must be a positive number")
+        if p.get("verification") not in VERIFICATION_LEVELS[:-1]:
+            raise RuleSetError(f"{where}.verification must be one of {VERIFICATION_LEVELS[:-1]}")
+        if p.get("source") not in source_ids:
+            raise RuleSetError(f"{where}: unknown source id {p.get('source')!r}")

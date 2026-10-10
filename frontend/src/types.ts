@@ -841,6 +841,7 @@ export interface TaxOptimization {
   offered_pcts: string; // free text, e.g. "10, 14"; empty = policy not confirmed
   actual_monthly_tds_before: number | null;
   actual_monthly_tds_after: number | null;
+  payslip_month: number | null; // month-by-month entry: 0 = April; null = the current month
 }
 
 export interface TaxPayslipSide {
@@ -850,10 +851,11 @@ export interface TaxPayslipSide {
   payroll_deductions: Record<string, number>;
   payroll_deductions_total: number;
   tds_monthly: number;
-  tds_basis: 'payroll_actual' | 'payroll_adjusted' | 'average';
+  tds_basis: 'payroll_actual' | 'payroll_adjusted' | 'average' | 'month_actual' | 'month_projected' | 'month_missing';
   engine_average_tds_monthly: number;
   net_in_hand_monthly: number;
   employer_nps_monthly: number;
+  employer_nps_annual: number;
   taxable_salary_annual: number;
   taxable_income_annual: number;
   annual_tax: number;
@@ -865,6 +867,7 @@ export interface TaxPayslipResult {
   after: TaxPayslipSide;
   feasible: boolean;
   notes: string[];
+  month: { index: number; label: string; status: 'actual' | 'projected' } | null; // null = average month
   difference: {
     monthly_cash_change: number;
     monthly_nps_change: number;
@@ -874,6 +877,17 @@ export interface TaxPayslipResult {
     net_annual_impact: number;
   };
   tds_note: string;
+}
+
+export interface TaxEpfSuggestion {
+  financial_year: string;
+  basis: 'ceiling' | 'full';
+  rate_pct: number;
+  months: { label: string; wages: number; epf: number; explanation: string;
+    ceilings: { amount: number; days: number; first_day: number; verification: TaxVerification }[] }[];
+  annual: number;
+  ceiling_changes: { from: string; amount: number; verification: TaxVerification; note?: string }[];
+  notes: string[];
 }
 
 export interface TaxWaterfallResult {

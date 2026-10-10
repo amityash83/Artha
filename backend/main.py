@@ -21,6 +21,7 @@ import backend.tax.nps as tax_nps
 import backend.tax.payroll as tax_payroll
 import backend.tax.waterfall as tax_waterfall
 import backend.tax.sensitivity as tax_sensitivity_mod
+import backend.tax.epf as tax_epf
 from backend.decision_engine import generate_recommendations, generate_credit_card_annual_reviews
 
 # Shared-secret auth for the Docker/web deployment path only. Empty/unset (the
@@ -1973,16 +1974,29 @@ class TaxPayslipRequest(TaxComputeRequest):
     regime_after: str = "best"
     actual_monthly_tds_before: Optional[float] = None
     actual_monthly_tds_after: Optional[float] = None
+    month_index: Optional[int] = None  # month-by-month entry: show this month (0 = April) instead of the average month
 
 @app.post("/api/tax/payslip")
 def tax_payslip(req: TaxPayslipRequest):
     def run(conn):
         rules, meta = _resolve_for(conn, req.financial_year, req.rule_set_id, req.rule_set_version)
         out = tax_payroll.payslip(req.inputs, rules, req.optimization, req.regime_before, req.regime_after,
-                                  req.actual_monthly_tds_before, req.actual_monthly_tds_after, _now_iso())
+                                  req.actual_monthly_tds_before, req.actual_monthly_tds_after, _now_iso(), req.month_index)
         out["rule_set"].update({"name": meta["name"], "source": meta["source"]})
         return out
     return _tax_store_call(run)
+
+class TaxEpfSuggestionRequest(BaseModel):
+    financial_year: str
+    wages: List[float]  # EPF wages (basic + DA) for each month, April to March
+    basis: str = "ceiling"  # "ceiling": statutory, wages capped at the dated ceiling; "full": on full wages
+
+@app.post("/api/tax/epf-suggestion")
+def tax_epf_suggestion(req: TaxEpfSuggestionRequest):
+    try:
+        return tax_epf.suggest_epf(req.financial_year, req.wages, req.basis)
+    except tax_engine.TaxInputError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 class TaxSensitivityRequest(TaxComputeRequest):
     bonus_month: int = 11  # month-by-month mode: where an extra bonus lands (0 = April ... 11 = March)

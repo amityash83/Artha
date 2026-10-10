@@ -86,10 +86,10 @@ export const PlannerOverview: React.FC<PlannerChildProps> = ({ result, inputs, p
         {payslip ? (
           <>
             <Kpi label="Monthly in-hand before optimisation" value={formatINR(payslip.before.net_in_hand_monthly)} better="higher"
-              sub={`${payslip.before.regime} regime · TDS ${payslip.before.tds_basis === 'average' ? 'average' : 'from payroll'}`} />
+              sub={`${payslip.before.regime} regime · ${payslip.month ? `${payslip.month.label} payslip` : `TDS ${payslip.before.tds_basis === 'average' ? 'average' : 'from payroll'}`}`} />
             <Kpi label="Monthly in-hand after optimisation" value={formatINR(payslip.after.net_in_hand_monthly)} better="higher"
               sub={`${payslip.after.regime} regime · set on the NPS Optimizer tab`} />
-            <Kpi label="Annual corporate NPS after optimisation" value={formatINR(payslip.after.employer_nps_monthly * 12)}
+            <Kpi label="Annual corporate NPS after optimisation" value={formatINR(payslip.after.employer_nps_annual)}
               sub={`${formatINR(payslip.after.employer_nps_monthly)} / month, not cash`} />
             <Kpi label="Net monthly cash impact" value={formatINR(payslip.difference.monthly_cash_change)} better="higher"
               sub={`Plus ${formatINR(payslip.difference.monthly_nps_change)} / month into NPS; tax saved ${formatINR(payslip.difference.annual_tax_saved)} / year`} />

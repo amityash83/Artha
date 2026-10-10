@@ -1,8 +1,8 @@
 import React from 'react';
 import { TaxPayslipResult, TaxPayslipSide } from '../../types';
 import type { OptimizationProps } from './NpsOptimizer';
-import { payslipRequest } from './plannerInputs';
-import { EmptyState, ErrorBanner, fieldGrid, Freshness, formatINR, NumberField, Pill, Section } from './taxUi';
+import { currentFyMonthIndex, fyMonthLabels, payslipRequest } from './plannerInputs';
+import { EmptyState, ErrorBanner, fieldGrid, Freshness, formatINR, NumberField, Pill, Section, SelectField } from './taxUi';
 import { CashFlowChart } from './TaxChartViews';
 import { useTaxPost } from './useTaxPost';
 
@@ -35,7 +35,18 @@ export const PayslipSimulator: React.FC<OptimizationProps> = ({ inputs, financia
     payroll_actual: `Payroll figure; engine average ${formatINR(side.engine_average_tds_monthly)}`,
     payroll_adjusted: 'Current payroll TDS moved by the computed change in tax',
     average: 'Average: annual tax ÷ 12',
+    month_actual: "This month's payslip TDS",
+    month_projected: 'Projected: tax still due ÷ remaining months',
+    month_missing: 'Actual month with no TDS entered (counted as zero)',
   }[side.tds_basis]);
+  const tdsPill: Record<TaxPayslipSide['tds_basis'], [string, string]> = {
+    average: ['Average', '#f59e0b'], payroll_actual: ['From payroll', '#a78bfa'], payroll_adjusted: ['From payroll', '#a78bfa'],
+    month_actual: ['From payslip', '#10b981'], month_projected: ['Projected', '#60a5fa'], month_missing: ['Not entered', '#f59e0b'],
+  };
+
+  const monthlyOn = !!inputs.monthly?.enabled;
+  const labels = fyMonthLabels(financialYear);
+  const autoMonth = currentFyMonthIndex(financialYear);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -46,7 +57,18 @@ export const PayslipSimulator: React.FC<OptimizationProps> = ({ inputs, financia
             onChange={(v) => set({ actual_monthly_tds_before: v > 0 ? v : null })} help="Leave at 0 to use the annual tax ÷ 12 average." />
           <NumberField id="ps-tds-after" label="Expected monthly TDS after (if payroll has told you)" value={opt.actual_monthly_tds_after ?? 0}
             onChange={(v) => set({ actual_monthly_tds_after: v > 0 ? v : null })} help="Leave at 0 to use the average." />
+          {monthlyOn && (
+            <SelectField id="ps-month" label="Payslip for" value={opt.payslip_month === null ? '' : String(opt.payslip_month)}
+              options={[{ value: '', label: `This month (${labels[autoMonth]})` }, ...labels.map((l, i) => ({ value: String(i), label: l }))]}
+              onChange={(v) => set({ payslip_month: v === '' ? null : Number(v) })}
+              help="Earnings, deductions and TDS are that month's own figures from the month-by-month grid." />
+          )}
         </div>
+        {!monthlyOn && (
+          <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
+            This is an average month (annual figures ÷ 12). If your pay or PF changes during the year, switch Salary &amp; CTC to month by month to see a specific month.
+          </div>
+        )}
       </Section>
 
       {error && <ErrorBanner message={error} />}
@@ -80,7 +102,7 @@ export const PayslipSimulator: React.FC<OptimizationProps> = ({ inputs, financia
             ))}
           </div>
 
-          <Section title="Monthly payslip" subtitle={<>{data.tds_note} Monthly in-hand = cash earnings − payroll deductions − TDS. Employer NPS is not cash.</>}>
+          <Section title={data.month ? `Payslip for ${data.month.label} (${data.month.status})` : 'Monthly payslip (average month)'} subtitle={<>{data.tds_note} Monthly in-hand = cash earnings − payroll deductions − TDS. Employer NPS is not cash.</>}>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -100,7 +122,7 @@ export const PayslipSimulator: React.FC<OptimizationProps> = ({ inputs, financia
                     .map((k) => row(`− ${labelFor(k, metadata.payroll_deductions)}`, data.before.payroll_deductions[k], data.after.payroll_deductions[k]))}
                   <tr>
                     <th scope="row" style={{ ...cell, textAlign: 'left', fontWeight: 500, color: 'var(--text-secondary)' }}>
-                      − TDS <span style={{ marginLeft: '6px' }}><Pill color={data.before.tds_basis === 'average' ? '#f59e0b' : '#a78bfa'}>{data.before.tds_basis === 'average' ? 'Average' : 'From payroll'}</Pill></span>
+                      − TDS <span style={{ marginLeft: '6px' }}><Pill color={tdsPill[data.before.tds_basis][1]}>{tdsPill[data.before.tds_basis][0]}</Pill></span>
                       <div style={{ fontSize: '10.5px', fontWeight: 400, color: 'var(--text-muted)' }}>{tdsHint(data.before)} / {tdsHint(data.after)}</div>
                     </th>
                     <td style={{ ...cell, color: 'var(--text-primary)' }}>{formatINR(data.before.tds_monthly)}</td>

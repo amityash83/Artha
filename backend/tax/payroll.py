@@ -7,26 +7,43 @@ Employer NPS is shown but never counted as cash. TDS uses the payroll's actual
 monthly figure when the caller provides one ("payroll_actual"); otherwise it is the
 annual liability / 12, labelled "average" because real payroll TDS is usually uneven
 (it is often trued-up in later months).
+
+With month-by-month salary entry, a payslip can instead show one specific month
+(month_index, 0 = April): that month's own earnings and deductions, and its TDS
+(the payslip's actual figure, or the engine's projection for a projected month).
+An average month hides changes during the year, such as a raise or an EPF wage
+ceiling revision.
 """
 from typing import Optional
 
-from backend.tax.engine import MONTHS_PER_YEAR, TaxInputError, compute, normalize_inputs
+from backend.tax.engine import MONTHS_PER_YEAR, TaxInputError, compute, monthly_enabled, normalize_inputs
 from backend.tax.nps import REGIME_CHOICES, apply_employer_nps, salary_base
 
 
 def _side(inp: dict, result: dict, regime: str, actual_monthly_tds: Optional[float],
-          adjusted_tds: Optional[float] = None) -> dict:
+          adjusted_tds: Optional[float] = None, month_index: Optional[int] = None) -> dict:
     r = result["regimes"][regime]
-    earnings = {k: round(v / MONTHS_PER_YEAR, 2) for k, v in inp["salary"].items()}
-    deductions = {k: round(v / MONTHS_PER_YEAR, 2) for k, v in inp["payroll_deductions"].items()}
-    gross = sum(earnings.values())
     average_tds = r["total_tax"] / MONTHS_PER_YEAR
+    if month_index is None:
+        earnings = {k: round(v / MONTHS_PER_YEAR, 2) for k, v in inp["salary"].items()}
+        deductions = {k: round(v / MONTHS_PER_YEAR, 2) for k, v in inp["payroll_deductions"].items()}
+        employer_nps = inp["employer_contributions"]["nps"] / MONTHS_PER_YEAR
+        default_tds, default_basis = average_tds, "average"
+    else:
+        month = inp["monthly"]["months"][month_index]
+        earnings = {k: round(v, 2) for k, v in month["salary"].items()}
+        deductions = {k: round(v, 2) for k, v in month["payroll_deductions"].items()}
+        employer_nps = month["employer_contributions"]["nps"]
+        row = r["monthly"]["months"][month_index]
+        default_tds = row["tds"]
+        default_basis = {"actual": "month_actual", "projected": "month_projected"}.get(row["tds_basis"], "month_missing")
+    gross = sum(earnings.values())
     if actual_monthly_tds is not None:
         tds, basis = actual_monthly_tds, "payroll_actual"
     elif adjusted_tds is not None:
         tds, basis = adjusted_tds, "payroll_adjusted"
     else:
-        tds, basis = average_tds, "average"
+        tds, basis = default_tds, default_basis
     deductions_total = sum(deductions.values())
     return {
         "regime": regime,
@@ -38,7 +55,8 @@ def _side(inp: dict, result: dict, regime: str, actual_monthly_tds: Optional[flo
         "tds_basis": basis,
         "engine_average_tds_monthly": round(average_tds, 2),
         "net_in_hand_monthly": round(gross - deductions_total - tds, 2),
-        "employer_nps_monthly": round(inp["employer_contributions"]["nps"] / MONTHS_PER_YEAR, 2),
+        "employer_nps_monthly": round(employer_nps, 2),
+        "employer_nps_annual": round(inp["employer_contributions"]["nps"], 2),
         "taxable_salary_annual": r["taxable_salary"],
         "taxable_income_annual": r["total_income"],
         "annual_tax": r["total_tax"],
@@ -48,7 +66,7 @@ def _side(inp: dict, result: dict, regime: str, actual_monthly_tds: Optional[flo
 def payslip(raw_inputs: dict, rules: dict, optimization: Optional[dict] = None,
             regime_before: str = "best", regime_after: str = "best",
             actual_monthly_tds_before: Optional[float] = None, actual_monthly_tds_after: Optional[float] = None,
-            computed_at: Optional[str] = None) -> dict:
+            computed_at: Optional[str] = None, month_index: Optional[int] = None) -> dict:
     for choice in (regime_before, regime_after):
         if choice not in REGIME_CHOICES:
             raise TaxInputError(f"regime must be one of {REGIME_CHOICES}")
@@ -56,7 +74,12 @@ def payslip(raw_inputs: dict, rules: dict, optimization: Optional[dict] = None,
         if value is not None and value < 0:
             raise TaxInputError("actual monthly TDS cannot be negative")
 
+    if month_index is not None and not (isinstance(month_index, int) and 0 <= month_index < MONTHS_PER_YEAR):
+        raise TaxInputError("month_index must be 0 (April) to 11 (March)")
+
     before_inp = normalize_inputs(raw_inputs)
+    # A specific month only exists with month-by-month entry; otherwise show the average month.
+    month = month_index if monthly_enabled(before_inp) else None
     before_result = compute(before_inp, rules, computed_at)
     notes = []
     feasible = True
@@ -74,14 +97,14 @@ def payslip(raw_inputs: dict, rules: dict, optimization: Optional[dict] = None,
 
     kb = before_result["comparison"]["best_regime"] if regime_before == "best" else regime_before
     ka = after_result["comparison"]["best_regime"] if regime_after == "best" else regime_after
-    before = _side(before_inp, before_result, kb, actual_monthly_tds_before)
+    before = _side(before_inp, before_result, kb, actual_monthly_tds_before, month_index=month)
     # With only today's payroll TDS known, estimate tomorrow's as today's actual moved by
     # the engine's change in tax, rather than mixing an actual with a plain average.
     adjusted = None
     if actual_monthly_tds_before is not None and actual_monthly_tds_after is None:
         change = (after_result["regimes"][ka]["total_tax"] - before_result["regimes"][kb]["total_tax"]) / MONTHS_PER_YEAR
         adjusted = max(actual_monthly_tds_before + change, 0.0)
-    after = _side(after_inp, after_result, ka, actual_monthly_tds_after, adjusted)
+    after = _side(after_inp, after_result, ka, actual_monthly_tds_after, adjusted, month)
 
     cash_change = after["net_in_hand_monthly"] - before["net_in_hand_monthly"]
     nps_change = after["employer_nps_monthly"] - before["employer_nps_monthly"]
@@ -94,6 +117,8 @@ def payslip(raw_inputs: dict, rules: dict, optimization: Optional[dict] = None,
         "optimization": optimization,
         "feasible": feasible,
         "notes": notes,
+        "month": None if month is None else {"index": month, "label": before_inp["monthly"]["months"][month]["label"],
+                                             "status": before_inp["monthly"]["months"][month]["status"]},
         "difference": {
             "monthly_cash_change": round(cash_change, 2),
             "monthly_nps_change": round(nps_change, 2),
@@ -105,5 +130,7 @@ def payslip(raw_inputs: dict, rules: dict, optimization: Optional[dict] = None,
         "tds_note": ("Monthly TDS uses the payroll figures you entered; where only the current figure was given, "
                      "the after figure is that actual moved by the computed change in annual tax / 12."
                      if actual_monthly_tds_before is not None or actual_monthly_tds_after is not None
-                     else "Monthly TDS is the annual liability / 12 (average); actual payroll TDS is usually uneven."),
+                     else ("TDS is this month's payslip figure for an actual month, or, for a projected month, the tax still "
+                           "due spread over the remaining months." if month is not None
+                           else "Monthly TDS is the annual liability / 12 (average); actual payroll TDS is usually uneven.")),
     }

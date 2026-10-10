@@ -10,7 +10,8 @@ Help a salaried user understand and plan their Indian income tax: which regime i
 - **Versioned rule sets**: one JSON file per financial year in `backend/tax/rules/` (`IN-TY2026-27.json` under the Income-tax Act, 2025; `IN-FY2025-26.json` under the 1961 Act). No slab, limit or rate lives in code; a test enforces it.
 - **User-editable rule sets** (`backend/tax/rule_store.py`): copy an official set (optionally re-targeted at another year as a draft), edit it, choose which set a year uses. Every save is a new immutable version.
 - **Tax Planner UI** (`frontend/src/components/tax/`, the default Taxation tab): Overview KPIs, Salary & CTC (annual or month-by-month), Old and New Regime inputs, Old vs New comparison, Corporate NPS Optimizer, Payslip simulator, Charts A–F, Sensitivity, Computation & Audit, Scenarios, Reports & Export.
-- **Month-by-month salary entry**: a 12-month grid (April–March) with actual/projected months, quick fills, spreadsheet paste and CSV import; per-month HRA and a TDS projection.
+- **Month-by-month salary entry**: a 12-month grid (April–March) with actual/projected months, quick fills, spreadsheet paste and CSV import; per-month HRA and a TDS projection. The Payslip tab can then show any single month's own figures instead of the average month.
+- **EPF helper** (`epf.py`, `metadata/epf_rules.json`): suggests Employee EPF from basic + DA, either capped at the dated EPFO wage ceiling or on full pay. A month where the ceiling changes (₹15,000 → ₹25,000 from 17 September 2026) is split by calendar days. It only fills the editable EPF input; the engine never derives EPF itself.
 - **Corporate NPS optimiser** (`nps.py`), **payslip simulator** (`payroll.py`), **savings waterfall** (`waterfall.py`), **break-even and sensitivity** (`sensitivity.py`): all built by re-running the engine on adjusted inputs, never by per-rupee shortcuts.
 - **Saved scenarios** (`scenario_store.py`): immutable snapshots of inputs, the full result and the exact rule-set version/fingerprint; "recalculate under current rules" writes a new scenario.
 - **Reports**: CSV per table or all-in-one, and a printable report saved as PDF (Electron `printToPDF` via the preload bridge; browser print dialog on the web).
@@ -79,7 +80,7 @@ Taxation page tabs: **Tax Planner** (default), Profile & Deductions, Old vs New 
 - `POST /api/tax/compute`: inputs + FY (or explicit rule set) → full result.
 - `GET /api/tax/input-metadata`, `GET/POST/PUT/DELETE /api/tax/rule-sets[/{id}]`, `/versions`, `/diff`, `/archive`, `/restore`, `PUT /api/tax/rule-set-selection/{fy}`.
 - `GET/POST/DELETE /api/tax/scenarios[/{id}]`, `POST /api/tax/scenarios/{id}/recalculate`.
-- `POST /api/tax/nps-scenarios`, `/payslip`, `/waterfall`, `/sensitivity`, `/nps-target`.
+- `POST /api/tax/nps-scenarios`, `/payslip` (optional `month_index` with month-by-month entry), `/waterfall`, `/sensitivity`, `/nps-target`, `/epf-suggestion`.
 - `GET /api/tax-profiles/{id}/estimate`: the profile estimate, on the same engine.
 
 Rule resolution everywhere: explicit rule set → the user's selection for the FY → the official set.

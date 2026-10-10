@@ -4,6 +4,7 @@ import { TaxInputField } from '../../types';
 import type { PlannerChildProps } from './TaxPlanner';
 import { annualFromMonths, MONTHS, monthsFromAnnual } from './plannerInputs';
 import { MonthlySalaryGrid } from './MonthlySalaryGrid';
+import { EpfHelper } from './EpfHelper';
 import { fieldGrid, formatINR, NumberField, Pill, Section, SelectField } from './taxUi';
 
 const cellInput: React.CSSProperties = { padding: '6px 8px', fontSize: '13px', textAlign: 'right', width: '100%', minWidth: '110px' };
@@ -217,6 +218,8 @@ export const SalaryInputs: React.FC<PlannerChildProps> = ({ inputs, update, meta
 
       <Section title="Payroll deductions" subtitle="Deducted from your cash pay. EPF/VPF also count towards 80C in the old regime automatically.">
         <MoneyTable caption="Payroll deductions">{simpleRows('payroll_deductions', metadata.payroll_deductions)}</MoneyTable>
+        <EpfHelper inputs={inputs} financialYear={financialYear} monthly={false}
+          onApply={(s) => update('payroll_deductions.employee_epf', s.annual)} />
       </Section>
 
       <Section title="Employer contributions" subtitle="Paid by your employer into retirement accounts, not as cash. How NPS is funded (restructured from CTC or added on top) is modelled in the Corporate NPS optimiser (Phase 3).">

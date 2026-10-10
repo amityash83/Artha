@@ -117,7 +117,23 @@ export const DEFAULT_OPTIMIZATION: TaxOptimization = {
   offered_pcts: '',
   actual_monthly_tds_before: null,
   actual_monthly_tds_after: null,
+  payslip_month: null,
 };
+
+/** Index (0 = April) of today's month within the financial year, clamped to the year. */
+export function currentFyMonthIndex(financialYear: string, today = new Date()): number {
+  const start = parseInt(financialYear.slice(0, 4), 10);
+  if (!Number.isFinite(start)) return 0;
+  const index = (today.getFullYear() - start) * MONTHS + today.getMonth() - 3;
+  return Math.max(0, Math.min(MONTHS - 1, index));
+}
+
+/** EPF wages (basic + DA) for each month: from the grid, or the annual figures spread evenly. */
+export function epfWages(inputs: TaxPlannerInputs): number[] {
+  if (inputs.monthly?.enabled) return inputs.monthly.months.map((m) => (m.salary.basic || 0) + (m.salary.da || 0));
+  const monthly = (k: string) => inputs.salary_monthly?.[k] ?? (inputs.salary[k] || 0) / MONTHS;
+  return Array.from({ length: MONTHS }, () => monthly('basic') + monthly('da'));
+}
 
 /** "10, 14" -> [10, 14]; empty -> null (employer policy not confirmed). */
 export function parseOfferedPcts(text: string): number[] | null {
@@ -139,6 +155,8 @@ export function payslipRequest(inputs: TaxPlannerInputs, financialYear: string, 
     regime_after: opt.regime,
     actual_monthly_tds_before: opt.actual_monthly_tds_before,
     actual_monthly_tds_after: opt.actual_monthly_tds_after,
+    // A specific month only exists with month-by-month entry; otherwise the payslip is the average month.
+    month_index: inputs.monthly?.enabled ? opt.payslip_month ?? currentFyMonthIndex(financialYear) : null,
   };
 }
 

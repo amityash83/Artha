@@ -117,7 +117,7 @@ export function buildReportTables(d: ReportData): ReportTable[] {
     const { before: b, after: a, difference: diff } = d.payslip;
     const line = (label: string, x: number, y: number): CsvCell[] => [label, x, y, y - x];
     tables.push({
-      id: 'payslip', title: 'Monthly payslip: before vs after optimisation', note: d.payslip.tds_note,
+      id: 'payslip', title: `${d.payslip.month ? `Payslip for ${d.payslip.month.label}` : 'Monthly payslip (average month)'}: before vs after optimisation`, note: d.payslip.tds_note,
       columns: [col('Line', 'text'), col(`Before (${b.regime} regime)`), col(`After (${a.regime} regime)`), col('Difference')],
       rows: [
         line('Gross monthly cash earnings', b.gross_monthly_cash, a.gross_monthly_cash),
