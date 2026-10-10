@@ -78,10 +78,10 @@ Legacy: a one-way migration in `init_db()` promotes any pre-existing `investment
 
 ## UI Structure
 
-- `src/components/EntityGrid.tsx` — generic entity list/table for `assets` (and other entity types). `CATEGORY_COLUMNS` adds category-specific columns when a single category is selected: `Stock` → Ticker + Quantity, `Mutual Fund` → Scheme Code + Units. `dispatchSatelliteData()` handles the Stock/Mutual Fund branch: diffs submitted `holding_lots` against existing ones fetched from `/api/assets/{id}/holdings`, issuing PUT/POST/DELETE per lot as needed.
-- `src/components/DynamicForm.tsx` — `HOLDING_CATEGORIES = ['Stock', 'Mutual Fund']`; `isHolding` branch swaps the standard "current_value / invested_amount" fields for institution, acquisition date, current value, status, owner, and renders `<HoldingLotsEditor>` for lot entry instead of a single cost field.
-- `src/components/HoldingLotsEditor.tsx` — sub-component for adding/editing/removing purchase lots (date, quantity, price per unit, notes); shows a live-computed total quantity and average cost/unit as the user edits, purely client-side (the authoritative weighted average is recomputed server-side on save).
-- `src/components/Simulations.tsx` — no dedicated investment-growth scenario type exists; it references investments only via generic "increase_sip" and property-purchase scenarios in the wealth simulation sandbox, not per-holding.
+- `frontend/src/components/EntityGrid.tsx` — generic entity list/table for `assets` (and other entity types). `CATEGORY_COLUMNS` adds category-specific columns when a single category is selected: `Stock` → Ticker + Quantity, `Mutual Fund` → Scheme Code + Units. `dispatchSatelliteData()` handles the Stock/Mutual Fund branch: diffs submitted `holding_lots` against existing ones fetched from `/api/assets/{id}/holdings`, issuing PUT/POST/DELETE per lot as needed.
+- `frontend/src/components/DynamicForm.tsx` — `HOLDING_CATEGORIES = ['Stock', 'Mutual Fund']`; `isHolding` branch swaps the standard "current_value / invested_amount" fields for institution, acquisition date, current value, status, owner, and renders `<HoldingLotsEditor>` for lot entry instead of a single cost field.
+- `frontend/src/components/HoldingLotsEditor.tsx` — sub-component for adding/editing/removing purchase lots (date, quantity, price per unit, notes); shows a live-computed total quantity and average cost/unit as the user edits, purely client-side (the authoritative weighted average is recomputed server-side on save).
+- `frontend/src/components/Simulations.tsx` — no dedicated investment-growth scenario type exists; it references investments only via generic "increase_sip" and property-purchase scenarios in the wealth simulation sandbox, not per-holding.
 
 ## API Contracts
 
@@ -98,7 +98,7 @@ None. No AI/LLM feature exists for Investments (or any domain) in the current co
 
 ## Reports
 
-- `src/components/Reports.tsx`: `exportInvestmentsCSV()` exports all rows from `data.assets` (name, category, current value, invested amount) to CSV — note this is not filtered to exclude Property/Insurance, so it currently includes every asset category, not strictly "investments" in the narrow sense.
+- `frontend/src/components/Reports.tsx`: `exportInvestmentsCSV()` exports all rows from `data.assets` (name, category, current value, invested amount) to CSV — note this is not filtered to exclude Property/Insurance, so it currently includes every asset category, not strictly "investments" in the narrow sense.
 - The markdown report (`exportMarkdownReport()`) includes an "Assets Registry" section listing every asset's name, category, current value, and invested amount.
 - No per-holding XIRR, CAGR, or realized/unrealized gain figures appear in any report — only current value and invested amount.
 

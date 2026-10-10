@@ -70,7 +70,7 @@ network.
 **1. Desktop (primary, cross-platform: Windows/macOS/Linux):**
 - `npm run build:frontend` (`tsc && vite build`) → static assets in `dist/`.
 - `npm run build:backend` (Windows) / `build:backend:posix` (macOS/Linux)
-  → PyInstaller bundles `backend/` + `run.py` into
+  → PyInstaller bundles `backend/` + `backend/run.py` into
   `backend/dist/main/main.exe` (Windows) or `backend/dist/main/main`
   (macOS/Linux, no extension), onedir/console mode. PyInstaller does not
   cross-compile — each OS's binary must be built by running PyInstaller
@@ -117,7 +117,7 @@ network.
   for the SQLite file so it survives container restarts/rebuilds.
 - This path drops the Electron shell entirely — same backend/frontend
   source, no code fork, just a different `API_BASE_URL` resolution
-  (`src/config.ts` reads `import.meta.env.VITE_API_BASE_URL`, falling
+  (`frontend/src/config.ts` reads `import.meta.env.VITE_API_BASE_URL`, falling
   back to the desktop's hardcoded `127.0.0.1:8000`) and a different
   process supervisor (Docker vs. Electron).
 
@@ -127,6 +127,6 @@ backend logic that's Docker-only or Electron-only.
 ## Backend Port/URL — a Real Multi-File Coupling
 
 `127.0.0.1:8000` is duplicated across `electron/main.js`,
-`package.json` scripts, and `src/config.ts`'s fallback value. There is
+`package.json` scripts, and `frontend/src/config.ts`'s fallback value. There is
 no single source of truth for the port; changing it means updating all
 three by hand. See `CLAUDE.md` for the authoritative note on this.

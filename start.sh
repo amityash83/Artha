@@ -12,6 +12,16 @@ set -e
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
+# Optional shared settings (see .env.example). Variables already set in the shell win.
+if [ -f "$ROOT_DIR/.env" ]; then
+  while IFS='=' read -r key value; do
+    key="${key#export }"
+    case "$key" in ''|\#*) continue ;; esac
+    value="${value%\"}"; value="${value#\"}"; value="${value%\'}"; value="${value#\'}"
+    if [ -z "${!key+x}" ]; then export "$key=$value"; fi
+  done < <(grep -E '^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' "$ROOT_DIR/.env" | sed -E 's/^[[:space:]]+//')
+fi
+
 export ARTHA_BACKEND_PORT="${ARTHA_BACKEND_PORT:-8010}"
 export ARTHA_FRONTEND_PORT="${ARTHA_FRONTEND_PORT:-5183}"
 # The backend's CORS allowlist defaults to Vite's own default port (5173),
@@ -100,7 +110,7 @@ else
     exit 1
   fi
   echo "Starting Vite dev server on :${ARTHA_FRONTEND_PORT}..."
-  npx vite > "$PID_DIR/vite.log" 2>&1 &
+  npm run dev -w frontend > "$PID_DIR/vite.log" 2>&1 &
   echo $! > "$PID_DIR/vite.pid"
 fi
 
@@ -120,17 +130,18 @@ fi
 echo "Launching Electron shell..."
 ELECTRON_BIN="$ROOT_DIR/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"
 if [ ! -x "$ELECTRON_BIN" ]; then
-  echo "Electron binary not found at $ELECTRON_BIN, falling back to npx electron ."
+  echo "Electron binary not found at $ELECTRON_BIN, falling back to npm run dev -w electron"
   ELECTRON_BIN=""
 fi
 # ELECTRON_RUN_AS_NODE (set by some host environments, e.g. Electron-based editors/tools)
 # forces any Electron binary to run as plain Node instead of launching the GUI shell.
 # Unset it for Artha's own Electron process. ARTHA_BACKEND_PORT/ARTHA_FRONTEND_PORT are
 # already exported above, so electron/main.js picks them up automatically.
+# The desktop shell lives in electron/ (an npm workspace with its own package.json).
 if [ -n "$ELECTRON_BIN" ]; then
-  env -u ELECTRON_RUN_AS_NODE "$ELECTRON_BIN" "$ROOT_DIR" > "$PID_DIR/electron.log" 2>&1 &
+  env -u ELECTRON_RUN_AS_NODE "$ELECTRON_BIN" "$ROOT_DIR/electron" > "$PID_DIR/electron.log" 2>&1 &
 else
-  env -u ELECTRON_RUN_AS_NODE npx electron . > "$PID_DIR/electron.log" 2>&1 &
+  env -u ELECTRON_RUN_AS_NODE npm run dev -w electron > "$PID_DIR/electron.log" 2>&1 &
 fi
 echo $! > "$PID_DIR/electron.pid"
 

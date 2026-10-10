@@ -86,13 +86,13 @@ If you want to run and test changes interactively:
 If you want to compile and package everything into a single standalone `.exe` installer:
 
 ### Step 6.1: Build the React Frontend
-This compiles TypeScript files and bundles React assets into static files inside the `dist/` directory:
+This compiles TypeScript files and bundles React assets into static files inside the `frontend/dist/` directory:
 ```powershell
 npm run build:frontend
 ```
 
 ### Step 6.2: Compile the Python Backend
-This uses PyInstaller to compile the FastAPI server (starting from the root-level runner `run.py`) and packages it into a folder containing `main.exe` and its library dependencies under `backend/dist/main/`:
+This uses PyInstaller to compile the FastAPI server (starting from the runner `backend/run.py`) and packages it into a folder containing `main.exe` and its library dependencies under `backend/dist/main/`:
 ```powershell
 npm run build:backend
 ```
@@ -103,9 +103,9 @@ backend\dist\main\main.exe
 *(If it starts up and prints "INFO: Started server process", close it using `Ctrl+C`).*
 
 ### Step 6.3: Package with Electron-Builder
-This bundles the Electron shell, the static React folder (`dist/`), and copies the PyInstaller folder (`backend/dist/main`) into the Electron resources folder, compressing everything into a single Windows portable file:
+This bundles the Electron shell, the static React folder (`frontend/dist/`, copied to `electron/web/`), and copies the PyInstaller folder (`backend/dist/main`) into the Electron resources folder, compressing everything into a single Windows portable file:
 ```powershell
-npx electron-builder --win portable
+npm run package:win -w electron
 ```
 
 ---

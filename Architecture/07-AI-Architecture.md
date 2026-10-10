@@ -9,7 +9,7 @@ AI boundaries, prompts, orchestration, explain vs calculate, guardrails.
 Despite Artha.md describing it as "AI-powered" and listing an "AI
 Assistant" module and "AI Engine" layer in the product vision, **there is
 no AI/LLM integration anywhere in the shipped codebase** — confirmed by
-grep across `backend/` and `src/`: no LLM API client, no prompt template,
+grep across `backend/` and `frontend/src/`: no LLM API client, no prompt template,
 no embeddings, no model call of any kind. Every "recommendation" a user
 sees comes from `decision_engine.py`'s deterministic rule checks (see
 `06-Business-Rules-Engine.md`), not from an AI. This document defines

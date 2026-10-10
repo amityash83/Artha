@@ -74,8 +74,8 @@ Legacy: `init_db()` contains a one-way migration that promotes any pre-existing 
 
 ## UI Structure
 
-- `src/components/DynamicForm.tsx` — `isInsurance` branch (`entityType === 'assets' && categoryName === 'Insurance'`). Renders a `policy_type` selector plus institution, policy number, premium, frequency, renewal date, status, and owner; then dynamically appends the type-specific fields from `INSURANCE_TYPE_FIELDS[policyType]` (e.g. selecting Health adds `sum_insured`, `claims_made`, `claims_amount`; selecting Vehicle swaps in `idv` and `vehicle_registration` as text/number inputs respectively).
-- `src/components/EntityGrid.tsx` — `CATEGORY_COLUMNS['Insurance']` adds "Policy Type" and "Premium" columns to the assets grid. `dispatchSatelliteData()` handles the Insurance branch: on save, PUTs the full `insurance_details` payload (`policy_type`, `policy_number`, `premium`, `frequency`, `renewal_date`, and all type-specific fields, sending zero/empty defaults for fields not relevant to the selected type) to `/api/assets/{id}/insurance-details`.
+- `frontend/src/components/DynamicForm.tsx` — `isInsurance` branch (`entityType === 'assets' && categoryName === 'Insurance'`). Renders a `policy_type` selector plus institution, policy number, premium, frequency, renewal date, status, and owner; then dynamically appends the type-specific fields from `INSURANCE_TYPE_FIELDS[policyType]` (e.g. selecting Health adds `sum_insured`, `claims_made`, `claims_amount`; selecting Vehicle swaps in `idv` and `vehicle_registration` as text/number inputs respectively).
+- `frontend/src/components/EntityGrid.tsx` — `CATEGORY_COLUMNS['Insurance']` adds "Policy Type" and "Premium" columns to the assets grid. `dispatchSatelliteData()` handles the Insurance branch: on save, PUTs the full `insurance_details` payload (`policy_type`, `policy_number`, `premium`, `frequency`, `renewal_date`, and all type-specific fields, sending zero/empty defaults for fields not relevant to the selected type) to `/api/assets/{id}/insurance-details`.
 
 ## API Contracts
 
@@ -91,7 +91,7 @@ None. No AI/LLM feature exists for Insurance (or any domain) in the current code
 
 ## Reports
 
-- `src/components/Reports.tsx`: `exportInsuranceCSV()` filters `data.assets` to `category_name === 'Insurance'` and exports name, policy number, coverage, premium, frequency, nominee, and renewal date. Note this references `coverage` and `nominee` fields that are legacy `metadata_json` keys from the pre-redesign schema, not columns that exist on the current `insurance_details` table (`sum_assured`/`sum_insured` and no `nominee` field) — for policies created after the satellite-table redesign, these two CSV columns would be blank.
+- `frontend/src/components/Reports.tsx`: `exportInsuranceCSV()` filters `data.assets` to `category_name === 'Insurance'` and exports name, policy number, coverage, premium, frequency, nominee, and renewal date. Note this references `coverage` and `nominee` fields that are legacy `metadata_json` keys from the pre-redesign schema, not columns that exist on the current `insurance_details` table (`sum_assured`/`sum_insured` and no `nominee` field) — for policies created after the satellite-table redesign, these two CSV columns would be blank.
 - The markdown report's "Assets Registry" section lists Insurance policies alongside every other asset type with only name, category, current value, and invested amount — no policy-specific fields.
 - `/api/calendar`'s Insurance events are the primary way renewal/premium information reaches the user proactively, though that is a calendar feature rather than a formal report/export.
 

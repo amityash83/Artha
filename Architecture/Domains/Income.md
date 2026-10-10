@@ -9,7 +9,7 @@ Income capture exists so Artha can compute cash-flow health (savings rate, inves
 - Generic CRUD for per-item income records (`income` table: Salary, Bonus, Rental, Dividend, Interest categories) via `/api/entities/income`.
 - A separate, independent monthly aggregate log (`monthly_cash_flows` table) capturing one row per month with `net_salary`, `other_income`, `household_expenses`, `emi`, `insurance_premium`, `investments`, `one_time_expenses` — manually entered by the user each month.
 - Cash-flow health ratios (savings rate, investment rate, debt burden, expense ratio) computed from the `monthly_cash_flows` log, plus a what-if simulator (`/api/calculations/cash-flow/simulate`) for scenario planning (salary change, bonus, new EMI, expense reduction, etc.).
-- **Budget Planning** (`src/components/BudgetPlanner.tsx`, a third, distinct feature living in this same conceptual space): per-Expense-category monthly budgets vs. actual spend. This is not covered by the original blueprint's domain list at all — it's documented here because it's the closest existing domain, not because it was anticipated. See Data Model below for how it relates (loosely) to `income`/`monthly_cash_flows`.
+- **Budget Planning** (`frontend/src/components/BudgetPlanner.tsx`, a third, distinct feature living in this same conceptual space): per-Expense-category monthly budgets vs. actual spend. This is not covered by the original blueprint's domain list at all — it's documented here because it's the closest existing domain, not because it was anticipated. See Data Model below for how it relates (loosely) to `income`/`monthly_cash_flows`.
 
 ## Out of Scope
 
@@ -61,10 +61,10 @@ Practically: the `income` table is available for anyone using the generic entity
 
 ## UI Structure
 
-- `src/components/CashFlowPlanning.tsx` — the actual cash-flow domain UI: monthly log table/history (backed by `monthly_cash_flows`), ratio health meters, an auto-fill mechanism that pulls current EMIs from `liabilities`, rental income from Property-category `assets`, and goal contributions from `goals` into a new monthly log entry, plus the salary/bonus/EMI/expense scenario simulator.
-- `src/components/EntityGrid.tsx` / `DynamicForm.tsx` — generic entity grid/form covering the separate `income` table; the `'income' || 'expenses'` branch in DynamicForm sets standard fields `amount` (number), `frequency` (text), `status` (select) — note `status` is not an actual column on the `income` table DDL, so it is captured into `metadata_json` via `serialize_entity_payload`'s fallback, same as any unrecognized field.
+- `frontend/src/components/CashFlowPlanning.tsx` — the actual cash-flow domain UI: monthly log table/history (backed by `monthly_cash_flows`), ratio health meters, an auto-fill mechanism that pulls current EMIs from `liabilities`, rental income from Property-category `assets`, and goal contributions from `goals` into a new monthly log entry, plus the salary/bonus/EMI/expense scenario simulator.
+- `frontend/src/components/EntityGrid.tsx` / `DynamicForm.tsx` — generic entity grid/form covering the separate `income` table; the `'income' || 'expenses'` branch in DynamicForm sets standard fields `amount` (number), `frequency` (text), `status` (select) — note `status` is not an actual column on the `income` table DDL, so it is captured into `metadata_json` via `serialize_entity_payload`'s fallback, same as any unrecognized field.
 - There is no dedicated "Income" nav item/page distinct from the generic entity grid — a user manages `income` rows the same way they'd manage `assets` or `expenses`, while cash-flow analysis lives entirely in the separately-named `CashFlowPlanning.tsx`.
-- `src/components/BudgetPlanner.tsx` — its own nav tab (`budget-planner`), separate from both of the above: month selector, a per-Expense-category budget input (persisted to `categories.monthly_budget`), and a computed "spent so far" figure per category for the selected month.
+- `frontend/src/components/BudgetPlanner.tsx` — its own nav tab (`budget-planner`), separate from both of the above: month selector, a per-Expense-category budget input (persisted to `categories.monthly_budget`), and a computed "spent so far" figure per category for the selected month.
 
 ## API Contracts
 

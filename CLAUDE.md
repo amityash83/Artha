@@ -18,24 +18,27 @@ python -m venv venv
 venv\Scripts\activate               # Windows; use `source venv/bin/activate` on macOS/Linux
 pip install -r backend/requirements.txt
 pip install pyinstaller
-npm install
+npm install                         # installs both npm workspaces (frontend, electron) from the root
 
-# Local development (Vite + FastAPI reload + Electron shell, concurrently)
-npm start                           # Windows; on macOS see start.sh/stop.sh instead (dev-mode only, not packaging)
+# Local development
+./start.sh / ./stop.sh              # macOS/Linux: backend :8010 + Vite :5183 + Electron window, logs in .run/
+npm start                           # any OS: backend + Vite + Electron via concurrently (ports 8000/5173)
+npm run dev:web                     # web app only: backend + Vite, no Electron
 
-# Frontend only
+# Frontend only (workspace "frontend")
 npm run dev:frontend                # vite, http://localhost:5173
-tsc && vite build                   # npm run build:frontend — typecheck + build to dist/
+npm run build:frontend              # tsc typecheck + vite build to frontend/dist/
 
 # Backend only (reload server)
-npm run dev:backend                 # uvicorn backend.main:app --reload on 127.0.0.1:8000
-venv\Scripts\python run.py          # manual sanity-check run, prints startup tracebacks directly (venv/bin/python on macOS/Linux)
+npm run dev:backend                 # scripts/backend.mjs: venv uvicorn backend.main:app --reload on 127.0.0.1:8000 (any OS)
+venv/bin/python backend/run.py      # manual sanity-check run, prints startup tracebacks directly (venv\Scripts\python on Windows)
 
 # Production packaging (PyInstaller backend + electron-builder), per platform:
 npm run package:portable            # Windows -> dist-portable/Artha <version>.exe
 npm run package:mac                 # macOS   -> dist-portable-mac/Artha-<version>{.dmg,.zip} (x64 + arm64, UNSIGNED — see caveat below)
 npm run package:linux               # Linux   -> dist-portable-linux/Artha-<version>.AppImage
-# each npm script chains build:frontend + a platform-appropriate build:backend variant, then electron-builder
+# each chains build:frontend + build:backend(:posix) (PyInstaller), then the electron workspace's
+# package:* script, which copies frontend/dist to electron/web and runs electron-builder
 
 # Backend tests (from repo root; pip install -r backend/requirements-test.txt first)
 pytest                                                          # whole suite
@@ -50,18 +53,20 @@ CI (`.github/workflows/build-and-publish.yml`) builds a 3-OS matrix (`windows-la
 
 A separate workflow, `.github/workflows/docker-build.yml`, builds and pushes the `backend`/`frontend` Docker images (see below) to GHCR (`ghcr.io/<owner>/artha-backend`, `artha-frontend`) — deliberately not folded into `build-and-publish.yml` since it produces a categorically different artifact (container images vs. desktop installers). It triggers only on push to `main` and `v*` tags (not PRs, to keep Docker builds off the PR critical path), tags images via `docker/metadata-action` (`latest` on `main`, semver on release tags, short-SHA on every build), and uses GHA-backed layer caching. It does not run the pytest suite as a gate — that suite has no CI hook of its own yet.
 
-**macOS build is intentionally unsigned**: no Apple Developer ID certificate or notarization credential exists in this repo (`build.mac.identity: null` in `package.json` explicitly opts out of signing so electron-builder doesn't fail looking for one). End users will see Gatekeeper's "unidentified developer" warning and must right-click → Open, or run `xattr -cr` on the `.app`, to launch it. All three platform targets point `icon` at `public/favicon.png` in `package.json`'s `build` config (no dedicated `.ico`/`.icns` assets).
+**macOS build is intentionally unsigned**: no Apple Developer ID certificate or notarization credential exists in this repo (`build.mac.identity: null` in `electron/package.json` explicitly opts out of signing so electron-builder doesn't fail looking for one). End users will see Gatekeeper's "unidentified developer" warning and must right-click → Open, or run `xattr -cr` on the `.app`, to launch it. All three platform targets point `icon` at `frontend/public/favicon.png` in `electron/package.json`'s `build` config (no dedicated `.ico`/`.icns` assets).
 
 ## Architecture
+
+The repo is a monorepo of three parts. `frontend/` + `backend/` make up the web app; `electron/` is only the desktop shell that wraps them. npm workspaces (`frontend`, `electron`, declared in the root `package.json`) give each JS part its own dependencies with one root lockfile and hoisted `node_modules`; the Python backend sits outside npm with its own `requirements*.txt`. The root `package.json` holds only orchestration scripts (and `concurrently`); `scripts/` holds the cross-platform helpers they call (`backend.mjs`, `copy-web.mjs`, `load-env.cjs`). The web Docker image installs only the `frontend` workspace (`npm ci -w frontend`), so it never downloads Electron. Electron is pinned to an exact version in `electron/package.json`: electron-builder runs from that workspace and needs a fixed version, since the hoisted install isn't in `electron/node_modules`.
 
 ```
 Electron (electron/main.js)
   ├─ spawns Python backend as a sidecar subprocess (venv python in dev, PyInstaller-built binary in prod — main.exe on Windows, extensionless main on macOS/Linux; electron/main.js branches on process.platform)
-  ├─ dev: loads http://localhost:5173 (Vite)  |  prod: loads dist/index.html
+  ├─ dev: loads http://localhost:5173 (Vite)  |  prod: loads web/index.html (frontend/dist, copied in by scripts/copy-web.mjs)
   └─ IPC: native save/open dialogs for picking a SQLite db file
 
-React/TS frontend (src/)
-  └─ talks to backend purely over HTTP: fetch calls to API_BASE_URL (src/config.ts, hardcoded 127.0.0.1:8000)
+React/TS frontend (frontend/src/)
+  └─ talks to backend purely over HTTP: fetch calls to API_BASE_URL (frontend/src/config.ts, hardcoded 127.0.0.1:8000)
 
 FastAPI backend (backend/)
   ├─ main.py           — all routes live in this one file
@@ -98,7 +103,7 @@ Credit-card spend is tracked in the same ledger: a `'Spend'` transaction with `d
 
 ### A dedicated screen can bypass the generic entity model entirely — check before assuming uniformity
 
-Not every category renders through the generic `EntityGrid`/`DynamicForm` path. Credit Cards has its own dedicated component (`src/components/CreditCards.tsx`) with its own reward-optimization engine (category multipliers, milestone thresholds, redemption partners, lounge tracking, bank-agnostic/pooled reward caps). It saves in two steps: base liability fields go through the generic entity route, and all card/reward config goes to `PUT /api/liabilities/{id}/credit-card-details`, which writes the `credit_card_details` satellite table. That table is the single source of truth, and `/api/init` flattens its columns directly onto each liability object, so read them off the card rather than parsing `metadata_json`. The Financial Calendar's due-date reminders read from the same table. Older docs (including parts of `Architecture/Domains/Credit-Cards.md`) describe an earlier state where `CreditCards.tsx` wrote reward config into `liabilities.metadata_json` and the two paths drifted apart. That no longer matches the code; `metadata_json` → `credit_card_details` survives only as a one-time backfill in `init_db()`.
+Not every category renders through the generic `EntityGrid`/`DynamicForm` path. Credit Cards has its own dedicated component (`frontend/src/components/CreditCards.tsx`) with its own reward-optimization engine (category multipliers, milestone thresholds, redemption partners, lounge tracking, bank-agnostic/pooled reward caps). It saves in two steps: base liability fields go through the generic entity route, and all card/reward config goes to `PUT /api/liabilities/{id}/credit-card-details`, which writes the `credit_card_details` satellite table. That table is the single source of truth, and `/api/init` flattens its columns directly onto each liability object, so read them off the card rather than parsing `metadata_json`. The Financial Calendar's due-date reminders read from the same table. Older docs (including parts of `Architecture/Domains/Credit-Cards.md`) describe an earlier state where `CreditCards.tsx` wrote reward config into `liabilities.metadata_json` and the two paths drifted apart. That no longer matches the code; `metadata_json` → `credit_card_details` survives only as a one-time backfill in `init_db()`.
 
 ### Database path resolution (portability)
 
@@ -118,8 +123,8 @@ Shipped rule files are read-only at runtime. Users edit their own copies, stored
 
 ### Backend port/URL
 
-Default is `127.0.0.1:8000` (backend) / `5173` (Vite), still hardcoded in `package.json`'s Windows npm scripts. `electron/main.js` and `vite.config.mts` read `ARTHA_BACKEND_PORT`/`ARTHA_FRONTEND_PORT` env vars with that default as a fallback, so a local dev setup can avoid colliding with another project's server on the same machine without editing code — see `start.sh`, which defaults to `8010`/`5183` for exactly this reason. `src/config.ts`'s `API_BASE_URL` fallback is set at build time by `vite.config.mts`'s `define` (driven by the same `ARTHA_BACKEND_PORT`, or by `VITE_API_BASE_URL` in the Docker build — see `docker-compose.yml`). There is still no single *runtime* source of truth for the port across every file — changing the default means updating `package.json`'s Windows scripts too.
+Default is `127.0.0.1:8000` (backend) / `5173` (Vite). `ARTHA_BACKEND_PORT`/`ARTHA_FRONTEND_PORT` override them, from the shell or from an optional git-ignored repo-root `.env` (see `.env.example`), which every dev entry point reads: `start.sh` (defaults `8010`/`5183` to avoid colliding with other local projects), `scripts/backend.mjs`, `frontend/vite.config.mts` and `electron/main.js` (dev only, via `scripts/load-env.cjs`). `frontend/src/config.ts`'s `API_BASE_URL` is baked in at build time by `frontend/vite.config.mts`'s `define`: the dev server follows `ARTHA_BACKEND_PORT`, but **production builds always use 8000** (the port the packaged desktop app starts its bundled backend on) unless `VITE_API_BASE_URL` is set explicitly, as the Docker build does. That stops a dev-only port in `.env` from being baked into a desktop package.
 
 ### Docker/web auth & CORS (opt-in, no-op for desktop)
 
-`backend/main.py` reads two env vars at process start, both empty/unset by default: `ARTHA_API_SECRET` (if set, every request must send a matching `X-Artha-Api-Secret` header, checked via `secrets.compare_digest`, enforced globally via a `Depends()` on the `FastAPI(...)` constructor itself — every route is covered, not opt-in per-router) and `ARTHA_ALLOWED_ORIGINS` (comma-separated CORS allowlist — no longer `allow_origins=["*"]`). If `ARTHA_ALLOWED_ORIGINS` is unset, the default is derived from `ARTHA_FRONTEND_PORT` (same var `electron/main.js`/`vite.config.mts` read, falling back to `5173`) rather than being hardcoded to one port, so overriding the frontend port (e.g. `start.sh`'s `5183` default) doesn't silently break CORS — `start.sh` also computes and exports `ARTHA_ALLOWED_ORIGINS` explicitly for the same reason, and `docker-compose.yml` derives it from `ARTHA_FRONTEND_HOST_PORT` (default `8080`). Both env vars are strictly no-ops for desktop/Electron (loopback-only, `file://` origin) — they only matter for the Docker/web deployment path and this bare-metal dev-server path. The frontend's copy of `ARTHA_API_SECRET` is baked into its static JS bundle at **build time** via `VITE_API_SECRET` (see `frontend.Dockerfile`/`docker-compose.yml`) — rotating the secret requires `docker compose up --build`, not just a restart, since a plain container restart won't re-bake a changed value into already-built frontend assets. `src/main.tsx` attaches the header to same-origin `fetch()` calls via a single global `window.fetch` override (deliberately not a per-call-site wrapper — see its code comment for the tradeoff) — this does not cover plain `<a href>` navigations, which is why the document-download link in `DocumentsEditor.tsx` fetches-as-blob instead of using a direct link. See `Architecture/11-Security-Architecture.md` for the full threat model, including what this explicitly does not protect against (no rate-limiting, no TLS termination).
+`backend/main.py` reads two env vars at process start, both empty/unset by default: `ARTHA_API_SECRET` (if set, every request must send a matching `X-Artha-Api-Secret` header, checked via `secrets.compare_digest`, enforced globally via a `Depends()` on the `FastAPI(...)` constructor itself — every route is covered, not opt-in per-router) and `ARTHA_ALLOWED_ORIGINS` (comma-separated CORS allowlist — no longer `allow_origins=["*"]`). If `ARTHA_ALLOWED_ORIGINS` is unset, the default is derived from `ARTHA_FRONTEND_PORT` (same var `electron/main.js`/`frontend/vite.config.mts` read, falling back to `5173`) rather than being hardcoded to one port, so overriding the frontend port (e.g. `start.sh`'s `5183` default) doesn't silently break CORS — `start.sh` also computes and exports `ARTHA_ALLOWED_ORIGINS` explicitly for the same reason, and `docker-compose.yml` derives it from `ARTHA_FRONTEND_HOST_PORT` (default `8080`). Both env vars are strictly no-ops for desktop/Electron (loopback-only, `file://` origin) — they only matter for the Docker/web deployment path and this bare-metal dev-server path. The frontend's copy of `ARTHA_API_SECRET` is baked into its static JS bundle at **build time** via `VITE_API_SECRET` (see `frontend.Dockerfile`/`docker-compose.yml`) — rotating the secret requires `docker compose up --build`, not just a restart, since a plain container restart won't re-bake a changed value into already-built frontend assets. `frontend/src/main.tsx` attaches the header to same-origin `fetch()` calls via a single global `window.fetch` override (deliberately not a per-call-site wrapper — see its code comment for the tradeoff) — this does not cover plain `<a href>` navigations, which is why the document-download link in `DocumentsEditor.tsx` fetches-as-blob instead of using a direct link. See `Architecture/11-Security-Architecture.md` for the full threat model, including what this explicitly does not protect against (no rate-limiting, no TLS termination).

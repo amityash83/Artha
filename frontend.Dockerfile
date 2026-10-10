@@ -4,13 +4,16 @@
 FROM node:22-slim AS build
 WORKDIR /app
 
+# npm workspaces: every workspace's package.json must be present for `npm ci` to
+# accept the lockfile, but only the frontend workspace is installed, so the web image
+# never downloads Electron or electron-builder.
 COPY package.json package-lock.json ./
-# The web build never runs Electron; skip downloading its ~100 MB binary during npm ci.
-ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
-RUN npm ci
+COPY frontend/package.json frontend/package.json
+COPY electron/package.json electron/package.json
+RUN npm ci --workspace frontend
 
-COPY tsconfig.json vite.config.mts index.html ./
-COPY src/ src/
+COPY scripts/load-env.cjs scripts/load-env.cjs
+COPY frontend/ frontend/
 
 # Backend base URL the browser will call; override at build time with
 # --build-arg VITE_API_BASE_URL=http://your-host:8000 for non-compose setups.
@@ -21,9 +24,9 @@ ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 # backend's ARTHA_API_SECRET.
 ARG VITE_API_SECRET=""
 ENV VITE_API_SECRET=$VITE_API_SECRET
-RUN npx tsc && npx vite build
+RUN npm run build --workspace frontend
 
 FROM nginx:alpine
-COPY --from=build /app/dist /usr/share/nginx/html
+COPY --from=build /app/frontend/dist /usr/share/nginx/html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]

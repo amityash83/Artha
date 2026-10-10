@@ -6,7 +6,6 @@ COPY backend/requirements.txt backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
 COPY backend/ backend/
-COPY run.py run.py
 
 # FINANCE_DB_DIR determines where the SQLite file lives; mount a volume here
 # to persist data across container restarts (see docker-compose.yml).

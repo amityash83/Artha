@@ -22,7 +22,7 @@ This plan outlines the changes to implement annual prepayments in the Multi-Loan
   - `prepayment_day: int = 31`
 - Pass these parameters to the `simulate_multi_loan_payoff` calls inside `optimize_loans`.
 
-### 3. Frontend React Component (`src/components/LoanOptimizer.tsx`)
+### 3. Frontend React Component (`frontend/src/components/LoanOptimizer.tsx`)
 - Introduce UI inputs for frequency toggle ("Monthly" vs. "Annually").
 - Create fields for annual prepayment amount, a dropdown/select input for the target Month, and a numeric input for the target Day (1-31).
 - Conditionally render inputs depending on the selected frequency mode.

@@ -20,7 +20,7 @@ transition.
 Two-region layout: fixed sidebar + main content area, both rendered from
 one top-level `App.tsx` after the `/api/init` payload loads (see
 `02-System-Architecture.md`'s startup sequence). No responsive
-breakpoints exist in `src/index.css` (zero `@media` queries found) — the
+breakpoints exist in `frontend/src/index.css` (zero `@media` queries found) — the
 app assumes a desktop-class window. Electron's `BrowserWindow` is
 created at a fixed `1440×900` with `autoHideMenuBar: true`; it's
 resizable by the OS window manager but the UI itself doesn't adapt
@@ -28,7 +28,7 @@ layout at different widths.
 
 ## Design System
 
-CSS custom properties in `src/index.css` define the token set: a dark
+CSS custom properties in `frontend/src/index.css` define the token set: a dark
 "Glassmorphism" theme (`--bg-primary: #07090e`, `--bg-glass: rgba(13,
 17, 29, 0.7)`), a purple/pink accent gradient (`--accent: #8b5cf6` →
 `--accent-gradient: linear-gradient(135deg, #8b5cf6, #ec4899)`), and
@@ -61,7 +61,7 @@ rather than an exhaustive per-screen audit:
 - **Modal/dialog semantics**: all 6 overlay call sites across the app
   (`AIExplainButton.tsx`, `InfoTooltip.tsx`, `TransactionsLedger.tsx`,
   `CreditCards.tsx`, `EntityGrid.tsx`, `creditcards/CardLibraryTab.tsx`)
-  use a shared `useModalA11y` hook (`src/hooks/useModalA11y.ts`) that adds
+  use a shared `useModalA11y` hook (`frontend/src/hooks/useModalA11y.ts`) that adds
   Escape-to-close, a Tab/Shift+Tab focus trap, and focus restore to the
   previously-focused element on close, plus `role="dialog"`,
   `aria-modal="true"`, and `aria-labelledby`/`aria-label` on each
@@ -84,7 +84,7 @@ rather than an exhaustive per-screen audit:
   `<label>` to pair — adding one would have been a visual change beyond
   an accessibility-only fix.
 - **Focus/motion**: a global `:focus-visible` outline rule was added to
-  `src/index.css` (keyboard-only, so mouse clicks don't get a
+  `frontend/src/index.css` (keyboard-only, so mouse clicks don't get a
   distracting ring) alongside a `prefers-reduced-motion` media query
   that collapses all animations/transitions to near-zero duration.
 

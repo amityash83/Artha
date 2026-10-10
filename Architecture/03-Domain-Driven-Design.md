@@ -10,7 +10,7 @@ services and bounded contexts.
 Despite the title, Artha's codebase does **not** implement Domain-Driven
 Design in the classical sense — there are no aggregates, no repository
 interfaces, no domain services, no bounded-context module boundaries in
-`backend/` or `src/`. This was proposed once (in the legacy
+`backend/` or `frontend/src/`. This was proposed once (in the legacy
 `Architecture/Legacy/Artha_Credit_Card_Architecture_v1.md` draft, which laid out
 a `domain/entities/`, `application/usecases/`, `infrastructure/
 repositories/` folder tree) and deliberately not adopted — see

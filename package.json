@@ -1,97 +1,27 @@
 {
-  "name": "personal-finance-dashboard",
+  "name": "artha",
   "version": "1.0.4",
+  "private": true,
   "description": "Personal Finance Dashboard & Decision Support System",
-  "main": "electron/main.js",
+  "workspaces": [
+    "frontend",
+    "electron"
+  ],
   "scripts": {
-    "dev:frontend": "vite",
-    "build:frontend": "tsc && vite build",
-    "dev:backend": "venv\\Scripts\\python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload",
-    "dev:electron": "electron .",
-    "start": "concurrently --kill-others \"npm run dev:backend\" \"npm run dev:frontend\" \"electron .\"",
-    "build:backend": "venv\\Scripts\\pyinstaller --noconfirm --onedir --console --name \"main\" --clean --distpath backend/dist --workpath backend/build --add-data \"backend/tax/rules:backend/tax/rules\" --add-data \"backend/tax/metadata:backend/tax/metadata\" run.py",
-    "build:backend:posix": "venv/bin/pyinstaller --noconfirm --onedir --console --name \"main\" --clean --distpath backend/dist --workpath backend/build --add-data \"backend/tax/rules:backend/tax/rules\" --add-data \"backend/tax/metadata:backend/tax/metadata\" run.py",
-    "package:portable": "npm run build:frontend && npm run build:backend && electron-builder --win portable --publish=never",
-    "package:mac": "npm run build:frontend && npm run build:backend:posix && electron-builder --mac -c.directories.output=dist-portable-mac --publish=never",
-    "package:linux": "npm run build:frontend && npm run build:backend:posix && electron-builder --linux AppImage -c.directories.output=dist-portable-linux --publish=never",
+    "dev:backend": "node scripts/backend.mjs --reload",
+    "dev:frontend": "npm run dev -w frontend",
+    "dev:electron": "npm run dev -w electron",
+    "dev:web": "concurrently --kill-others --names backend,frontend \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "start": "concurrently --kill-others --names backend,frontend,electron \"npm run dev:backend\" \"npm run dev:frontend\" \"npm run dev:electron\"",
+    "build:frontend": "npm run build -w frontend",
+    "build:backend": "venv\\Scripts\\pyinstaller --noconfirm --onedir --console --name \"main\" --clean --distpath backend/dist --workpath backend/build --paths . --add-data \"backend/tax/rules:backend/tax/rules\" --add-data \"backend/tax/metadata:backend/tax/metadata\" backend/run.py",
+    "build:backend:posix": "venv/bin/pyinstaller --noconfirm --onedir --console --name \"main\" --clean --distpath backend/dist --workpath backend/build --paths . --add-data \"backend/tax/rules:backend/tax/rules\" --add-data \"backend/tax/metadata:backend/tax/metadata\" backend/run.py",
+    "package:portable": "npm run build:frontend && npm run build:backend && npm run package:win -w electron",
+    "package:mac": "npm run build:frontend && npm run build:backend:posix && npm run package:mac -w electron",
+    "package:linux": "npm run build:frontend && npm run build:backend:posix && npm run package:linux -w electron",
     "build:exe": "powershell -ExecutionPolicy Bypass -File ./build_release.ps1"
   },
-  "dependencies": {
-    "chart.js": "^4.5.1",
-    "lucide-react": "^1.54.0",
-    "react": "^19.3.0",
-    "react-chartjs-2": "^5.3.1",
-    "react-dom": "^19.3.0"
-  },
   "devDependencies": {
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.1.2",
-    "concurrently": "^10.0.6",
-    "electron": "^44.7.0",
-    "electron-builder": "^26.15.3",
-    "typescript": "^7.0.2",
-    "vite": "^8.3.4"
-  },
-  "build": {
-    "appId": "com.artha.desktop",
-    "productName": "Artha",
-    "directories": {
-      "output": "dist-portable"
-    },
-    "files": [
-      "dist/**/*",
-      "electron/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "backend/dist/main",
-        "to": "backend/dist/main",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
-    "win": {
-      "target": [
-        "portable"
-      ],
-      "icon": "public/favicon.png"
-    },
-    "mac": {
-      "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
-      ],
-      "category": "public.app-category.finance",
-      "identity": null,
-      "hardenedRuntime": false,
-      "icon": "public/favicon.png"
-    },
-    "linux": {
-      "target": [
-        {
-          "target": "AppImage",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "category": "Finance",
-      "icon": "public/favicon.png"
-    }
+    "concurrently": "^10.0.6"
   }
 }

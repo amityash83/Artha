@@ -10,7 +10,7 @@ You are a code reviewer for Artha, a privacy-first personal finance app (React/E
 
 ## Review Scope
 
-By default, review `git diff` (unstaged, then staged if unstaged is empty) touching `backend/main.py`, `backend/db.py`, `backend/decision_engine.py`, `backend/calculations.py`, or `src/components/{EntityGrid,DynamicForm,TransactionsLedger,CreditCards}.tsx`. The user may specify a different scope (a range of commits, specific files, a PR diff).
+By default, review `git diff` (unstaged, then staged if unstaged is empty) touching `backend/main.py`, `backend/db.py`, `backend/decision_engine.py`, `backend/calculations.py`, or `frontend/src/components/{EntityGrid,DynamicForm,TransactionsLedger,CreditCards}.tsx`. The user may specify a different scope (a range of commits, specific files, a PR diff).
 
 ## Invariants to check, in priority order
 
@@ -33,7 +33,7 @@ By default, review `git diff` (unstaged, then staged if unstaged is empty) touch
 
 **7. `init_db()` migrations must be idempotent.** Any new `ALTER TABLE`/backfill/seed statement must be safe to run on every startup — guarded by `PRAGMA table_info()` checks, `NOT IN (SELECT ...)` anti-joins, or `INSERT OR IGNORE`/`CREATE TABLE IF NOT EXISTS`. Flag a migration that would error or duplicate rows on a second run. Separately: flag any code that trusts `cursor.lastrowid` immediately after an `INSERT OR IGNORE` as the row's real id — it returns 0 (or the wrong id) on a conflict; the correct pattern is to look the row up by its natural key afterward.
 
-**8. CORS/API-secret config must stay derived from env vars, not hardcoded ports.** `_parse_allowed_origins()` in `main.py` should stay driven by `ARTHA_FRONTEND_PORT` (or an explicit `ARTHA_ALLOWED_ORIGINS` override), matching `electron/main.js`/`vite.config.mts`/`start.sh`. Flag a hardcoded port/origin literal reintroduced here.
+**8. CORS/API-secret config must stay derived from env vars, not hardcoded ports.** `_parse_allowed_origins()` in `main.py` should stay driven by `ARTHA_FRONTEND_PORT` (or an explicit `ARTHA_ALLOWED_ORIGINS` override), matching `electron/main.js`/`frontend/vite.config.mts`/`start.sh`. Flag a hardcoded port/origin literal reintroduced here.
 
 **9. Database path resolution order must stay `~/.financeos/settings.json` → `FINANCE_DB_DIR` → dev fallback.** Flag any test or script that assumes setting `FINANCE_DB_DIR` alone is sufficient for isolation — it silently is not if a real `settings.json` already has `active_db_path` set (see `backend/tests/conftest.py`'s `get_db_path` monkeypatch for the correct pattern).
 

@@ -7,7 +7,7 @@ Extension points, plugin lifecycle, module registration.
 ## Current State: No Plugin System Exists
 
 Confirmed via grep: no plugin loader, no extension-point registry, no
-module-registration mechanism anywhere in `backend/` or `src/`. The only
+module-registration mechanism anywhere in `backend/` or `frontend/src/`. The only
 "plugin" matches in the codebase are Chart.js's own `plugins:` config
 option (a Chart.js library concept, unrelated to Artha extensibility) —
 not a false positive worth investigating further, just noise from the

@@ -11,7 +11,7 @@ architecture diagrams, deployment model.
 Electron Shell (electron/main.js)
     │ spawns backend subprocess, native file dialogs, auto-backup on open/close
     ▼
-React/TS Frontend (src/)
+React/TS Frontend (frontend/src/)
     │ fetch() calls to API_BASE_URL — no client-side domain/service layer
     ▼
 FastAPI Backend (backend/main.py)
@@ -55,7 +55,7 @@ The `Domains/` folder documents 13 conceptual domains (Banking, Loans,
 Credit Cards, Investments, Properties, Insurance, Goals, Income,
 Reports, Calendar, Taxation, Knowledge, Documents/Financial-Profile).
 These are **documentation boundaries**, not code boundaries — there is
-no package/module split enforcing them in `backend/` or `src/`. Most
+no package/module split enforcing them in `backend/` or `frontend/src/`. Most
 domains share the same generic `assets`/`liabilities` tables and the
 same `EntityGrid`/`DynamicForm` components, differentiated only by a
 `category_id` value. Treat "bounded context" here as "a section of this
@@ -64,7 +64,7 @@ documentation," not "an isolated subsystem."
 ## Deployment Model
 
 Two independent deployment paths exist, sharing the same
-`backend/`/`src/` source:
+`backend/`/`frontend/src/` source:
 
 1. **Desktop (primary, cross-platform: Windows/macOS/Linux)**: PyInstaller
    bundles the FastAPI backend into a native binary (`main.exe` on
@@ -87,7 +87,7 @@ Two independent deployment paths exist, sharing the same
    `docker-compose.yml` wires both together with a named volume for the
    SQLite file. This path drops the Electron shell entirely — the app
    runs in a browser instead. `VITE_API_BASE_URL` (build-time env var,
-   `src/config.ts`) is what makes the same frontend code target either
+   `frontend/src/config.ts`) is what makes the same frontend code target either
    `127.0.0.1:8000` (desktop) or a container-network hostname (Docker)
    without a code fork.
 

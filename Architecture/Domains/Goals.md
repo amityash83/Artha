@@ -57,8 +57,8 @@ Goals translate a raw net-worth number into progress toward specific outcomes th
 
 ## UI Structure
 
-- `src/components/EntityGrid.tsx` — `COMMON_COLUMNS['goals']`: Goal Name, Target Amount, Current Amount, Monthly SIP (`monthly_contribution`), Expected Date (`expected_completion`).
-- `src/components/DynamicForm.tsx` — goals branch sets standard fields `target_amount`, `current_amount`, `monthly_contribution` (all `number`), `target_date` (`date`), `priority` (`select_priority`); no category-driven custom fields since goals have no `category_id`.
+- `frontend/src/components/EntityGrid.tsx` — `COMMON_COLUMNS['goals']`: Goal Name, Target Amount, Current Amount, Monthly SIP (`monthly_contribution`), Expected Date (`expected_completion`).
+- `frontend/src/components/DynamicForm.tsx` — goals branch sets standard fields `target_amount`, `current_amount`, `monthly_contribution` (all `number`), `target_date` (`date`), `priority` (`select_priority`); no category-driven custom fields since goals have no `category_id`.
 - Goal funding (linking an asset to a goal) is edited from the **asset's** form via a `goal_mapping` field, not from the goal's own form — there is no dedicated "manage this goal's funding sources" screen showing/editing `goal_holdings` weights directly.
 
 ## API Contracts

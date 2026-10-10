@@ -59,13 +59,13 @@ No dedicated schema for "Reports" as a concept. The routes in this domain read/w
 
 ## UI Structure
 
-- `src/components/Reports.tsx` (1355 lines) — four sub-tabs via `activeSubTab` state:
+- `frontend/src/components/Reports.tsx` (1355 lines) — four sub-tabs via `activeSubTab` state:
   - **Database**: shows current DB path/recent databases, "Switch Database" (Electron file dialog), backup-on-open/close toggles, backup count limit, custom backup directory, manual "Create Backup Now", and a list of existing backups with per-backup restore.
   - **Rules**: lists all `financial_rules` grouped by `category`, with inline value/enabled editing posting to `/api/rules`.
   - **Categories**: full CRUD over `categories` (including a custom-fields-definition builder UI) and `institutions`.
   - **Data**: MMex CSV import control, plus the CSV/Markdown export buttons (Accounts, Loans, Investments, Insurance, and a Markdown planning report).
-- `src/components/Dashboard.tsx` — separate from Reports.tsx entirely; this is the actual analytics/reporting-flavored view in the app: net worth trend line chart and asset-allocation doughnut chart, both rendered with `react-chartjs-2`/Chart.js, fed by `GET /api/snapshots` (the historical `snapshots` table) and the live `/api/init` summary. If a genuine "Reports/Analytics" surface exists in this codebase today, it is Dashboard.tsx, not Reports.tsx.
-- `src/components/EmiCalculator.tsx` (inferred from the export route's usage) is the origin of the Excel EMI export button, not Reports.tsx.
+- `frontend/src/components/Dashboard.tsx` — separate from Reports.tsx entirely; this is the actual analytics/reporting-flavored view in the app: net worth trend line chart and asset-allocation doughnut chart, both rendered with `react-chartjs-2`/Chart.js, fed by `GET /api/snapshots` (the historical `snapshots` table) and the live `/api/init` summary. If a genuine "Reports/Analytics" surface exists in this codebase today, it is Dashboard.tsx, not Reports.tsx.
+- `frontend/src/components/EmiCalculator.tsx` (inferred from the export route's usage) is the origin of the Excel EMI export button, not Reports.tsx.
 
 ## API Contracts
 

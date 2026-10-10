@@ -54,7 +54,7 @@ Nothing in this domain is DB-configurable via `financial_rules` — there is no 
 
 ## UI Structure
 
-- `src/components/FinancialCalendar.tsx` — fetches `GET /api/calendar` on mount, groups events by month/year for display, offers a category filter (All / EMI / SIP / Insurance / Credit Card) via simple string-equality client-side filtering, and shows a "Projected Outlay (12-Month Total)" sum of all currently-filtered event amounts. Each event renders its day-of-month, weekday, title, type badge (color-coded per type), amount, and a `details` string supplied by the backend (e.g. "Monthly Loan Instalment", "Policy: {policy_number}", "Issuer: {issuer} | Billed Statement Balance").
+- `frontend/src/components/FinancialCalendar.tsx` — fetches `GET /api/calendar` on mount, groups events by month/year for display, offers a category filter (All / EMI / SIP / Insurance / Credit Card) via simple string-equality client-side filtering, and shows a "Projected Outlay (12-Month Total)" sum of all currently-filtered event amounts. Each event renders its day-of-month, weekday, title, type badge (color-coded per type), amount, and a `details` string supplied by the backend (e.g. "Monthly Loan Instalment", "Policy: {policy_number}", "Issuer: {issuer} | Billed Statement Balance").
 - No other component reads `/api/calendar` — this is the sole consumer.
 
 ## API Contracts

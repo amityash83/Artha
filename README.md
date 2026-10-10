@@ -80,8 +80,9 @@ pip install -r backend/requirements.txt
 pip install pyinstaller
 npm install
 
-npm start                       # Windows: Vite + FastAPI + Electron, all at once
-# macOS: ./start.sh (see start.sh/stop.sh — dev convenience only, not packaging)
+npm start                       # any OS: Vite + FastAPI + Electron, all at once
+npm run dev:web                 # web app only (Vite + FastAPI), no Electron
+# macOS/Linux: ./start.sh and ./stop.sh (dev convenience only, not packaging)
 ```
 
 Requires [Node.js](https://nodejs.org/) v22.12+ and [Python](https://www.python.org/) v3.12+.

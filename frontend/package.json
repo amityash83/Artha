@@ -1,0 +1,27 @@
+{
+  "name": "@artha/frontend",
+  "version": "1.0.4",
+  "private": true,
+  "description": "Artha web UI (React + Vite). Talks to the FastAPI backend over HTTP; used by both the web deployment and the desktop app.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "chart.js": "^4.5.1",
+    "lucide-react": "^1.54.0",
+    "react": "^19.3.0",
+    "react-chartjs-2": "^5.3.1",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  }
+}

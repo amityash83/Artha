@@ -1,0 +1,79 @@
+{
+  "name": "@artha/electron",
+  "version": "1.0.4",
+  "private": true,
+  "description": "Artha desktop shell: wraps the web UI and the bundled Python backend into a portable desktop app.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "electron .",
+    "copy-web": "node ../scripts/copy-web.mjs",
+    "package:win": "npm run copy-web && electron-builder --win portable --publish=never",
+    "package:mac": "npm run copy-web && electron-builder --mac -c.directories.output=../dist-portable-mac --publish=never",
+    "package:linux": "npm run copy-web && electron-builder --linux AppImage -c.directories.output=../dist-portable-linux --publish=never"
+  },
+  "devDependencies": {
+    "electron": "44.7.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.artha.desktop",
+    "productName": "Artha",
+    "directories": {
+      "output": "../dist-portable"
+    },
+    "files": [
+      "main.js",
+      "web/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend/dist/main",
+        "to": "backend/dist/main",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "../frontend/public/favicon.png"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.finance",
+      "identity": null,
+      "hardenedRuntime": false,
+      "icon": "../frontend/public/favicon.png"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Finance",
+      "icon": "../frontend/public/favicon.png"
+    }
+  }
+}

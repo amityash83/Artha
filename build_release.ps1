@@ -29,7 +29,8 @@ if ($LASTEXITCODE -ne 0) {
 
 # Step 4: Package standalone portable Electron executable
 Write-Host "[4/5] Packaging standalone portable desktop executable..." -ForegroundColor Yellow
-npx electron-builder --win portable
+# Runs in the electron workspace: copies frontend/dist into electron/web, then packages.
+npm run package:win -w electron
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Electron packaging failed!"
     Exit $LASTEXITCODE
@@ -47,8 +48,8 @@ if (Test-Path "data/finance.db") {
     Write-Host "Warning: Source database (data/finance.db) not found. Skipping database copy." -ForegroundColor Gray
 }
 
-# Retrieve target executable name from package.json version and build properties
-$packageJson = Get-Content -Raw -Path "package.json" | ConvertFrom-Json
+# Retrieve target executable name from the desktop workspace's version and build properties
+$packageJson = Get-Content -Raw -Path "electron/package.json" | ConvertFrom-Json
 $version = $packageJson.version
 $productName = $packageJson.build.productName
 $exeName = "$productName $version.exe"

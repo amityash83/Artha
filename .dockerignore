@@ -1,9 +1,15 @@
 node_modules
+**/node_modules
 venv
 .venv
 env
 dist
+**/dist
+electron/web
+.env
 dist-portable
+dist-portable-mac
+dist-portable-linux
 build-out
 out
 backend/dist

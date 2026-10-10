@@ -13,6 +13,11 @@ build-out/
 out/
 backend/dist/
 backend/build/
+# Copy of frontend/dist made by scripts/copy-web.mjs for desktop packaging
+electron/web/
+
+# Local port/config overrides (see .env.example)
+.env
 
 # PyInstaller Configuration Files
 *.spec

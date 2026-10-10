@@ -5,6 +5,17 @@ const { spawn } = require('child_process');
 let mainWindow = null;
 let pyProc = null;
 
+// Dev only: pick up ports from the optional repo-root .env (see .env.example), the same
+// file scripts/backend.mjs, frontend/vite.config.mts and start.sh read. Packaged builds
+// don't ship the scripts/ folder and use the defaults below.
+if (!app.isPackaged) {
+  try {
+    require('../scripts/load-env.cjs').loadRootEnv();
+  } catch (err) {
+    console.warn('Could not load .env:', err.message);
+  }
+}
+
 // Configurable so multiple environments (or other local projects) can avoid port
 // collisions without editing code — see CLAUDE.md's "Backend port/URL" note.
 const BACKEND_PORT = process.env.ARTHA_BACKEND_PORT || '8000';
@@ -104,10 +115,10 @@ function createWindow() {
   const isDev = !app.isPackaged;
   // Window icon (Linux/Windows taskbar — macOS uses the app bundle icon set via
   // electron-builder's build.mac.icon instead, not this option). Same PNG Vite
-  // copies from public/ into dist/ at build time.
+  // copies from frontend/public into the web build, which packaging copies to web/.
   const windowIcon = isDev
-    ? path.join(__dirname, '..', 'public', 'favicon.png')
-    : path.join(__dirname, '..', 'dist', 'favicon.png');
+    ? path.join(__dirname, '..', 'frontend', 'public', 'favicon.png')
+    : path.join(__dirname, 'web', 'favicon.png');
 
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -128,7 +139,8 @@ function createWindow() {
     // Open DevTools in dev mode
     // mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    // The web UI build, copied next to this file by scripts/copy-web.mjs before packaging.
+    mainWindow.loadFile(path.join(__dirname, 'web', 'index.html'));
   }
 
   mainWindow.once('ready-to-show', () => {
