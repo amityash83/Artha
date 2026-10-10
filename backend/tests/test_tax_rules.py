@@ -1,6 +1,7 @@
 import copy
+import io
 import json
-import re
+import tokenize
 from pathlib import Path
 
 import pytest
@@ -59,15 +60,16 @@ def test_malformed_rule_sets_fail_loudly(mutate, message):
         validate_rule_set(rules)
 
 
-def _code_without_comments_and_docstrings(source: str) -> str:
-    source = re.sub(r'"""[\s\S]*?"""', "", source)
-    return "\n".join(line.split("#", 1)[0] for line in source.splitlines())
+def _numeric_literals(source: str):
+    """Number tokens only: strings, docstrings and comments can't trip the check."""
+    return [tok.string for tok in tokenize.generate_tokens(io.StringIO(source).readline) if tok.type == tokenize.NUMBER]
 
 
-@pytest.mark.parametrize("module", ["engine.py", "hra.py", "validation.py", "rules_loader.py"])
+@pytest.mark.parametrize("module", ["engine.py", "hra.py", "validation.py", "rules_loader.py", "rule_store.py",
+                                    "scenario_store.py", "nps.py", "payroll.py", "waterfall.py"])
 def test_no_financial_thresholds_hardcoded_in_tax_code(module):
     # Financial-year-specific numbers (slab bounds, limits, caps) belong in the rule
-    # files. Any literal of 4+ digits in executable code is almost certainly one.
-    code = _code_without_comments_and_docstrings((TAX_PACKAGE / module).read_text(encoding="utf-8"))
-    literals = re.findall(r"(?<![\w.])\d{4,}(?:\.\d+)?(?![\w])", code)
+    # files. Any numeric literal of 4+ digits in code is almost certainly one.
+    source = (TAX_PACKAGE / module).read_text(encoding="utf-8")
+    literals = [n for n in _numeric_literals(source) if abs(float(n.replace("_", ""))) >= 1000]
     assert literals == [], f"{module} contains numeric literals {literals}; move them to a rule set"

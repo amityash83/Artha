@@ -17,6 +17,9 @@ import backend.tax.engine as tax_engine
 import backend.tax.rules_loader as tax_rules
 import backend.tax.rule_store as tax_store
 import backend.tax.scenario_store as tax_scenarios
+import backend.tax.nps as tax_nps
+import backend.tax.payroll as tax_payroll
+import backend.tax.waterfall as tax_waterfall
 from backend.decision_engine import generate_recommendations, generate_credit_card_annual_reviews
 
 # Shared-secret auth for the Docker/web deployment path only. Empty/unset (the
@@ -1933,6 +1936,62 @@ def _compute_tax(conn, req: TaxComputeRequest) -> dict:
 @app.post("/api/tax/compute")
 def compute_tax(req: TaxComputeRequest):
     return _tax_store_call(_compute_tax, req)
+
+def _resolve_for(conn, financial_year: Optional[str], rule_set_id: Optional[str], rule_set_version: Optional[int]):
+    fy = financial_year or (None if rule_set_id else _default_financial_year())
+    rules, meta = tax_store.resolve(conn, fy, rule_set_id, rule_set_version)
+    return rules, meta
+
+def _now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+class TaxNpsScenariosRequest(TaxComputeRequest):
+    levels_pct: Optional[List[float]] = None
+    custom_pct: Optional[float] = None
+    custom_monthly_amount: Optional[float] = None
+    funding: str = "restructure"
+    restructure_from: str = "special_allowance"
+    salary_base_override: Optional[float] = None
+    offered_pcts: Optional[List[float]] = None  # null = employer policy not confirmed
+    regime: str = "best"
+
+@app.post("/api/tax/nps-scenarios")
+def tax_nps_scenarios(req: TaxNpsScenariosRequest):
+    def run(conn):
+        rules, meta = _resolve_for(conn, req.financial_year, req.rule_set_id, req.rule_set_version)
+        out = tax_nps.nps_scenarios(req.inputs, rules, req.levels_pct, req.custom_pct, req.custom_monthly_amount,
+                                    req.funding, req.restructure_from, req.salary_base_override, req.offered_pcts,
+                                    req.regime, _now_iso())
+        out["rule_set"].update({"name": meta["name"], "source": meta["source"]})
+        return out
+    return _tax_store_call(run)
+
+class TaxPayslipRequest(TaxComputeRequest):
+    optimization: Optional[dict] = None  # {employer_nps_pct | employer_nps_monthly, funding, restructure_from, salary_base_override}
+    regime_before: str = "best"
+    regime_after: str = "best"
+    actual_monthly_tds_before: Optional[float] = None
+    actual_monthly_tds_after: Optional[float] = None
+
+@app.post("/api/tax/payslip")
+def tax_payslip(req: TaxPayslipRequest):
+    def run(conn):
+        rules, meta = _resolve_for(conn, req.financial_year, req.rule_set_id, req.rule_set_version)
+        out = tax_payroll.payslip(req.inputs, rules, req.optimization, req.regime_before, req.regime_after,
+                                  req.actual_monthly_tds_before, req.actual_monthly_tds_after, _now_iso())
+        out["rule_set"].update({"name": meta["name"], "source": meta["source"]})
+        return out
+    return _tax_store_call(run)
+
+class TaxWaterfallRequest(TaxComputeRequest):
+    regime: str = "new"
+
+@app.post("/api/tax/waterfall")
+def tax_waterfall_route(req: TaxWaterfallRequest):
+    def run(conn):
+        rules, _meta = _resolve_for(conn, req.financial_year, req.rule_set_id, req.rule_set_version)
+        return tax_waterfall.tax_waterfall(req.inputs, rules, req.regime)
+    return _tax_store_call(run)
 
 @app.get("/api/tax/input-metadata")
 def get_tax_input_metadata():

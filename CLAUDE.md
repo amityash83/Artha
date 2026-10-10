@@ -69,7 +69,9 @@ FastAPI backend (backend/)
   ├─ calculations.py   — pure financial math (EMI, XIRR, amortization, tenure/interest projections)
   ├─ decision_engine.py— reads financial_rules + entities, returns recommendation objects
   ├─ tax/              — income-tax engine (engine.py, 14-step old/new regime computation with an audit line per figure),
-  │                      driven ONLY by versioned per-FY rule sets in tax/rules/*.json (no slab/limit literals in code — a test enforces it)
+  │                      driven ONLY by versioned per-FY rule sets in tax/rules/*.json (no slab/limit literals in code — a test enforces it);
+  │                      nps.py / payroll.py / waterfall.py build NPS scenarios, before/after payslips and the savings waterfall
+  │                      by re-running the engine (never by per-rupee shortcuts)
   └─ ai/               — AI Assistant: providers.py (Ollama / OpenAI-compatible / Anthropic behind get_provider()),
                          context.py (builds explain/ask prompt context from the DB); imported lazily inside the AI routes in main.py
 ```

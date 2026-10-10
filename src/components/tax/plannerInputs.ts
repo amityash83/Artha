@@ -1,4 +1,4 @@
-import { TaxPlannerInputs } from '../../types';
+import { TaxOptimization, TaxPlannerInputs } from '../../types';
 
 // Starting values from the Tax Planner spec's sample payroll. They are user data, not
 // tax rules: every one is editable, and no tax threshold or limit lives in the UI.
@@ -58,10 +58,62 @@ export function toEngineInputs(inputs: TaxPlannerInputs): TaxPlannerInputs {
   return { ...inputs, salary_monthly: monthly };
 }
 
+// The optimisation being evaluated by the payslip simulator and charts. 14% of
+// basic + DA is just a starting point to compare against; it is not a tax rule.
+export const DEFAULT_OPTIMIZATION: TaxOptimization = {
+  mode: 'pct',
+  employer_nps_pct: 14,
+  employer_nps_monthly: 0,
+  funding: 'restructure',
+  restructure_from: 'special_allowance',
+  salary_base_override: null,
+  regime: 'best',
+  offered_pcts: '',
+  actual_monthly_tds_before: null,
+  actual_monthly_tds_after: null,
+};
+
+/** "10, 14" -> [10, 14]; empty -> null (employer policy not confirmed). */
+export function parseOfferedPcts(text: string): number[] | null {
+  const values = text.split(/[,\s]+/).map((t) => parseFloat(t)).filter((n) => Number.isFinite(n));
+  return values.length ? values : null;
+}
+
+export function payslipRequest(inputs: TaxPlannerInputs, financialYear: string, opt: TaxOptimization) {
+  return {
+    financial_year: financialYear,
+    inputs: toEngineInputs(inputs),
+    optimization: {
+      ...(opt.mode === 'pct' ? { employer_nps_pct: opt.employer_nps_pct } : { employer_nps_monthly: opt.employer_nps_monthly }),
+      funding: opt.funding,
+      restructure_from: opt.restructure_from,
+      salary_base_override: opt.salary_base_override,
+    },
+    regime_before: opt.regime,
+    regime_after: opt.regime,
+    actual_monthly_tds_before: opt.actual_monthly_tds_before,
+    actual_monthly_tds_after: opt.actual_monthly_tds_after,
+  };
+}
+
+export function npsRequest(inputs: TaxPlannerInputs, financialYear: string, opt: TaxOptimization) {
+  return {
+    financial_year: financialYear,
+    inputs: toEngineInputs(inputs),
+    funding: opt.funding,
+    restructure_from: opt.restructure_from,
+    salary_base_override: opt.salary_base_override,
+    offered_pcts: parseOfferedPcts(opt.offered_pcts),
+    regime: opt.regime,
+    custom_pct: opt.mode === 'pct' && ![0, 5, 10, 12, 14].includes(opt.employer_nps_pct) ? opt.employer_nps_pct : null,
+    custom_monthly_amount: opt.mode === 'monthly' ? opt.employer_nps_monthly : null,
+  };
+}
+
 const DRAFT_KEY = 'artha.taxPlanner.draft.v1';
 
 // Per-device convenience only: the durable record is a saved scenario (server-side).
-export function loadDraft(): { inputs: TaxPlannerInputs; financialYear?: string } | null {
+export function loadDraft(): { inputs: TaxPlannerInputs; financialYear?: string; optimization?: TaxOptimization } | null {
   try {
     const raw = window.localStorage.getItem(DRAFT_KEY);
     return raw ? JSON.parse(raw) : null;
@@ -70,9 +122,9 @@ export function loadDraft(): { inputs: TaxPlannerInputs; financialYear?: string 
   }
 }
 
-export function saveDraft(inputs: TaxPlannerInputs, financialYear: string): void {
+export function saveDraft(inputs: TaxPlannerInputs, financialYear: string, optimization?: TaxOptimization): void {
   try {
-    window.localStorage.setItem(DRAFT_KEY, JSON.stringify({ inputs, financialYear }));
+    window.localStorage.setItem(DRAFT_KEY, JSON.stringify({ inputs, financialYear, optimization }));
   } catch {
     // storage unavailable (private window etc.) — the draft simply isn't kept
   }

@@ -49,7 +49,7 @@ export const WarningList: React.FC<{ warnings: TaxWarning[] }> = ({ warnings }) 
   );
 };
 
-export const PlannerOverview: React.FC<PlannerChildProps> = ({ result, inputs }) => {
+export const PlannerOverview: React.FC<PlannerChildProps> = ({ result, inputs, payslip }) => {
   if (!result) return <EmptyState>Computing…</EmptyState>;
   const { old: oldR, new: newR } = result.regimes;
   const cmp = result.comparison;
@@ -73,8 +73,19 @@ export const PlannerOverview: React.FC<PlannerChildProps> = ({ result, inputs })
         <Kpi label="Monthly tax saving" value={formatINR(Math.abs(cmp.monthly_savings_old_minus_new))} better="higher" sub="Annual ÷ 12 (average)" />
         <Kpi label="Monthly in-hand: old regime" value={formatINR(oldR.monthly_average.in_hand_salary)} better="higher" sub="Average, after payroll deductions and tax" />
         <Kpi label="Monthly in-hand: new regime" value={formatINR(newR.monthly_average.in_hand_salary)} better="higher" sub="Average, after payroll deductions and tax" />
-        <Kpi label="Annual employer NPS" value={formatINR(employerNps)} sub={employerNps ? `${formatINR(employerNps / 12)} / month, not paid as cash` : 'None entered'} />
-        <Kpi label="Before vs after optimisation" value="Phase 3" sub="Corporate NPS optimiser and payslip simulator are coming next" />
+        <Kpi label="Annual employer NPS (current)" value={formatINR(employerNps)} sub={employerNps ? `${formatINR(employerNps / 12)} / month, not paid as cash` : 'None entered'} />
+        {payslip ? (
+          <>
+            <Kpi label="Monthly in-hand before optimisation" value={formatINR(payslip.before.net_in_hand_monthly)} better="higher"
+              sub={`${payslip.before.regime} regime · TDS ${payslip.before.tds_basis === 'average' ? 'average' : 'from payroll'}`} />
+            <Kpi label="Monthly in-hand after optimisation" value={formatINR(payslip.after.net_in_hand_monthly)} better="higher"
+              sub={`${payslip.after.regime} regime · set on the NPS Optimizer tab`} />
+            <Kpi label="Annual corporate NPS after optimisation" value={formatINR(payslip.after.employer_nps_monthly * 12)}
+              sub={`${formatINR(payslip.after.employer_nps_monthly)} / month, not cash`} />
+            <Kpi label="Net monthly cash impact" value={formatINR(payslip.difference.monthly_cash_change)} better="higher"
+              sub={`Plus ${formatINR(payslip.difference.monthly_nps_change)} / month into NPS; tax saved ${formatINR(payslip.difference.annual_tax_saved)} / year`} />
+          </>
+        ) : <Kpi label="Before vs after optimisation" value="…" sub="Calculating" />}
       </div>
 
       <div style={{

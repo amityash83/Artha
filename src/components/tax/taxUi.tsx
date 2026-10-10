@@ -165,3 +165,15 @@ export const SubTabs = <T extends string>({ tabs, active, onChange, label }: {
     ))}
   </div>
 );
+
+/** Dims content computed from older inputs while a fresh computation is pending. */
+export const Freshness: React.FC<{ stale: boolean; children: React.ReactNode }> = ({ stale, children }) => (
+  <div aria-busy={stale} style={{ opacity: stale ? 0.45 : 1, transition: 'opacity 120ms', position: 'relative' }}>
+    {stale && (
+      <span style={{ position: 'absolute', top: 6, right: 8, fontSize: '11px', color: 'var(--text-secondary)', zIndex: 1 }}>
+        Updating…
+      </span>
+    )}
+    {children}
+  </div>
+);

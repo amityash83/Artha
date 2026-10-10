@@ -736,3 +736,110 @@ export interface TaxScenario extends TaxScenarioSummary {
   inputs: TaxPlannerInputs;
   result: TaxComputeResult;
 }
+
+export interface TaxNpsFlag {
+  code: string;
+  message: string;
+}
+
+export interface TaxNpsScenario {
+  label: string;
+  pct_of_base: number | null;
+  regime: TaxRegimeKey;
+  feasible: boolean;
+  employer_nps_annual: number;
+  employer_nps_monthly: number;
+  deductible_employer_nps: number;
+  taxable_income_before: number;
+  taxable_income_after: number;
+  tax_before: number;
+  tax_after: number;
+  tax_saved_annual: number;
+  tax_saved_monthly: number;
+  tax_saved_per_rupee: number | null;
+  cash_salary_annual: number;
+  cash_reduction_annual: number;
+  cash_reduction_monthly: number;
+  in_hand_annual: number;
+  in_hand_monthly: number;
+  in_hand_change_annual: number;
+  in_hand_change_monthly: number;
+  effective_rate_before_pct: number;
+  effective_rate_after_pct: number;
+  additional_retirement_investment_annual: number;
+  net_economic_benefit_annual: number;
+  ctc_before: number;
+  ctc_after: number;
+  tax_by_regime: Record<TaxRegimeKey, number>;
+  flags: TaxNpsFlag[];
+}
+
+export interface TaxNpsScenariosResult {
+  rule_set: TaxRuleSetRef;
+  funding: 'restructure' | 'over_ctc';
+  restructure_from: string | null;
+  regime_mode: 'best' | TaxRegimeKey;
+  salary_base_annual: number;
+  salary_base_source: string;
+  current_employer_nps_annual: number;
+  before: { regime: TaxRegimeKey; tax: number; in_hand_annual: number; in_hand_monthly: number; taxable_income: number };
+  scenarios: TaxNpsScenario[];
+  definitions: Record<string, string>;
+}
+
+// The optimisation the payslip simulator, overview and charts apply.
+export interface TaxOptimization {
+  mode: 'pct' | 'monthly';
+  employer_nps_pct: number;
+  employer_nps_monthly: number;
+  funding: 'restructure' | 'over_ctc';
+  restructure_from: string;
+  salary_base_override: number | null;
+  regime: 'best' | TaxRegimeKey;
+  offered_pcts: string; // free text, e.g. "10, 14"; empty = policy not confirmed
+  actual_monthly_tds_before: number | null;
+  actual_monthly_tds_after: number | null;
+}
+
+export interface TaxPayslipSide {
+  regime: TaxRegimeKey;
+  earnings: Record<string, number>;
+  gross_monthly_cash: number;
+  payroll_deductions: Record<string, number>;
+  payroll_deductions_total: number;
+  tds_monthly: number;
+  tds_basis: 'payroll_actual' | 'payroll_adjusted' | 'average';
+  engine_average_tds_monthly: number;
+  net_in_hand_monthly: number;
+  employer_nps_monthly: number;
+  taxable_salary_annual: number;
+  taxable_income_annual: number;
+  annual_tax: number;
+}
+
+export interface TaxPayslipResult {
+  rule_set: TaxRuleSetRef;
+  before: TaxPayslipSide;
+  after: TaxPayslipSide;
+  feasible: boolean;
+  notes: string[];
+  difference: {
+    monthly_cash_change: number;
+    monthly_nps_change: number;
+    annual_tax_saved: number;
+    monthly_tax_saved: number;
+    net_monthly_impact: number;
+    net_annual_impact: number;
+  };
+  tds_note: string;
+}
+
+export interface TaxWaterfallResult {
+  regime: TaxRegimeKey;
+  baseline_tax: number;
+  baseline_taxable_income: number;
+  steps: { key: string; label: string; effect: number; tax_after_step: number }[];
+  final_tax: number;
+  consistent: boolean;
+  baseline_definition: string;
+}
