@@ -84,7 +84,7 @@ npm start                       # Windows: Vite + FastAPI + Electron, all at onc
 # macOS: ./start.sh (see start.sh/stop.sh — dev convenience only, not packaging)
 ```
 
-Requires [Node.js](https://nodejs.org/) v20+ and [Python](https://www.python.org/) v3.12+.
+Requires [Node.js](https://nodejs.org/) v22.12+ and [Python](https://www.python.org/) v3.12+.
 
 ### 3. Docker / web deployment
 

@@ -8,7 +8,7 @@ This guide outlines step-by-step instructions to set up, run, and compile the **
 
 Before running or building the app, make sure you have the following three programs installed:
 
-1. **Node.js (LTS Version 20+)**
+1. **Node.js (LTS Version 22.12+)** (Electron 44 and the build tooling require it)
    - Download the installer from: [nodejs.org](https://nodejs.org/)
    - Run the installer and accept defaults. Confirm installation by running `node -v` in PowerShell.
 2. **Python (Version 3.12)**

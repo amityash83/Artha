@@ -1,10 +1,12 @@
 # Builds and serves the React frontend as a plain web app (no Electron), for
 # the web/Docker deployment path only. The Electron desktop build is untouched
 # and does not use this file.
-FROM node:20-slim AS build
+FROM node:22-slim AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
+# The web build never runs Electron; skip downloading its ~100 MB binary during npm ci.
+ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 RUN npm ci
 
 COPY tsconfig.json vite.config.mts index.html ./
