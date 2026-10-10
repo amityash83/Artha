@@ -899,3 +899,26 @@ export interface TaxWaterfallResult {
   consistent: boolean;
   baseline_definition: string;
 }
+
+export interface TaxPrefillItem {
+  id: string;
+  target: string; // a planner input path, or 'salary_total' (fixed salary components, scaled together)
+  target_label: string;
+  amount: number;
+  label: string;
+  basis: 'recorded' | 'estimate' | 'guess';
+  explanation: string;
+  source: { type: string; id?: number; category?: string };
+  selected: boolean;
+  note?: string | null;
+  overlap?: string;
+}
+
+export interface TaxPrefillResult {
+  financial_year: string;
+  person_id: number | null;
+  people: { id: number; name: string; role: string }[];
+  items: TaxPrefillItem[];
+  monthly_grid_targets: string[];
+  notes: string[];
+}

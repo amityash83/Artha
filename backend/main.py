@@ -2,6 +2,7 @@ import os
 import secrets
 import shutil
 import json
+import re
 import math
 import uuid
 from datetime import datetime, date
@@ -22,6 +23,7 @@ import backend.tax.payroll as tax_payroll
 import backend.tax.waterfall as tax_waterfall
 import backend.tax.sensitivity as tax_sensitivity_mod
 import backend.tax.epf as tax_epf
+import backend.tax.prefill as tax_prefill_mod
 from backend.decision_engine import generate_recommendations, generate_credit_card_annual_reviews
 
 # Shared-secret auth for the Docker/web deployment path only. Empty/unset (the
@@ -1997,6 +1999,45 @@ def tax_epf_suggestion(req: TaxEpfSuggestionRequest):
         return tax_epf.suggest_epf(req.financial_year, req.wages, req.basis)
     except tax_engine.TaxInputError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+@app.get("/api/tax/prefill")
+def tax_prefill(financial_year: Optional[str] = None, person_id: Optional[int] = None):
+    """Proposed planner figures from Artha's own records; the UI applies only what the user ticks."""
+    return _tax_store_call(lambda conn: tax_prefill_mod.prefill(conn, financial_year or _default_financial_year(), person_id))
+
+PLANNER_DRAFT_SLOT = re.compile(r"^[a-z0-9_-]{1,40}$")
+
+@app.get("/api/tax/planner-draft/{slot}")
+def get_tax_planner_draft(slot: str):
+    if not PLANNER_DRAFT_SLOT.match(slot):
+        raise HTTPException(status_code=422, detail="Invalid draft slot")
+    def fetch(conn):
+        row = conn.execute("SELECT content_json, updated_at FROM tax_planner_drafts WHERE slot = ?", (slot,)).fetchone()
+        return {"slot": slot, "content": json.loads(row["content_json"]) if row else None,
+                "updated_at": row["updated_at"] if row else None}
+    return _tax_store_call(fetch)
+
+@app.put("/api/tax/planner-draft/{slot}")
+def put_tax_planner_draft(slot: str, content: dict):
+    if not PLANNER_DRAFT_SLOT.match(slot):
+        raise HTTPException(status_code=422, detail="Invalid draft slot")
+    def save(conn):
+        conn.execute("""INSERT INTO tax_planner_drafts (slot, content_json, updated_at) VALUES (?, ?, datetime('now'))
+                        ON CONFLICT(slot) DO UPDATE SET content_json = excluded.content_json, updated_at = excluded.updated_at""",
+                     (slot, json.dumps(content)))
+        conn.commit()
+        return {"slot": slot, "saved": True}
+    return _tax_store_call(save)
+
+@app.delete("/api/tax/planner-draft/{slot}")
+def delete_tax_planner_draft(slot: str):
+    if not PLANNER_DRAFT_SLOT.match(slot):
+        raise HTTPException(status_code=422, detail="Invalid draft slot")
+    def remove(conn):
+        conn.execute("DELETE FROM tax_planner_drafts WHERE slot = ?", (slot,))
+        conn.commit()
+        return {"slot": slot, "deleted": True}
+    return _tax_store_call(remove)
 
 class TaxSensitivityRequest(TaxComputeRequest):
     bonus_month: int = 11  # month-by-month mode: where an extra bonus lands (0 = April ... 11 = March)

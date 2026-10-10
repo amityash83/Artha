@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { RotateCcw } from 'lucide-react';
+import { RotateCcw, Wand2 } from 'lucide-react';
 import { TaxComputeResult, TaxInputMetadata, TaxOptimization, TaxPayslipResult, TaxPlannerInputs, TaxRuleSetMeta } from '../../types';
 import { API_BASE_URL } from '../../config';
 import { apiJson, EmptyState, ErrorBanner, Pill, SubTabs } from './taxUi';
-import { clearDraft, DEFAULT_OPTIMIZATION, DEFAULT_PLANNER_INPUTS, loadDraft, payslipRequest, saveDraft, setIn, toEngineInputs } from './plannerInputs';
+import { clearDraft, DEFAULT_OPTIMIZATION, DEFAULT_PLANNER_INPUTS, loadDraft, payslipRequest, setIn, toEngineInputs } from './plannerInputs';
+import { PrefillDialog } from './PrefillDialog';
 import { PlannerOverview } from './PlannerOverview';
 import { SalaryInputs } from './SalaryInputs';
 import { OldRegimeInputs } from './OldRegimeInputs';
@@ -36,6 +37,8 @@ const TABS: { key: PlannerTab; label: string }[] = [
 ];
 
 const COMPUTE_DEBOUNCE_MS = 250;
+const DRAFT_SAVE_DEBOUNCE_MS = 600;
+const DRAFT_URL = '/api/tax/planner-draft/default';
 
 // Fills fields a stored draft predates (e.g. a field added to the metadata later).
 function withDefaults<T>(defaults: T, value: unknown): T {
@@ -64,20 +67,51 @@ interface TaxPlannerProps {
 }
 
 export const TaxPlanner: React.FC<TaxPlannerProps> = ({ showToast, onOpenRules }) => {
-  const draft = useRef(loadDraft());
   const [tab, setTab] = useState<PlannerTab>('overview');
   const [metadata, setMetadata] = useState<TaxInputMetadata | null>(null);
   const [ruleSets, setRuleSets] = useState<TaxRuleSetMeta[]>([]);
-  const [financialYear, setFinancialYear] = useState<string>(draft.current?.financialYear ?? '');
-  const [inputs, setInputs] = useState<TaxPlannerInputs>(
-    withDefaults(DEFAULT_PLANNER_INPUTS, draft.current?.inputs),
-  );
-  const [optimization, setOptimization] = useState<TaxOptimization>(
-    withDefaults(DEFAULT_OPTIMIZATION, draft.current?.optimization),
-  );
+  const [financialYear, setFinancialYear] = useState<string>('');
+  const [inputs, setInputs] = useState<TaxPlannerInputs>(DEFAULT_PLANNER_INPUTS);
+  const [optimization, setOptimization] = useState<TaxOptimization>(DEFAULT_OPTIMIZATION);
+  const [draftReady, setDraftReady] = useState(false);
+  const [showPrefill, setShowPrefill] = useState(false);
   const [result, setResult] = useState<TaxComputeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [computing, setComputing] = useState(false);
+  const skipNextSave = useRef(true);
+
+  // The working draft lives in the database, so it travels with the .db file. A draft from
+  // before that (browser storage) is moved over once and then removed from the browser, so
+  // it can't leak into a different database opened later.
+  useEffect(() => {
+    const restore = (d: { inputs?: unknown; financialYear?: string; optimization?: unknown } | null) => {
+      if (!d) return;
+      setInputs(withDefaults(DEFAULT_PLANNER_INPUTS, d.inputs));
+      setOptimization(withDefaults(DEFAULT_OPTIMIZATION, d.optimization));
+      if (d.financialYear) setFinancialYear(d.financialYear);
+    };
+    apiJson<{ content: { inputs?: unknown; financialYear?: string; optimization?: unknown } | null }>(DRAFT_URL)
+      .then(async ({ content }) => {
+        if (content) return restore(content);
+        const local = loadDraft();
+        if (!local) return;
+        restore(local);
+        await apiJson(DRAFT_URL, { method: 'PUT', body: JSON.stringify(local) });
+        clearDraft();
+      })
+      .catch(() => restore(loadDraft())) // older backend or offline: fall back to the browser copy
+      .finally(() => setDraftReady(true));
+  }, []);
+
+  useEffect(() => {
+    if (!draftReady || !financialYear) return;
+    if (skipNextSave.current) { skipNextSave.current = false; return; } // the state just restored
+    const timer = window.setTimeout(() => {
+      apiJson(DRAFT_URL, { method: 'PUT', body: JSON.stringify({ inputs, financialYear, optimization }) })
+        .catch(() => { /* next change retries; the planner keeps working without a saved draft */ });
+    }, DRAFT_SAVE_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [draftReady, inputs, financialYear, optimization]);
 
   const loadRuleSets = useCallback(() => {
     apiJson<TaxRuleSetMeta[]>('/api/tax/rule-sets').then(setRuleSets).catch(() => setRuleSets([]));
@@ -96,8 +130,7 @@ export const TaxPlanner: React.FC<TaxPlannerProps> = ({ showToast, onOpenRules }
   // Debounced recompute on every change; each request aborts the previous one so a
   // slow response can never overwrite a newer result.
   useEffect(() => {
-    if (!financialYear) return;
-    saveDraft(inputs, financialYear, optimization);
+    if (!financialYear || !draftReady) return;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setComputing(true);
@@ -127,11 +160,7 @@ export const TaxPlanner: React.FC<TaxPlannerProps> = ({ showToast, onOpenRules }
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [inputs, financialYear]);
-
-  useEffect(() => {
-    if (financialYear) saveDraft(inputs, financialYear, optimization);
-  }, [optimization]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [inputs, financialYear, draftReady]);
 
   // Before/after payslip for the Overview cards (the Payslip tab fetches its own).
   const overviewPayslip = useTaxPost<TaxPayslipResult>('/api/tax/payslip', payslipRequest(inputs, financialYear, optimization),
@@ -142,13 +171,13 @@ export const TaxPlanner: React.FC<TaxPlannerProps> = ({ showToast, onOpenRules }
   }, []);
 
   const resetToDefaults = () => {
-    clearDraft();
+    apiJson(DRAFT_URL, { method: 'DELETE' }).catch(() => undefined);
     setInputs(DEFAULT_PLANNER_INPUTS);
     setOptimization(DEFAULT_OPTIMIZATION);
     showToast?.('Planner inputs reset to the sample payroll', 'info');
   };
 
-  if (!metadata) {
+  if (!metadata || !draftReady) {
     return error ? <ErrorBanner message={error} /> : <EmptyState>Loading tax planner...</EmptyState>;
   }
 
@@ -183,6 +212,10 @@ export const TaxPlanner: React.FC<TaxPlannerProps> = ({ showToast, onOpenRules }
         )}
         <span style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
           {computing && <span style={{ color: 'var(--text-muted)' }} aria-live="polite">Recalculating…</span>}
+          <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', gap: '6px', alignItems: 'center' }}
+            onClick={() => setShowPrefill(true)} title="Propose figures from your income, investments, insurance, loans and gains">
+            <Wand2 size={13} /> Fill from my data
+          </button>
           <button className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={onOpenRules}>Manage tax rules</button>
           <button className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', gap: '6px', alignItems: 'center' }}
             onClick={resetToDefaults} title="Replace all inputs with the sample payroll">
@@ -192,6 +225,10 @@ export const TaxPlanner: React.FC<TaxPlannerProps> = ({ showToast, onOpenRules }
       </div>
 
       {error && <ErrorBanner message={error} />}
+      {showPrefill && (
+        <PrefillDialog inputs={inputs} metadata={metadata} financialYear={financialYear} onClose={() => setShowPrefill(false)}
+          onApply={(next, summary) => { setInputs(next); setShowPrefill(false); showToast?.(summary, 'success'); }} />
+      )}
 
       <SubTabs label="Tax planner sections" tabs={TABS} active={tab} onChange={setTab} />
 

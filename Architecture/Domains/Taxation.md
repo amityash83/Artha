@@ -13,6 +13,8 @@ Help a salaried user understand and plan their Indian income tax: which regime i
 - **Month-by-month salary entry**: a 12-month grid (April–March) with actual/projected months, quick fills, spreadsheet paste and CSV import; per-month HRA and a TDS projection. The Payslip tab can then show any single month's own figures instead of the average month.
 - **EPF helper** (`epf.py`, `metadata/epf_rules.json`): suggests Employee EPF from basic + DA, either capped at the dated EPFO wage ceiling or on full pay. A month where the ceiling changes (₹15,000 → ₹25,000 from 17 September 2026) is split by calendar days. It only fills the editable EPF input; the engine never derives EPF itself.
 - **Corporate NPS optimiser** (`nps.py`), **payslip simulator** (`payroll.py`), **savings waterfall** (`waterfall.py`), **break-even and sensitivity** (`sensitivity.py`): all built by re-running the engine on adjusted inputs, never by per-rupee shortcuts.
+- **Fill from my Artha data** (`prefill.py`, `PrefillDialog.tsx`): proposes planner figures from Artha's own records: salary/bonus/interest/dividend income rows, Rent expenses, money put into PPF / ELSS (by fund name) / NPS this year, life/term/health premiums, home and education loan interest and principal (an amortisation estimate from the outstanding balance and the EMIs recorded this year), the rental ledger, realised gains and Profile & Deductions entries. Each item is labelled recorded, estimate or guess. The user ticks items, and ticked items for the same field replace that field. Nothing is written until they apply. Income and expense rows have no owner, so they are listed individually; everything else is filtered to the chosen person.
+- **Planner drafts** are stored in the database (`tax_planner_drafts`), so they travel with the `.db` file; an older browser-only draft is moved there once.
 - **Saved scenarios** (`scenario_store.py`): immutable snapshots of inputs, the full result and the exact rule-set version/fingerprint; "recalculate under current rules" writes a new scenario.
 - **Reports**: CSV per table or all-in-one, and a printable report saved as PDF (Electron `printToPDF` via the preload bridge; browser print dialog on the web).
 - The older **profile estimate** (Profile & Deductions / Old vs New Estimate tabs, `tax_profiles` + `tax_deductions`) now runs on the same engine and rule resolution.
@@ -49,6 +51,7 @@ From `backend/db.py`'s `init_db()`:
 - `capital_gains_realizations`: realized gains log per Sell transaction.
 - `tax_rule_sets`: user rule-set versions (`rule_set_id`, `version`, FY, name, based-on reference, `content_json`, `content_hash`, status, note). `UNIQUE(rule_set_id, version)`.
 - `tax_rule_set_selection`: FY → rule set in use (no row = official set).
+- `tax_planner_drafts`: the planner's working state (inputs, year, optimisation) per slot; the planner uses `default`.
 - `tax_scenarios`: saved scenarios (name, FY, rule set id/version/hash, `inputs_json`, `result_json`, `recalculated_from`, notes).
 
 The legacy Taxation keys in `financial_rules` (`section_80c_limit`, `standard_deduction_salaried`, …) are still seeded but unused; their descriptions say so.
@@ -81,6 +84,8 @@ Taxation page tabs: **Tax Planner** (default), Profile & Deductions, Old vs New 
 - `GET /api/tax/input-metadata`, `GET/POST/PUT/DELETE /api/tax/rule-sets[/{id}]`, `/versions`, `/diff`, `/archive`, `/restore`, `PUT /api/tax/rule-set-selection/{fy}`.
 - `GET/POST/DELETE /api/tax/scenarios[/{id}]`, `POST /api/tax/scenarios/{id}/recalculate`.
 - `POST /api/tax/nps-scenarios`, `/payslip` (optional `month_index` with month-by-month entry), `/waterfall`, `/sensitivity`, `/nps-target`, `/epf-suggestion`.
+- `GET /api/tax/prefill?financial_year=&person_id=`: proposals from Artha's records (read-only).
+- `GET/PUT/DELETE /api/tax/planner-draft/{slot}`.
 - `GET /api/tax-profiles/{id}/estimate`: the profile estimate, on the same engine.
 
 Rule resolution everywhere: explicit rule set → the user's selection for the FY → the official set.
@@ -98,4 +103,4 @@ Reports & Export tab: CSV per table (summary, comparison, computation per regime
 - Confirm `secondary_source`/`unverified` items against the Income-tax Act, 2025, Finance Act 2026 and Income-tax Rules 2026 texts, and upgrade them to `verified`.
 - Model the dividend surcharge cap and accretion tax above the retirement cap.
 - Form 16 / payslip PDF parsing into the monthly grid.
-- Wire the pytest suite into CI.
+- Record the actual premiums paid this year (transactions) rather than the current premium, and the real home-loan interest from a lender certificate.

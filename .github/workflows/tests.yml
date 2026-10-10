@@ -1,0 +1,56 @@
+name: Tests
+
+# Backend pytest suite and frontend typecheck/build on every push to main and every PR.
+# Kept separate from build-and-publish.yml so a failing test is reported in a minute,
+# without waiting for (or blocking) the three-OS packaging matrix.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9: the oldest the code supports (the local dev venv); 3.12: what the packaged builds use.
+        python: ['3.9', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: 'pip'
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-test.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements-test.txt
+      - name: Run pytest
+        # conftest.py points every test at a temp-file DB, so no ~/.financeos settings are needed.
+        run: python -m pytest -q
+
+  frontend:
+    name: Frontend typecheck and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+      - name: Install the frontend workspace only (skips the Electron download)
+        run: npm ci --workspace frontend
+      - name: tsc + vite build
+        run: npm run build:frontend

@@ -186,14 +186,6 @@ export function loadDraft(): { inputs: TaxPlannerInputs; financialYear?: string;
   }
 }
 
-export function saveDraft(inputs: TaxPlannerInputs, financialYear: string, optimization?: TaxOptimization): void {
-  try {
-    window.localStorage.setItem(DRAFT_KEY, JSON.stringify({ inputs, financialYear, optimization }));
-  } catch {
-    // storage unavailable (private window etc.) — the draft simply isn't kept
-  }
-}
-
 export function clearDraft(): void {
   try {
     window.localStorage.removeItem(DRAFT_KEY);

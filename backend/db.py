@@ -621,6 +621,16 @@ def init_db():
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tax_scenarios_rule_set ON tax_scenarios(rule_set_id)")
 
+    # Tax Planner working state (inputs, year, optimisation), kept in the DB so it travels
+    # with the portable .db file. One row per slot; the planner uses 'default'.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tax_planner_drafts (
+        slot TEXT PRIMARY KEY,
+        content_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+    """)
+
     # Transactions (Normalized schema)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS transactions (
