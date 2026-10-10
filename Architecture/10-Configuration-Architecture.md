@@ -44,8 +44,9 @@ a field set per category:
   `policy_type` selector swaps visible fields; see
   `Domains/Insurance.md`).
 - Credit Cards additionally has an entirely separate, non-generic screen
-  (`CreditCards.tsx`) that doesn't go through `DynamicForm` at all — see
-  the dual-persistence-path issue documented in `Domains/Credit-Cards.md`.
+  (`CreditCards.tsx`) that doesn't go through `DynamicForm` at all. It
+  still persists through the same `credit_card_details` satellite route
+  as the generic tab — see `Domains/Credit-Cards.md`.
 
 `EntityGrid.tsx`'s column rendering follows the same pattern: common
 columns per `entityType`, plus category-specific columns appended when

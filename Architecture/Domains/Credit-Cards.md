@@ -2,148 +2,203 @@
 
 ## Purpose
 
-Credit Cards gives the user a single place to track owned cards as revolving-credit liabilities and to actively optimize how they use them — not just log a balance, but simulate reward yield across category-based multipliers, milestone step-ups, and mileage-transfer redemptions, plus track lounge access and fee-waiver progress. Per the legacy design note preserved from `Architecture/Legacy/Artha_Credit_Card_Architecture_v1.md`, the intent is decision support ("should I keep paying this card, is my utilization healthy, which card should I swipe for this purchase"), not transaction-level accounting — Artha is a Financial Intelligence Layer on top of the user's data, not a bookkeeping tool. Unlike the rest of this document set, Credit Cards today already has a substantial, shipped reward-optimization surface, not just balance tracking.
+Credit Cards gives the user a single place to track owned cards as revolving-credit liabilities and to actively optimize how they use them — not just log a balance, but simulate reward yield across category-based multipliers, caps, milestone step-ups, and mileage-transfer redemptions, track lounge access and fee-waiver progress, compare cards (owned or from a reference catalogue), and get a per-card annual Keep/Close/Downgrade/Upgrade verdict. Per the legacy design note preserved from `Architecture/Legacy/Artha_Credit_Card_Architecture_v1.md`, the intent is decision support ("should I keep paying for this card, is my utilization healthy, which card should I swipe for this purchase"), not bookkeeping — Artha is a Financial Intelligence Layer on top of the user's data. Card spend *is* now recorded transaction-by-transaction in the shared ledger, but only so reward/cap math can run against real per-category spend, not to turn Artha into a statement-reconciliation tool.
 
 ## Scope
 
-- Credit Card tracking as a `category` of the shared `liabilities` table (`category_name = 'Credit Card'`, `liability_kind = 'revolving_credit'`), not a separate `owned_cards` table
-- A dedicated, shipped screen — `src/components/CreditCards.tsx` (~1400 lines), wired into `App.tsx` as its own `credit-cards` tab, separate from the generic `liabilities` tab — with three sub-tabs: **Card Inventory**, **Waivers & Milestones**, and **Smart Rewards Simulator**
-- **Card Inventory**: a visual card-face grid per card (network badge, masked number, holder name/remarks), outstanding vs. available limit, limit utilization bar, current statement spend, reward points balance and cash value, and a quick lounge-quota readout
-- **Reward optimization engine** (real, shipped, not a mockup): per-card `CategoryMultiplierRule`s (spend-category point multipliers with optional monthly point caps and category exclusions), `MilestoneThresholdRule`s (step-up bonus point rates once cumulative statement spend crosses a threshold), and `RedemptionPartnerRatio`s (airline/hotel transfer partners with named transfer ratios, e.g. 5:4, 5:2) — all user-configured per card, no fixed catalogue
-- **Smart Rewards Simulator** (the "calculator" sub-tab): given a hypothetical spend amount + category + redemption strategy (cash vs. miles), computes and ranks estimated reward yield across all registered cards, applying category exclusions, multiplier resolution, milestone step-up detection, monthly point caps, and best-partner mileage transfer value
-- **Lounge access tracking**: domestic/international visit limits and used-counts per card, surfaced in both Inventory and the Waivers & Milestones tab
+- Credit Card tracking as a `category` of the shared `liabilities` table (`category_name = 'Credit Card'`, `liability_kind = 'revolving_credit'`), with card-specific fields in the `credit_card_details` satellite table — not a separate `owned_cards` table
+- A dedicated screen — `src/components/CreditCards.tsx`, wired into `App.tsx` as its own `credit-cards` tab, separate from the generic `liabilities` tab — with six sub-tabs (`activeSubTab`): **Card Inventory**, **Waivers & Milestones**, **Smart Rewards Simulator** (`calculator`), **Card Library**, **Compare Cards**, and **Annual Review**. The last three live in `src/components/creditcards/` (`CardLibraryTab.tsx`, `CompareCardsTab.tsx`, `AnnualReviewTab.tsx`)
+- **Card Inventory**: a visual card-face grid per card (network badge, masked number, holder name/remarks), outstanding vs. available limit, limit utilization bar, current-cycle statement spend, reward points balance and cash value, and a quick lounge-quota readout
+- **Reward optimization engine**: per-card `CategoryMultiplierRule`s (spend-category point multipliers, category exclusions, and caps — a legacy single `monthlyCapPoints` and/or a `caps[]` array of `{capPoints, period, groupLabel?}` for banks with multiple simultaneous ceilings, e.g. daily + monthly), `MilestoneThresholdRule`s (step-up bonus point rates once cycle spend crosses a threshold), and `RedemptionPartnerRatio`s (airline/hotel transfer partners with a transfer ratio and an optional per-route `pointValue`)
+- **Per-category spend ledger**: card spend is recorded as `'Spend'` transactions in the shared `transactions` ledger (`dest_ref_type = 'Liability'`, with a `category_id`), entered via the Transactions Ledger. Billing cycles are computed live from `credit_card_details.statement_date`; the current cycle's total and per-category breakdown feed the Inventory, the Simulator, milestone detection, and pooled-cap enforcement
+- **Smart Rewards Simulator**: given a hypothetical spend amount + category + redemption strategy (cash vs. miles), computes and ranks estimated reward yield across all registered cards, applying category exclusions, multiplier resolution, milestone step-up detection (against real cycle spend when it exists), the tightest applicable cap, pooled-cap headroom (`groupLabel`) against real per-category spend, and best-route redemption value (`transferRatio × pointValue`)
+- **Lounge access tracking**: domestic/international visit limits and used-counts per card, surfaced in Inventory and Waivers & Milestones
 - **Fee-waiver / spend-milestone tracking**: a target spend amount + current progress + renewal date per card, with a computed "required daily spend rate" to hit the waiver target before renewal
-- Built-in `PRESETS` — starter templates for real Indian premium cards (HDFC Infinia, Axis Magnus, SBI Card ELITE) that pre-fill the reward-engine configuration fields when registering a new card
-- A **second, independent** basic-fields editing path via the generic `liabilities` tab (`EntityGrid`/`DynamicForm`), which writes `credit_limit`/`statement_balance`/`statement_date`/`due_date`/`annual_fee`/`reward_points`/`point_value` to the `credit_card_details` satellite table (see Data Model for why this coexists separately from the path above)
-- Statement-balance and due-date reminders on the shared Financial Calendar (separate "Billed" vs. "Unbilled" balance events), sourced from `credit_card_details`, not from `CreditCards.tsx`'s `metadata_json` fields
+- **Card Library**: a user-editable reference catalogue of card *products* (`card_variants` table) — fees, fee-waiver spend, base earn rate, point value, lounge entitlements, eligibility notes, pros/cons, and the same three rule-JSON shapes as owned cards. Ships with 10 seeded Indian cards (HDFC Infinia, Axis Magnus, SBI Card ELITE, HDFC Regalia Gold, ICICI Amazon Pay, Amex MR Gold, SBI Cashback, Axis Ace, HSBC Premier Metal, IDFC FIRST Wealth), seeded exactly once on the run that creates the table, so user deletions/renames stick. A variant can prefill a new owned card with no transformation
+- **Compare Cards**: side-by-side weighted scoring of 2–5 cards, mixing owned cards and Library variants
+- **Annual Review**: a backend rule function producing a Keep / Close / Downgrade / Upgrade-Candidate verdict per owned card, with "worth the fee?", milestone pace, lounge utilization, a reason string, and a next-review date
+- Built-in `PRESETS` in `CreditCards.tsx` (HDFC Infinia, Axis Magnus, SBI Card ELITE) — hardcoded starter values that pre-fill the add-card form; separate from, and predating, the Card Library
+- A second, narrower editing path via the generic `liabilities` tab (`EntityGrid`/`DynamicForm`), which writes 7 basic fields to the same `credit_card_details` row through the same route (see Data Model)
+- Statement-balance and due-date reminders on the shared Financial Calendar (separate "Billed" vs. "Unbilled" balance events), sourced from `credit_card_details`
 
 ## Out of Scope
 
-- **No card product reference library/catalogue.** `PRESETS` in `CreditCards.tsx` are hardcoded starter values copied into a new card's *editable* fields when registering it — not a maintained, database-backed catalogue of published card terms. There is no `card_variants` table and no workflow to add/update reference card products independent of a user's own registered card.
-- **No Compare Cards or Annual Review decision engine.** These are named, described screens in the legacy architecture doc (side-by-side weighted scoring, keep/close/upgrade/downgrade recommendations) but have no implementation anywhere in `src/` or `backend/`.
-- **No reward-points accrual/reconciliation from real transactions.** The Smart Rewards Simulator estimates *hypothetical* reward yield from a user-entered spend amount; it does not read actual `transactions` rows, and nothing automatically increments `reward_points`/`current_statement_spend` when a real credit-card expense transaction is posted. Point balances, current statement spend, and milestone progress are all manually entered/edited by the user.
-- **No annual-fee waiver *rule engine*.** The Waivers & Milestones tab computes a required daily spend rate against a manually-entered target/current/renewal date, but this is display-only arithmetic in the component — `decision_engine.py` has no Credit-Card-specific checks and does not surface fee-waiver risk as a recommendation.
-- **The `reward_programs`, `reward_rules`, `reward_partners`, `reward_ledger`, and `reward_redemptions` tables in `backend/db.py` are dead schema, unrelated to the reward engine above.** They are never read from or written to by any route in `backend/main.py`, and `reward_programs` even references a `financial_products` table that is never created anywhere in `init_db()`. The real, shipped reward-rule data (category multipliers, milestones, redemption partners) lives entirely as JSON blobs inside `liabilities.metadata_json`, not in these dedicated tables — a genuine architectural mismatch worth resolving (see Future Enhancements).
-- No dedicated `/api/decision-engine`-style recommendations for credit cards — `generate_recommendations()` only ever inspects loans, insurance, goals, and liquidity, never credit card data from either persistence path.
+- **No automatic reward-points accrual.** `reward_points` (the points balance), `milestone_spend_current`, and lounge used-counts are still manually entered. Logging `'Spend'` transactions updates the derived cycle-spend figures and pooled-cap headroom, but nothing increments the points balance from them.
+- **Annual Review does not use the spend ledger.** `generate_credit_card_annual_reviews()` reads only aggregate `credit_card_details` fields (points balance, fee, milestone target/current, lounge counts); its response carries an explicit `caveat` saying so. It also deliberately never names a specific replacement card — that's Compare Cards' job.
+- **No proactive credit-card recommendations.** `generate_recommendations()` (the dashboard's rule-based recommendations) still inspects only loans, insurance, goals, and liquidity — no utilization warning, no fee-waiver risk flag, no minimum-payment risk. The Annual Review is pull-only (the user opens its tab).
+- **No statement reconciliation or import.** Spend is entered manually in the Ledger; there's no statement/CSV import and no matching of logged spend against the card's `statement_balance`.
+- **The `reward_programs`, `reward_rules`, `reward_partners`, `reward_ledger`, and `reward_redemptions` tables in `backend/db.py` are dead schema, unrelated to the reward engine above.** No route reads or writes them, and `reward_programs` references a `financial_products` table that is never created anywhere in `init_db()`. The real reward-rule data lives as JSON in `credit_card_details` (owned cards) and `card_variants` (Library).
 
 ## Business Objectives
 
 - Let the user see, at a glance, how much of each card's limit is used, when the next payment is due, and whether a card is a "low yield" drag (annual fee exceeding its accumulated reward value)
-- Help the user decide which card to use for a given purchase category by simulating reward yield across all registered cards before swiping, accounting for category multipliers, milestone step-ups, and redemption strategy
-- Track progress toward annual-fee waiver spend targets so the user can see, in concrete daily-spend terms, whether they're on pace to justify a card's fee before renewal
+- Help the user decide which card to use for a given purchase by simulating reward yield across all registered cards before swiping, accounting for multipliers, caps (including pooled caps already partly consumed this cycle), milestone step-ups, and redemption strategy
+- Track progress toward annual-fee waiver spend targets in concrete daily-spend terms
 - Track lounge-visit entitlements so unused benefits aren't wasted
-- Keep credit card debt visible in net-worth and total-liabilities calculations exactly like any other liability, without requiring a special-cased data model for the base balance/due-date tracking
+- Support keep/close/switch decisions with a per-card annual verdict and a weighted comparison against other owned cards or catalogue products
+- Keep credit card debt visible in net-worth and total-liabilities calculations exactly like any other liability
 
 ## Data Model
 
-Conceptually, a Credit Card is a **Liability** (the same generic entity type used for Loans) with a category discriminator of `Credit Card` and a `liability_kind` of `revolving_credit` — not a loan-shaped amortizing debt. Its loan-only columns (`interest_rate`, `emi`, `tenure_months`) are explicitly zeroed out rather than removed, for schema uniformity across all liability rows.
+Conceptually, a Credit Card is a **Liability** (the same generic entity type used for Loans) with a category discriminator of `Credit Card` and a `liability_kind` of `revolving_credit` — not amortizing debt. Its loan-only columns (`interest_rate`, `emi`, `tenure_months`) are zeroed rather than removed, for schema uniformity across liability rows.
 
-**Important architectural fact: a Credit Card liability today has two coexisting, independent persistence paths for what looks like overlapping data**, because two separate UIs write to it differently:
+**`credit_card_details` is the single source of truth for all card-specific data**, including the full reward-engine config. Both UIs write it through the same route, `PUT /api/liabilities/{id}/credit-card-details`:
 
-1. **`credit_card_details` satellite table** (1:1 via `liability_id`) — holds `credit_limit`, `statement_balance`, `statement_date`, `due_date`, `annual_fee`, `reward_points`, `point_value`. Written only via `PUT /api/liabilities/{id}/credit-card-details`, which is called exclusively from `EntityGrid.tsx`'s `dispatchSatelliteData()` when a card is added/edited through the **generic `liabilities` tab** (`DynamicForm.tsx`'s `isCreditCard` field branch). This is also the only source the Financial Calendar reads from for due-date/statement-balance reminders.
-2. **`liabilities.metadata_json`** — holds a much larger set of fields written by the **dedicated `CreditCards.tsx` screen** (the `credit-cards` tab): `credit_limit`, `statement_date`, `due_date`, `annual_fee`, `reward_points`, `point_value` again (duplicated, but as loose JSON keys, not satellite columns), plus `network`, `renewal_date`, `remarks`, `lounge_visits_limit/used`, `lounge_int_limit/used`, `milestone_spend_target/current`, `milestone_reward_desc`, `base_points`, `base_spend`, `current_statement_spend`, and three JSON-stringified rule arrays: `category_rules_json` (`CategoryMultiplierRule[]`), `milestone_rules_json` (`MilestoneThresholdRule[]`), `redemption_partners_json` (`RedemptionPartnerRatio[]`). This is written via the plain generic `POST/PUT /api/entities/liabilities`, which folds any non-column field into `metadata_json` per `serialize_entity_payload()` — `CreditCards.tsx` never calls the `credit-card-details` satellite route at all. Notably, `CreditCards.tsx` has no field for `statement_balance` — that value only exists in path 1.
+1. **Dedicated screen (`CreditCards.tsx`)** saves in two steps: base liability fields (name, category, issuing institution, outstanding) via the generic `POST/PUT /api/entities/liabilities`, then every card/reward field via the satellite route.
+2. **Generic `liabilities` tab** (`EntityGrid.tsx`'s `dispatchSatelliteData()`) PUTs only 7 fields: `credit_limit`, `statement_balance`, `statement_date`, `due_date`, `annual_fee`, `reward_points`, `point_value`.
 
-Because `GET /api/init` merges both the `credit_card_details` join *and* the parsed `metadata_json` onto the same returned liability object (with `metadata_json`'s keys applied via `d.update(...)` after the satellite fields), whichever was written most recently for an overlapping key (e.g. `credit_limit`) wins in the merged object, and the two screens can silently drift out of sync with each other for a single real-world card.
+The satellite PUT is a **partial update** for an existing row (`exclude_unset=True`): only fields the caller sent are written. This is load-bearing — before it, a 7-field save from the generic grid filled the other ~15 fields from schema defaults and wiped the card's rule JSON. Any new caller of this route must send only the fields it means to change.
 
-- **Liability** (base row): name, category, lender/issuing institution, outstanding balance, `liability_kind = 'revolving_credit'`, `metadata_json`. `interest_rate`/`emi`/`tenure_months` are forced to 0 by the satellite-table PUT route (path 1); `CreditCards.tsx` also sends them as 0 directly in its own generic entity payload (path 2).
-- **CreditCardDetails** (satellite, path 1 only): credit limit, statement balance, statement date, due date, annual fee, and the two "placeholder" reward fields as originally designed.
-- **Institution**: shared reference entity (the issuing bank), same table used by loans, accounts, and insurance.
-- **Category**: `Credit Card`'s `fields_definition` is `NULL` — the satellite table was the intended design for card-specific fields, but `CreditCards.tsx`'s richer reward-engine fields bypass both `fields_definition` and the satellite table, landing in `metadata_json` instead.
+`GET /api/init` spreads `metadata_json` onto each liability first, then overlays the `credit_card_details` columns, so for any overlapping key the satellite value wins. Older installs may still carry stale reward keys in `metadata_json` from before the satellite table held them; they're harmless for overlapping keys but nothing should read reward config from `metadata_json`.
+
+**Spend and the ledger.** A `'Spend'` transaction (`source_ref_type = 'None'`, `dest_ref_type = 'Liability'`, `dest_ref_id = <card>`, optional `category_id`) increases the card's `liabilities.outstanding` via `adjust_double_entry_balances()`; EMI/Prepayment-style payments decrease it. One exception: the **statement spend adjustment** row. The dedicated screen's "Statement Spend Adjustment" field (for spend the user hasn't logged individually this cycle) is stored as a single dated `'Spend'` transaction with `transactions.is_balance_exempt = 1`. It counts toward cycle spend but never moves `outstanding`. `is_balance_exempt` is a structural column, not caller-settable: the generic entity routes strip it from payloads and, on edit/delete, take it from the stored row. Earlier designs that identified this row by its notes text drifted across edits and were replaced; see `backend/tests/test_transaction_editing.py` for the edge cases this must keep passing.
+
+`credit_card_details.current_statement_spend` is now **vestigial**: the satellite PUT converts any value sent for it into the adjustment transaction and always writes the column as 0. The frontend shows `real_cycle_spend_total` when `has_spend_transactions` is true and only falls back to the column for legacy rows.
+
+- **Liability** (base row): name, category, lender/issuing institution, outstanding, `liability_kind = 'revolving_credit'`. `interest_rate`/`emi`/`tenure_months` are forced to 0 by the satellite PUT route.
+- **CreditCardDetails** (satellite, 1:1 via `liability_id`): limits/dates/fee, points balance and value, network, renewal date, lounge limits/used, milestone target/current/description, remarks, base earn rate, and the three rule-JSON columns.
+- **CardVariant** (`card_variants`, reference data): independent of any owned card; `UNIQUE(name, issuer)`, `is_seeded` distinguishes shipped rows from user-added ones.
+- **Transaction** (`'Spend'` rows): the per-category spend ledger described above.
+- **Institution**: shared reference entity (the issuing bank).
+- **Category**: `Credit Card`'s `fields_definition` is `NULL` — the satellite table carries the card-specific fields instead.
 
 ## Database Schema
 
 From `backend/db.py`'s `init_db()`:
 
 ```sql
-CREATE TABLE IF NOT EXISTS liabilities (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    category_id INTEGER NOT NULL REFERENCES categories(id),
-    lender_institution_id INTEGER REFERENCES institutions(id),
-    interest_rate REAL DEFAULT 0.0,     -- forced to 0 for credit cards
-    emi REAL DEFAULT 0.0,               -- forced to 0 for credit cards
-    outstanding REAL DEFAULT 0.0,
-    tenure_months INTEGER DEFAULT 0,    -- forced to 0 for credit cards
-    compounding TEXT DEFAULT 'Monthly',
-    linked_asset_id INTEGER REFERENCES assets(id),
-    tax_benefit TEXT DEFAULT 'None',
-    metadata_json TEXT,                 -- carries CreditCards.tsx's whole reward-engine config
-    liability_kind TEXT DEFAULT 'loan'  -- 'revolving_credit' for credit cards
-)
-
 CREATE TABLE IF NOT EXISTS credit_card_details (
     liability_id INTEGER PRIMARY KEY REFERENCES liabilities(id) ON DELETE CASCADE,
     credit_limit REAL DEFAULT 0.0,
     statement_balance REAL DEFAULT 0.0,
-    statement_date INTEGER,
-    due_date INTEGER,
+    statement_date INTEGER,             -- day of month; anchors the live billing-cycle computation
+    due_date INTEGER,                   -- day of month; anchors calendar reminders
     annual_fee REAL DEFAULT 0.0,
     reward_points REAL DEFAULT 0.0,
-    point_value REAL DEFAULT 0.25
+    point_value REAL DEFAULT 0.25,
+    renewal_date TEXT,
+    network TEXT DEFAULT 'Visa',
+    lounge_visits_limit REAL DEFAULT 0.0,
+    lounge_visits_used REAL DEFAULT 0.0,
+    lounge_int_limit REAL DEFAULT 0.0,
+    lounge_int_used REAL DEFAULT 0.0,
+    milestone_spend_target REAL DEFAULT 0.0,
+    milestone_spend_current REAL DEFAULT 0.0,
+    milestone_reward_desc TEXT,
+    remarks TEXT,
+    base_points REAL DEFAULT 1.0,
+    base_spend REAL DEFAULT 100.0,
+    current_statement_spend REAL DEFAULT 0.0,   -- vestigial, always written as 0 (see Data Model)
+    category_rules_json TEXT DEFAULT '[]',
+    milestone_rules_json TEXT DEFAULT '[]',
+    redemption_partners_json TEXT DEFAULT '[]'
+)
+
+CREATE TABLE IF NOT EXISTS card_variants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    issuer TEXT NOT NULL,
+    network TEXT NOT NULL DEFAULT 'Visa',
+    card_tier TEXT DEFAULT 'Premium',
+    joining_fee REAL DEFAULT 0.0,
+    annual_fee REAL DEFAULT 0.0,
+    fee_waiver_spend REAL DEFAULT 0.0,
+    base_points REAL DEFAULT 1.0,
+    base_spend REAL DEFAULT 100.0,
+    point_value REAL DEFAULT 0.25,
+    lounge_visits_domestic INTEGER DEFAULT 0,
+    lounge_visits_international INTEGER DEFAULT 0,
+    eligibility_notes TEXT,
+    category_rules_json TEXT DEFAULT '[]',
+    milestone_rules_json TEXT DEFAULT '[]',
+    redemption_partners_json TEXT DEFAULT '[]',
+    pros_json TEXT DEFAULT '[]',
+    cons_json TEXT DEFAULT '[]',
+    is_seeded INTEGER NOT NULL DEFAULT 0,
+    source_notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(name, issuer)
 )
 ```
 
+`transactions` additions relevant here: `type` allows `'Spend'`, the ref-type columns allow `'Liability'`, plus `category_id` and `is_balance_exempt` columns (see `Architecture/05-Database-Architecture.md` for the full table).
+
 Seeded category row: `('Liability', 'Credit Card', None)` — `fields_definition` is `NULL`.
 
-Legacy migration path: a pre-existing `credit_cards` table (with `issuer`, `credit_limit`, `outstanding`, `remarks`, etc.) is migrated into `liabilities` + `metadata_json` and renamed to `credit_cards_old` on startup if found. A separate idempotent backfill step then reads any Credit-Card liability's `metadata_json` and populates `credit_card_details` from it (for installs predating the satellite table), then zeroes the loan-only columns and sets `liability_kind = 'revolving_credit'`. This backfill only runs once per liability (guarded by "not already in `credit_card_details`"), so it does not keep the two paths in sync going forward — new edits from `CreditCards.tsx` after that point only update `metadata_json`, not the satellite row.
+Migrations, all idempotent, in `init_db()` order:
 
-`CreditCards.tsx`'s reward-engine fields inside `metadata_json` (not columns anywhere): `network`, `renewal_date`, `remarks`, `lounge_visits_limit`, `lounge_visits_used`, `lounge_int_limit`, `lounge_int_used`, `milestone_spend_target`, `milestone_spend_current`, `milestone_reward_desc`, `base_points`, `base_spend`, `current_statement_spend`, `category_rules_json`, `milestone_rules_json`, `redemption_partners_json`.
+- A pre-existing legacy `credit_cards` table is migrated into `liabilities` + `metadata_json` and renamed to `credit_cards_old`.
+- **(F)** Any Credit-Card liability without a `credit_card_details` row gets one backfilled from its `metadata_json` basic fields; loan-only columns are zeroed and `liability_kind` set.
+- **(J)** The reward-engine columns are added to `credit_card_details` if missing, then backfilled once per card from `metadata_json` (for installs where `CreditCards.tsx` used to store reward config there).
+- **(L)** Any non-zero legacy `current_statement_spend` is converted into a dated, `is_balance_exempt = 1` `'Spend'` adjustment transaction (dated today, so it naturally ages out of the cycle window like real spend), and the column is zeroed so the migration can't re-fire — even if the marker is later deleted via the generic Ledger.
+- `card_variants` is seeded only on the run that first creates the table.
 
-Unused/dead schema present in `db.py` but not wired to any route (distinct from the working `metadata_json`-based reward engine described above): `reward_programs` (references a non-existent `financial_products` table), `reward_rules`, `reward_partners`, `reward_ledger`, `reward_redemptions`.
+Unused/dead schema present in `db.py` but not wired to any route: `reward_programs` (references a non-existent `financial_products` table), `reward_rules`, `reward_partners`, `reward_ledger`, `reward_redemptions`.
 
 ## Business Rules
 
-There are no rules specific to Credit Cards in `decision_engine.py` or `financial_rules` — `generate_recommendations()` never inspects `credit_card_details` or Credit-Card liabilities at all (no utilization warning, no fee-waiver risk flag, no minimum-payment risk). What does exist is client-side computed logic inside `CreditCards.tsx` itself, evaluated live in the browser from user-entered configuration, not stored as rule outputs:
+Credit-card logic is split between `backend/calculations.py`, `backend/decision_engine.py`, and client-side mirrors in `CreditCards.tsx`. Nothing here is in `financial_rules`; all inputs are per-card data.
 
-- **Reward yield resolution** (`calculatorRecommendations`, the Smart Rewards Simulator): for a hypothetical spend amount/category, checks category exclusion first; if not excluded, resolves a multiplier from `category_rules_json` (defaulting to 1.0x if no matching category rule); checks whether projected total spend (`current_statement_spend + hypothetical amount`) crosses the highest applicable `milestone_rules_json` threshold, and if so substitutes that milestone's bonus points-rate/spend-block instead of the base rate; computes raw points as `(amount / spend_block) * points_rate * multiplier`; applies a monthly point cap from the category rule if set; converts to INR either at `point_value` (cash strategy) or via the best-ratio redemption partner assuming ₹1/mile (miles strategy)
-- **"Low yield" flag**: a card is flagged in Inventory if `annual_fee > 0` and its accumulated `reward_points * point_value` is less than the annual fee — pure display logic, not a stored recommendation
-- **Fee-waiver pacing**: `required daily rate = (milestone_spend_target - milestone_spend_current) / days_until_renewal_date` — again computed live in the component, not persisted or exposed via any API
-- The only backend-side "rule-like" behavior is structural: `PUT /api/liabilities/{id}/credit-card-details` unconditionally forces `interest_rate = 0, emi = 0, tenure_months = 0` and sets `liability_kind = 'revolving_credit'` on the parent liability — a data-integrity side effect, not a financial business rule, and one that only fires along path 1 (the generic `liabilities` tab), not when a card is edited through `CreditCards.tsx`.
+- **Billing cycle** (`calculate_statement_cycle(statement_date, as_of)`): returns the `{start, end}` of the cycle containing `as_of`, clamping `statement_date` to each month's length (e.g. day 31 in February) and walking back a month if this month's statement day hasn't arrived. Defaults to day 15 if unset. Computed fresh on every call; there's no stored cycle anchor or scheduled reset.
+- **Reward yield resolution** (`resolve_reward_rate()` in `calculations.py`, mirrored in `CreditCards.tsx`'s `calculatorRecommendations` — keep the two in sync): category exclusion → category multiplier (1.0× if no rule) → milestone step-up if `current_spend + amount` crosses a threshold (substituting that milestone's rate/spend-block for the base rate) → raw points `(amount / spend_block) × rate × multiplier` → clamp to the **tightest** of all the category's caps (`monthlyCapPoints` and every `caps[]` entry). Because each call evaluates one isolated hypothetical transaction, taking the minimum is exact with no date arithmetic.
+- **Pooled caps** (`groupLabel`): a cap entry with a `groupLabel` is also a ceiling on the *combined* points of every category on the card declaring the same label. When a `category_spend_map` (real per-category spend this cycle, from `GET /api/liabilities/{id}/spend-breakdown`) is supplied, the pool's remaining headroom is added as an extra cap candidate. Siblings' already-earned points are estimated at this call's resolved rate (an approximation — there's no per-transaction points ledger). Without spend data, pooled caps degrade to ordinary per-category caps.
+- **Redemption value**: cash strategy uses the card's `point_value`; miles strategy picks the partner maximizing `transferRatio × pointValue` (per-route `pointValue`, defaulting to ₹1/point when absent). This is client-side only, in `CreditCards.tsx`.
+- **Compare Cards** (`normalize_card_for_comparison()` + `compare_cards()`): normalizes owned cards and Library variants to one shape, then scores five dimensions min-max-normalized *relative to the other cards in the set* (not absolute): fee (inverted), projected annual reward value at `assumed_annual_spend` (default ₹6,00,000, spend-free projection), lounge access (international weighted 1.5×), milestone ease (inverse of fee-waiver spend), and simplicity. Default weights: reward 0.4, fee 0.2, lounge 0.2, milestone 0.1, simplicity 0.1; caller-supplied weights are merged over these.
+- **Annual Review** (`generate_credit_card_annual_reviews()` in `decision_engine.py`): `reward_value = reward_points × point_value`, `net = reward_value − annual_fee`. Verdict in order: no fee → Keep; net ≥ 0 → Keep; behind milestone pace (progress vs. fraction of the year elapsed before renewal) → Downgrade; lounge utilization < 25% with fee > ₹3,000 → Downgrade; otherwise Close. A Keep with a fee and net > 2× fee becomes Upgrade-Candidate.
+- **"Low yield" flag** (Inventory, client-side display only): `annual_fee > 0` and `reward_points × point_value < annual_fee`.
+- **Fee-waiver pacing** (Waivers & Milestones, client-side display only): `(milestone_spend_target − milestone_spend_current) / days_until_renewal_date`.
+- **Structural side effects**: the satellite PUT forces `interest_rate = emi = tenure_months = 0` and `liability_kind = 'revolving_credit'` on the parent liability. `'Spend'` increases `outstanding` unless `is_balance_exempt`.
 
-Because Credit Cards deliberately are not amortizing debt, none of `calculations.py`'s loan math (`calculate_remaining_tenure`, `calculate_remaining_interest`, `calculate_loan_progress`, `calculate_interest_saved_after_prepayment`, `calculate_advanced_emi_schedule`, `simulate_multi_loan_payoff`, `calculate_monthly_emi`) applies to them — confirmed by `/api/init`'s liability-enrichment logic, which only computes `remaining_tenure`/`remaining_interest`/`progress` when `interest_rate > 0 and emi > 0`, so Credit Card rows always get `remaining_tenure = -1`, `remaining_interest = 0.0`, `progress = 100.0`.
+Because Credit Cards aren't amortizing debt, none of `calculations.py`'s loan math applies; `/api/init` only computes `remaining_tenure`/`remaining_interest`/`progress` when `interest_rate > 0 and emi > 0`, so card rows always get `remaining_tenure = -1`.
 
 ## Configuration
 
-Per `hardcoded_vs_dynamic.md`, there is nothing Credit-Card-specific in the `financial_rules` table. All Credit-Card "configuration" is per-card, user-entered data, not global system rules:
+Per `hardcoded_vs_dynamic.md`, there is nothing Credit-Card-specific in the `financial_rules` table. All configuration is per-card user data or reference data:
 
-- The 7 fixed fields on `credit_card_details`, editable per-card through the generic entity form (hardcoded field list in `DynamicForm.tsx`'s `isCreditCard` branch)
-- The full reward-engine configuration in `CreditCards.tsx` — category multiplier rules, milestone thresholds, redemption partner ratios, lounge limits, base points/spend rate, fee-waiver target — all per-card user input stored in that card's `metadata_json`, not a global rule
-- `PRESETS` (HDFC Infinia, Axis Magnus, SBI Card ELITE) are hardcoded starting values in the component source, only used to pre-fill the add-card form; editing a preset's values afterward only changes that one card's `metadata_json`, never the preset itself
+- All `credit_card_details` fields per owned card, editable in full via the dedicated screen's multi-tab modal, or the 7 basic fields via the generic liabilities form (`DynamicForm.tsx`'s `isCreditCard` branch)
+- Card Library entries (`card_variants`) — seeded starter rows plus user additions, fully editable
+- `PRESETS` in `CreditCards.tsx` — hardcoded add-form starting values; editing a card created from one never changes the preset
+- Hardcoded constants in code: Compare Cards' default weights and default assumed annual spend, the Annual Review's thresholds (25% lounge utilization, ₹3,000 fee, 2× net-value upgrade), and the day-15 default statement date
 
 ## UI Structure
 
-Two genuinely separate screens can edit a Credit Card liability:
+- **Dedicated path** — `App.tsx`'s `credit-cards` tab renders `CreditCards.tsx` directly. It has its own inventory grid (stylized card faces), a multi-tab add/edit modal (`activeModalTab`: `general`, `rates`, `categories`, `milestones`, `partners`) whose General tab also shows the current cycle's real spend total and per-category breakdown, and the six page-level sub-tabs listed in Scope. On mount it fetches `spend-breakdown` for every card so the Simulator can enforce pooled caps.
+- **Generic path** — `App.tsx`'s `liabilities` tab renders `EntityGrid.tsx` + `DynamicForm.tsx` for all liability categories. For Credit Cards, `EntityGrid` adds Credit Limit and Due Date columns, and `DynamicForm`'s `isCreditCard` branch drops the loan fields and shows the 7 basic card fields. Saves PUT those 7 fields to the satellite route (a partial update, so the reward config survives).
+- **Transactions Ledger** (`TransactionsLedger.tsx`) — where `'Spend'` rows against a card are entered, with a category picker writing `transactions.category_id`.
 
-- **Generic path** — `App.tsx`'s `liabilities` tab renders `EntityGrid.tsx` + `DynamicForm.tsx` for all liability categories. For `category_name === 'Credit Card'`, `EntityGrid` adds two `CATEGORY_COLUMNS`: Credit Limit and Due Date. `DynamicForm`'s `isCreditCard` branch drops `interest_rate`/`emi`/`tenure_months` and shows `lender_institution_id`, `outstanding`, `credit_limit`, `statement_balance`, `statement_date`, `due_date`, `annual_fee`, `status`, `owner`. On save, `EntityGrid.dispatchSatelliteData()` PUTs these to `/api/liabilities/{id}/credit-card-details` (the satellite table) — this is the *only* UI path that writes `credit_card_details`.
-- **Dedicated path** — `App.tsx`'s `credit-cards` tab renders `CreditCards.tsx` directly (not through `EntityGrid`/`DynamicForm` at all). It has its own inventory grid (stylized card faces), its own multi-tab add/edit modal (`activeModalTab`: `general`, `rates`, `categories`, `milestones`, `partners`), and three page-level sub-tabs: **Card Inventory**, **Waivers & Milestones** (fee-waiver progress bars + lounge quota trackers), and **Smart Rewards Simulator** (category/amount/strategy inputs ranking all cards by estimated yield). Every save here goes through the plain generic `POST/PUT /api/entities/liabilities` with all card-specific data folded into `metadata_json` — it never calls the `credit-card-details` satellite endpoints.
-
-Both tabs read from the same `data.liabilities` array (from `GET /api/init`), which contains the merged result of both persistence paths, so both UIs display a plausible-looking card, but each only writes the subset of fields its own form covers, and a value edited in one screen is invisible to (and can be silently overwritten by a later save from) the other.
+Both card screens read the same `data.liabilities` array from `GET /api/init`, with `credit_card_details` columns flattened onto each card plus derived `real_cycle_spend_total`, `has_spend_transactions`, `cycle_start`, `cycle_end`, and `statement_spend_adjustment`.
 
 ## API Contracts
 
-- `GET/POST/PUT/DELETE /api/entities/liabilities` — generic CRUD used by *both* UI paths. `GET /api/init` and `GET /api/entities/liabilities` join in `credit_card_details` for any liability whose `category_name == 'Credit Card'` and flatten those fields onto the returned object, then additionally parse and spread `metadata_json` onto the same object — so the final API response for a credit card is a merge of both persistence paths, with `metadata_json` fields applied after (and so taking precedence for any overlapping key name)
-- `GET /api/liabilities/{id}/credit-card-details` — returns the satellite row for a given liability id, or `null` if none exists yet. Not called by `CreditCards.tsx`.
-- `PUT /api/liabilities/{id}/credit-card-details` — upserts the satellite row (`CreditCardDetailsSchema`: `credit_limit`, `statement_balance`, `statement_date`, `due_date`, `annual_fee`, `reward_points`, `point_value`); as a side effect, always sets the parent liability's `liability_kind = 'revolving_credit'` and zeroes `interest_rate`/`emi`/`tenure_months`. Called only from `EntityGrid.tsx`.
-- `GET /api/calendar` — generates two kinds of Credit Card events per card per month over the next 12 months: `"{name} Payment Due (Billed)"` for the statement balance, and `"{name} Payment Due (Unbilled)"` for `max(outstanding - statement_balance, 0)`, both anchored to `credit_card_details.due_date`. This reads exclusively from the `credit_card_details` satellite table (via a SQL join), so a card only edited through `CreditCards.tsx` (path 2) and never through the generic liabilities tab will have no `credit_card_details` row and will not appear on the calendar at all, or will show stale values from whenever the satellite row was last backfilled/written.
-- No dedicated `/api/calculations/*` endpoint exists for credit card rewards (contrast with Loans' `advanced-emi` and `loan-optimizer` endpoints) — the entire Smart Rewards Simulator computation happens client-side in `CreditCards.tsx`'s `calculatorRecommendations` memo, with no backend round-trip
-- `PUT /api/rules` exists generically but has no Credit-Card rule_keys to target (see Business Rules)
+- `GET/POST/PUT/DELETE /api/entities/liabilities` — generic CRUD for the base liability row, used by both UIs.
+- `GET /api/init` — returns each Credit Card liability with `credit_card_details` flattened on (overlaying any `metadata_json` keys) plus the derived cycle-spend fields above.
+- `GET /api/liabilities/{id}/credit-card-details` — the satellite row, or `null`.
+- `PUT /api/liabilities/{id}/credit-card-details` — upsert (`CreditCardDetailsSchema`). Partial update for an existing row; full insert with defaults for a new one. Maps `current_statement_spend` onto the balance-exempt adjustment transaction (create / update-and-redate only if the amount changed / delete when zeroed) and writes the column as 0. Forces the parent liability to `revolving_credit` with loan fields zeroed.
+- `GET /api/liabilities/{id}/spend-breakdown` — `{cycle_start, cycle_end, total, by_category[]}` for the currently open cycle, computed live from `'Spend'` transactions. Deliberately on-demand rather than part of `/api/init`.
+- `GET/POST/PUT/DELETE /api/card-variants` — Card Library CRUD.
+- `POST /api/credit-cards/compare` — body: `owned_liability_ids`, `library_variant_ids` (2–5 total, else 400), optional `weights` and `assumed_annual_spend`.
+- `GET /api/credit-cards/annual-review` — verdicts for all owned cards, or one via `?liability_id=`.
+- `GET /api/calendar` — two Credit Card events per card per month over the next 12 months: `"{name} Payment Due (Billed)"` for `statement_balance` and `"{name} Payment Due (Unbilled)"` for `max(outstanding − statement_balance, 0)`, anchored to `credit_card_details.due_date`. Both UIs write that table, so every card with a satellite row and a due date appears.
+- `/api/entities/transactions` — `'Spend'` rows are ordinary generic-ledger transactions, except that `is_balance_exempt` is stripped from payloads and preserved from the stored row.
 
 ## AI Responsibilities
 
-None currently exist. There is no AI/ML assistant implemented anywhere in Artha — no LLM integration, no natural-language interface, nothing that reads or writes Credit Card data autonomously today. The legacy architecture doc's "AI Scope" section (AI may explain/recommend/compare/summarize; AI must not modify reference data, calculations, schema, or business rules) is a forward-looking design boundary for a not-yet-built assistant, not a description of an existing feature. `CreditCards.tsx`'s reward-yield calculator is deterministic arithmetic evaluated in React, not AI/ML, despite computing something that *feels* like a recommendation ("this card gives you the best yield for this purchase"). `decision_engine.py`'s rule-based recommendations (which power Loans/Insurance/Goals/Liquidity checks) are the closest adjacent capability but still do not cover Credit Cards at all — there is no proactive warning today for a maxed-out card, a card carrying revolving interest, or a missed fee-waiver deadline; the user must open the Waivers & Milestones tab themselves to see that.
+The AI Assistant (`backend/ai/`, opt-in) can explain and answer questions over already-computed data. For card-related questions (`card`, `credit card` keywords), `backend/ai/context.py` includes liabilities and a sample of Card Library rows in the prompt context. It is read-only: it doesn't write card data, change rules, or produce verdicts of its own. The Simulator, Compare Cards, and Annual Review are deterministic code, not AI.
 
 ## Reports
 
-No dedicated Credit Card export/report exists today. There is no Excel/PDF export analogous to Loans' amortization-schedule export, and no "annual card review" or "utilization history" report. Credit Card balances and due dates feed into the shared Financial Calendar (from the `credit_card_details` path only) and into the overall net-worth/total-liabilities figures on the dashboard, and reward-yield estimates are viewable live in the Smart Rewards Simulator — but none of these are exportable/printable reports.
+- **Annual Review** is the closest thing to a card report: a per-card verdict list viewable in its tab. It isn't exportable.
+- **Compare Cards** results are computed on demand and not persisted or exportable.
+- There's no Excel/PDF export analogous to Loans' amortization export, and no utilization-history or spend-history report. Card balances and due dates feed the shared Financial Calendar and the dashboard's net-worth/total-liabilities figures.
 
 ## Future Enhancements
 
-Pulled from `Architecture/Legacy/Artha_Credit_Card_Architecture_v1.md`'s forward-looking sections, plus one internal-consistency item surfaced while documenting this domain. **None of the following are built**; each needs an explicit product decision, and per that doc's guidance, should extend the existing generic tables rather than introduce a parallel domain module or repository layer:
+None of the following are built; each needs an explicit product decision, and per the legacy doc's guidance should extend the existing generic tables rather than introduce a parallel domain module:
 
-- **Reconcile the two persistence paths.** The most concrete near-term fix: either retire the `credit_card_details` satellite table and the generic-tab editing path in favor of `CreditCards.tsx`'s richer `metadata_json` model, or extend `credit_card_details` with the reward-engine columns and make `CreditCards.tsx` write through the satellite route instead of raw `metadata_json`. Today a user can edit a card in one screen and have it look unchanged (or get overwritten) in the other — this needs a decision, not just documentation.
-- **Wire the reward engine to real transactions.** `category_rules_json`/`milestone_rules_json`/`redemption_partners_json` already model a genuine reward system; the missing piece is accruing `reward_points` and `current_statement_spend` automatically from posted `transactions` rows instead of manual entry.
-- **Decide the fate of `reward_programs`/`reward_rules`/`reward_partners`/`reward_ledger`/`reward_redemptions`.** These pre-date (or were designed in parallel with) `CreditCards.tsx`'s `metadata_json`-based reward engine and now duplicate its purpose while being completely unused. Either wire them up properly (fixing the dangling `financial_products` FK first) and migrate `CreditCards.tsx` to use them, or remove them.
-- **Card Library**: a genuine, maintained reference catalogue of card products (bank, network, published fees/rewards/eligibility/lounge access/merchant offers), distinct from a user's own editable `PRESETS`-seeded card — would warrant new reference tables (`card_variants`, `travel_partners`, `merchant_offers`) separate from both existing persistence paths
-- **Compare Cards**: side-by-side weighted scoring across 2-5 registered cards (fee, rewards, acceptance, ecosystem, travel, simplicity, stability) — no persistence needed if built, purely computed on demand
-- **Annual Review decision engine**: a `decision_engine.py`-style function outputting Keep/Close/Upgrade/Downgrade/Replace plus a "worth the fee?" verdict and next review date — natural home for turning the existing client-side "low yield"/fee-waiver-pacing arithmetic into an actual proactive recommendation
-- **Offer/merchant intelligence and portfolio-level reward optimization** — explicitly labeled Phase 2/3 ideas in the legacy doc, no design work done yet beyond the phase list itself
+- **Feed the spend ledger into the Annual Review** — it still uses manually-entered aggregates (its `caveat` field says so).
+- **Accrue `reward_points` and `milestone_spend_current` from `'Spend'` transactions** instead of manual entry. This needs a per-transaction points record to be exact, since rates vary by milestone state at the time of each spend.
+- **Surface Annual Review verdicts and utilization/fee-waiver risk in `generate_recommendations()`** so they appear proactively on the dashboard.
+- **Decide the fate of the dead `reward_*` tables** — wire them up (fixing the dangling `financial_products` FK first) or remove them. The live reward engine doesn't need them.
+- **Retire `PRESETS`** in favor of prefilling from Card Library variants, which already covers the same three cards.
+- **Offer/merchant intelligence and portfolio-level reward optimization** — Phase 2/3 ideas in the legacy doc, no design work done beyond the phase list.
