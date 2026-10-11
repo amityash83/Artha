@@ -160,7 +160,7 @@ export const MonthlySalaryGrid: React.FC<Props> = ({ inputs, financialYear, meta
             ? { ...m, payroll_deductions: { ...m.payroll_deductions, employee_epf: s.months[i].epf } } : m)),
           `Filled Employee EPF in ${scope === 'all' ? 'every month' : 'the projected months'}${scope === 'projected' && months.some((m) => m.status === 'actual') ? '; actual months keep their payslip figures' : ''}.`)} />
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-          <button className="btn btn-secondary" style={smallBtn} onClick={() => setShowImport(true)}><FileUp size={12} /> Import CSV</button>
+          <button className="btn btn-secondary" style={smallBtn} onClick={() => setShowImport(true)}><FileUp size={12} /> Import payslips (PDF/CSV)</button>
           <button className="btn btn-secondary" style={smallBtn} onClick={downloadTemplate}><Download size={12} /> Download as CSV (template)</button>
           <button className="btn btn-secondary" style={smallBtn} onClick={resetFromCtc}>Reset from annual (CTC)</button>
           {notice && <span role="status" style={{ fontSize: '12px', color: 'var(--success)' }}>{notice}</span>}

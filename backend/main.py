@@ -26,6 +26,7 @@ import backend.tax.waterfall as tax_waterfall
 import backend.tax.sensitivity as tax_sensitivity_mod
 import backend.tax.epf as tax_epf
 import backend.tax.prefill as tax_prefill_mod
+import backend.tax.payslip_pdf as tax_payslip_pdf_mod
 from backend.decision_engine import generate_recommendations, generate_credit_card_annual_reviews
 
 # Shared-secret auth for the Docker/web deployment path only. Empty/unset (the
@@ -2031,6 +2032,28 @@ def tax_epf_suggestion(req: TaxEpfSuggestionRequest):
 def tax_prefill(financial_year: Optional[str] = None, person_id: Optional[int] = None):
     """Proposed planner figures from Artha's own records; the UI applies only what the user ticks."""
     return _tax_store_call(lambda conn: tax_prefill_mod.prefill(conn, financial_year or _default_financial_year(), person_id))
+
+PAYSLIP_PDF_MAX_FILES = 24
+PAYSLIP_PDF_MAX_BYTES = 10 * 1024 * 1024
+
+@app.post("/api/tax/payslip-pdf")
+async def tax_payslip_pdf(files: List[UploadFile] = File(...), password: Optional[str] = Form(None)):
+    """Reads payslip PDFs in memory (never stored) into a pay month and label/amount lines;
+    the planner maps them onto the month-by-month grid. One result per file, in order."""
+    if len(files) > PAYSLIP_PDF_MAX_FILES:
+        raise HTTPException(status_code=422, detail=f"Up to {PAYSLIP_PDF_MAX_FILES} PDFs at a time.")
+    results = []
+    for f in files:
+        data = await f.read(PAYSLIP_PDF_MAX_BYTES + 1)
+        entry = {"file": f.filename}
+        if len(data) > PAYSLIP_PDF_MAX_BYTES:
+            results.append({**entry, "error": "too_large", "message": "Larger than 10 MB; this doesn't look like a payslip."})
+            continue
+        try:
+            results.append({**entry, **tax_payslip_pdf_mod.read_payslip(data, password or None)})
+        except tax_payslip_pdf_mod.PayslipPdfError as e:
+            results.append({**entry, "error": e.code, "message": str(e)})
+    return {"results": results}
 
 PLANNER_DRAFT_SLOT = re.compile(r"^[a-z0-9_-]{1,40}$")
 

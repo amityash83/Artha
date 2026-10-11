@@ -86,7 +86,8 @@ FastAPI backend (backend/)
   │                      months (apply_monthly_totals), HRA is computed per month, and each regime result gains a monthly TDS projection.
   │                      epf.py suggests Employee EPF from dated EPFO wage ceilings (tax/metadata/epf_rules.json; a mid-month change is split by days).
   │                      prefill.py proposes planner figures from Artha's own records (read-only; the user ticks what to apply);
-  │                      the planner keeps one saved plan per person and year in tax_planner_drafts (slot p<person>-<FY>)
+  │                      the planner keeps one saved plan per person and year in tax_planner_drafts (slot p<person>-<FY>).
+  │                      payslip_pdf.py reads payslip PDFs (pypdf[crypto], in memory) into month + label/amount lines for the grid's import
   │                      sensitivity.py: break-even, NPS-for-target and salary/bonus/basic-share sweeps (bisection over full engine runs);
   │                      CSV/PDF reports are built client-side (frontend/src/components/tax/reportTables.ts), PDF via the preload's savePdf
   └─ ai/               — AI Assistant: providers.py (Ollama / OpenAI-compatible / Anthropic behind get_provider()),
