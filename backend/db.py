@@ -407,6 +407,25 @@ def init_db():
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_property_rental_ledger_asset ON property_rental_ledger(asset_id)")
 
+    # Floating-rate loans: dated rate changes (and the EMI, when the bank changed it rather
+    # than the tenure). previous_rate/previous_emi on the earliest row are the terms before
+    # any recorded change. Interest is charged at the rate in force on each date; past
+    # ledger entries are never rewritten (main.py loan_terms_on / apply_rate_changes).
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS loan_rate_changes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        liability_id INTEGER NOT NULL REFERENCES liabilities(id) ON DELETE CASCADE,
+        effective_date TEXT NOT NULL,
+        rate REAL NOT NULL,
+        emi REAL,
+        previous_rate REAL,
+        previous_emi REAL,
+        note TEXT,
+        UNIQUE(liability_id, effective_date)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_loan_rate_changes_liability ON loan_rate_changes(liability_id)")
+
     # Insurance claims (satellite table: 1:many with assets, individual claim events)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS insurance_claims (

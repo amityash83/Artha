@@ -6,6 +6,7 @@ import re
 import math
 import uuid
 import calendar
+import sqlite3
 from datetime import datetime, date
 from typing import List, Optional
 from contextlib import asynccontextmanager
@@ -254,10 +255,9 @@ def get_init_data():
     # Post any automatic EMIs that have come due (cheap when there are none). Never lets a
     # posting problem stop the app from loading.
     try:
-        if post_due_emis(cursor):
-            conn.commit()
-        else:
-            conn.commit()  # may have stamped auto_emi_since
+        apply_rate_changes(cursor)
+        post_due_emis(cursor)
+        conn.commit()  # postings, and possibly a stamped auto_emi_since or new current terms
     except Exception as e:
         conn.rollback()
         print("[Auto EMI] Posting skipped:", e)
@@ -709,6 +709,44 @@ def _loan_due_dates(day: int, after: date, upto: date) -> list:
     return out
 
 
+def _rate_changes(cursor, loan_id: int) -> list:
+    return [dict(r) for r in cursor.execute(
+        "SELECT * FROM loan_rate_changes WHERE liability_id = ? ORDER BY effective_date, id", (loan_id,))]
+
+
+def loan_terms_on(cursor, loan_id: int, day: date, current_rate: float, current_emi: float) -> tuple:
+    """(rate, EMI) in force on `day`. With no recorded changes, the loan's own rate and EMI.
+    Otherwise the terms before the first change (its previous_*), then each change on or
+    before `day` in date order: a change always sets the rate, and the EMI only when the
+    bank changed it (else the EMI stays and the tenure moves)."""
+    changes = _rate_changes(cursor, loan_id)
+    if not changes:
+        return current_rate, current_emi
+    first = changes[0]
+    rate = first["previous_rate"] if first["previous_rate"] is not None else current_rate
+    emi = first["previous_emi"] if first["previous_emi"] is not None else current_emi
+    for c in changes:
+        if c["effective_date"] > day.isoformat():
+            break
+        rate = c["rate"]
+        if c["emi"]:
+            emi = c["emi"]
+    return rate, emi
+
+
+def apply_rate_changes(cursor, today: Optional[date] = None) -> None:
+    """Keep each loan's own rate and EMI equal to the terms in force today, so projections
+    (tenure and interest left), the forms and the calendar follow a change once it starts."""
+    today = today or date.today()
+    for row in cursor.execute("SELECT DISTINCT liability_id FROM loan_rate_changes").fetchall():
+        loan = cursor.execute("SELECT interest_rate, emi FROM liabilities WHERE id = ?", (row["liability_id"],)).fetchone()
+        if not loan:
+            continue
+        rate, emi = loan_terms_on(cursor, row["liability_id"], today, loan["interest_rate"], loan["emi"])
+        if (rate, emi) != (loan["interest_rate"], loan["emi"]):
+            cursor.execute("UPDATE liabilities SET interest_rate = ?, emi = ? WHERE id = ?", (rate, emi, row["liability_id"]))
+
+
 def post_due_emis(cursor, today: Optional[date] = None) -> list:
     """Automatic EMIs, MMEX-style: for each loan with "Post EMI automatically" on (loan
     metadata: auto_emi, emi_account_id, emi_day), post every EMI date that has come since
@@ -747,7 +785,8 @@ def post_due_emis(cursor, today: Optional[date] = None) -> list:
             owed = cursor.execute("SELECT outstanding FROM liabilities WHERE id = ?", (loan["id"],)).fetchone()["outstanding"] or 0.0
             if owed <= 0:
                 break
-            rate = float(loan["interest_rate"] or 0.0)
+            rate, emi_due = loan_terms_on(cursor, loan["id"], due, float(loan["interest_rate"] or 0.0), float(loan["emi"] or 0.0))
+            rate = float(rate or 0.0)
             interest = round(owed * rate / 1200.0, 2)
             month = due.strftime("%b %Y")
             if interest > 0:
@@ -755,7 +794,9 @@ def post_due_emis(cursor, today: Optional[date] = None) -> list:
                                   VALUES ('None', NULL, 'Liability', ?, 'Interest', ?, ?, ?)""",
                                (loan["id"], interest, due.isoformat(), f"Interest for {month} at {rate:g}% ({AUTO_POSTED_NOTE})"))
                 adjust_double_entry_balances(cursor, "Interest", interest, "None", None, "Liability", loan["id"], "add")
-            emi = round(min(float(loan["emi"]), owed + interest), 2)  # the last EMI clears what's left
+            emi = round(min(float(emi_due or 0.0), owed + interest), 2)  # the last EMI clears what's left
+            if emi <= 0:
+                break
             cursor.execute("""INSERT INTO transactions (source_ref_type, source_ref_id, dest_ref_type, dest_ref_id, type, amount, transaction_date, notes)
                               VALUES ('Account', ?, 'Liability', ?, 'EMI', ?, ?, ?)""",
                            (account_id, loan["id"], emi, due.isoformat(), f"EMI for {month} ({AUTO_POSTED_NOTE})"))
@@ -1223,6 +1264,78 @@ def get_credit_card_details(id: int):
         return dict(row) if row else None
     finally:
         conn.close()
+
+class LoanRateChange(BaseModel):
+    effective_date: str
+    rate: float
+    emi: Optional[float] = None  # set when the bank changed the EMI; empty when it changed the tenure
+    note: Optional[str] = ""
+
+
+@app.get("/api/liabilities/{id}/rate-changes")
+def list_rate_changes(id: int):
+    conn = get_db_connection()
+    try:
+        return _rate_changes(conn.cursor(), id)
+    finally:
+        conn.close()
+
+
+@app.post("/api/liabilities/{id}/rate-changes")
+def add_rate_change(id: int, change: LoanRateChange):
+    """Record that from effective_date the loan's rate (and possibly EMI) changed. Past ledger
+    entries are untouched; postings on or after the date use the new terms."""
+    try:
+        day = date.fromisoformat(change.effective_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="effective_date must be YYYY-MM-DD")
+    if not 0 <= change.rate <= 50 or (change.emi is not None and change.emi < 0):
+        raise HTTPException(status_code=422, detail="Rate must be 0-50% and EMI not negative")
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        loan = cursor.execute("SELECT interest_rate, emi FROM liabilities WHERE id = ?", (id,)).fetchone()
+        if not loan:
+            raise HTTPException(status_code=404, detail="Loan not found")
+        before = date.fromordinal(day.toordinal() - 1)
+        prev_rate, prev_emi = loan_terms_on(cursor, id, before, loan["interest_rate"], loan["emi"])
+        try:
+            cursor.execute("""INSERT INTO loan_rate_changes (liability_id, effective_date, rate, emi, previous_rate, previous_emi, note)
+                              VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                           (id, day.isoformat(), change.rate, change.emi or None, prev_rate, prev_emi, change.note or ""))
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=409, detail="There's already a change on that date; delete it first")
+        apply_rate_changes(cursor)
+        conn.commit()
+        return {"status": "success", "id": cursor.lastrowid}
+    finally:
+        conn.close()
+
+
+@app.delete("/api/liabilities/{id}/rate-changes/{change_id}")
+def delete_rate_change(id: int, change_id: int):
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        changes = _rate_changes(cursor, id)
+        gone = next((c for c in changes if c["id"] == change_id), None)
+        if not gone:
+            raise HTTPException(status_code=404, detail="Rate change not found")
+        cursor.execute("DELETE FROM loan_rate_changes WHERE id = ?", (change_id,))
+        # The earliest row carries the terms before any change: hand them on.
+        if gone is changes[0] and len(changes) > 1:
+            cursor.execute("UPDATE loan_rate_changes SET previous_rate = ?, previous_emi = ? WHERE id = ?",
+                           (gone["previous_rate"], gone["previous_emi"], changes[1]["id"]))
+        # With no changes left, the loan goes back to its terms before the first one.
+        if len(changes) == 1 and gone["previous_rate"] is not None:
+            cursor.execute("UPDATE liabilities SET interest_rate = ?, emi = ? WHERE id = ?",
+                           (gone["previous_rate"], gone["previous_emi"] if gone["previous_emi"] is not None else 0, id))
+        apply_rate_changes(cursor)
+        conn.commit()
+        return {"status": "success"}
+    finally:
+        conn.close()
+
 
 class LoanPropertyLink(BaseModel):
     asset_id: Optional[int] = None

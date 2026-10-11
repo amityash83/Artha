@@ -3,6 +3,7 @@ import { Category, Institution, Liability, Goal, Person } from '../types';
 import { HoldingLotsEditor } from './HoldingLotsEditor';
 import { GoalFundingConstraintsEditor } from './GoalFundingConstraintsEditor';
 import { DocumentsEditor } from './DocumentsEditor';
+import { LoanRateChangesEditor } from './LoanRateChangesEditor';
 import { PropertyRentalLedgerEditor } from './PropertyRentalLedgerEditor';
 import { InsuranceClaimsEditor } from './InsuranceClaimsEditor';
 import { InsurancePremiumPaymentsEditor } from './InsurancePremiumPaymentsEditor';
@@ -681,6 +682,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
   };
 
   const hasDocuments = (entityType === 'accounts' || entityType === 'assets' || entityType === 'liabilities' || entityType === 'goals') && !!initialData?.id;
+  const isLoan = entityType === 'liabilities' && !isCreditCard;
   const hasExtras = isHolding || isProperty || isInsurance || hasDocuments;
 
   return (
@@ -730,6 +732,13 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
                 calls directly rather than staging through the JSON satellite-dispatch flow,
                 since file bytes can't travel inside the form's JSON payload. Only shown once
                 the entity actually has an id — an unsaved new entity has nothing to attach to. */}
+            {isLoan && initialData?.id && (
+              <LoanRateChangesEditor loanId={initialData.id} onTermsChange={(rate, emi) => {
+                handleChange('interest_rate', rate);
+                if (emi) handleChange('emi', emi);
+              }} />
+            )}
+
             {hasDocuments && (
               <DocumentsEditor entityType={entityType} entityId={initialData.id} />
             )}

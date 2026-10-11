@@ -1131,3 +1131,12 @@ h1, h2, h3, h4, h5 {
 .aa-suggest { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .aa-qa .settings-row-label { font-weight: 500; }
 .aa-answer { font-size: 13.5px; color: var(--text-secondary); line-height: 1.6; white-space: pre-wrap; }
+.lr-history .df-checks { margin-top: 4px; }
+.lr-row { justify-content: space-between; cursor: default; }
+.lr-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+.lr-add input[type="date"] { width: 150px; font-size: 13px; padding: 6px 8px; }
+.lr-add select { width: auto; font-size: 13px; padding: 6px 8px; }
+.lr-text { display: flex; flex-direction: column; gap: 1px; }
+.lr-text > span { display: block; }
+.lr-add .settings-affix { width: auto; }
+.lr-add .settings-affix input { flex: none; width: 70px; text-align: right; padding: 6px 8px; font-size: 13px; }
