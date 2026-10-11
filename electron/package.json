@@ -4,6 +4,7 @@
   "private": true,
   "description": "Artha desktop shell: wraps the web UI and the bundled Python backend into a portable desktop app.",
   "main": "main.js",
+  "desktopName": "artha.desktop",
   "scripts": {
     "dev": "electron .",
     "copy-web": "node ../scripts/copy-web.mjs",
@@ -74,6 +75,7 @@
         }
       ],
       "category": "Finance",
+      "executableName": "artha",
       "icon": "../frontend/public/favicon.png"
     }
   }
