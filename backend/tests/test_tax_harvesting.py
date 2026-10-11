@@ -100,3 +100,16 @@ def test_route(conn):
     with TestClient(app) as client:
         r = client.get("/api/tax/harvesting", params={"person_id": 1, "financial_year": FY})
     assert r.status_code == 200 and r.json()["exemption"] == 125000
+
+
+def test_debt_and_liquid_funds_are_left_out_by_fund_type(conn):
+    import json
+    eq = holding(conn, "Index fund", "Mutual Fund", 200000, [("2024-01-10", 1000, 100)])
+    liquid = holding(conn, "Liquid fund", "Mutual Fund", 200000, [("2024-01-10", 1000, 100)])
+    conn.execute("UPDATE assets SET metadata_json = ? WHERE id = ?", (json.dumps({"fund_type": "Equity"}), eq))
+    conn.execute("UPDATE assets SET metadata_json = ? WHERE id = ?", (json.dumps({"fund_type": "Liquid"}), liquid))
+    conn.commit()
+    out = harvest_plan(conn, 1, FY, RULES, today=TODAY)
+    assert [s["asset"] for s in out["gain_harvest"]] == ["Index fund"]
+    assert any("Liquid fund (liquid)" in n for n in out["notes"])
+    assert not any("without a fund type" in n for n in out["notes"])

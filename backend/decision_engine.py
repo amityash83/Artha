@@ -1,6 +1,7 @@
 from datetime import datetime, date
 
 from backend.formatting import inr
+from backend.risk import effective_risk, metadata
 
 def get_rules(cursor):
     cursor.execute("SELECT rule_key, value, is_enabled FROM financial_rules")
@@ -224,8 +225,39 @@ def generate_recommendations(conn) -> list:
     for v in violations:
         recs.append({
             "category": "Goal Funding",
-            "title": f"Funding Rule Violated: {v['goal_name']}",
-            "message": f"'{v['goal_name']}' excludes funding from {v['category_name']}, but is currently linked to '{v['asset_name']}' ({v['category_name']}). Reassign this holding or remove the funding constraint.",
+            "title": f"{v['goal_name']} uses a kind of asset it shouldn't",
+            "message": f"{v['goal_name']} is set never to use {v['category_name']}, but {v['asset_name']} ({v['category_name']}) counts towards it. "
+                       f"Change the goal's restrictions, or the holding's \"Counts towards goal\".",
+            "status": "warning",
+            "action_type": "info",
+            "suggested_amount": 0.0,
+            "rule_key": None
+        })
+
+    # Check 5c: goals set to "Only low-risk holdings" (in the goal's funding_sources_json)
+    # funded by a holding whose effective risk isn't Low (backend/risk.py: a mutual
+    # fund's fund type, else its risk level, else the usual risk of its kind).
+    cursor.execute("""
+        SELECT g.name AS goal_name, g.funding_sources_json, a.name AS asset_name, a.risk_level, a.metadata_json, c.name AS category
+        FROM goals g
+        JOIN goal_holdings gh ON gh.goal_id = g.id
+        JOIN assets a ON a.id = gh.asset_id
+        LEFT JOIN categories c ON c.id = a.category_id
+        ORDER BY g.name, a.name
+    """)
+    for row in cursor.fetchall():
+        if not metadata(row["funding_sources_json"]).get("low_risk_only"):
+            continue
+        risk = effective_risk(row["category"], row["risk_level"], row["metadata_json"])
+        if risk == "Low":
+            continue
+        fund = metadata(row["metadata_json"]).get("fund_type")
+        what = f"{fund.lower()} fund" if fund and row["category"] == "Mutual Fund" else (row["category"] or "holding").lower()
+        recs.append({
+            "category": "Goal Funding",
+            "title": f"{row['goal_name']} has a {risk.lower()}-risk holding",
+            "message": f"{row['goal_name']} is set to use only low-risk holdings, but {row['asset_name']} ({what}, {risk.lower()} risk) counts towards it. "
+                       f"Move it to another goal, or untick \"Only low-risk holdings\" on the goal.",
             "status": "warning",
             "action_type": "info",
             "suggested_amount": 0.0,

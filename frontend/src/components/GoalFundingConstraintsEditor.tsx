@@ -31,7 +31,7 @@ export const GoalFundingConstraintsEditor: React.FC<GoalFundingConstraintsEditor
   return (
     <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: '10px' }}>
       <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-        Funding Restrictions — never fund this goal from these asset categories
+        Never count these kinds of asset towards this goal
       </label>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
         {assetCategories.map((cat) => (

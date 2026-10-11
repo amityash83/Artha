@@ -28,6 +28,16 @@ interface DynamicFormProps {
 
 const HOLDING_CATEGORIES = ['Stock', 'Mutual Fund'];
 
+// Mutual fund types and the risk each implies; mirrors backend/risk.py FUND_TYPE_RISK.
+const FUND_TYPES: { value: string; label: string }[] = [
+  { value: 'Equity', label: 'Equity (including index funds and ELSS)' },
+  { value: 'Hybrid', label: 'Hybrid' },
+  { value: 'Debt', label: 'Debt' },
+  { value: 'Liquid', label: 'Liquid or money market' },
+  { value: 'Other', label: 'Other (gold, international)' },
+];
+const FUND_TYPE_RISK: Record<string, string> = { Equity: 'High', Hybrid: 'Medium', Debt: 'Low', Liquid: 'Low', Other: 'Medium' };
+
 // What a home loan's money went on, and what that means for tax (tax/prefill.py).
 const LOAN_USE_HINT: Record<string, string> = {
   purchase: 'Interest (24b) and principal (80C) can count, old regime, self-occupied home.',
@@ -123,6 +133,8 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         standardFields['current_value'] = 'number';
         standardFields['status'] = 'select_status';
         standardFields['owner_id'] = 'person_select';
+        // A fund's type decides its risk (backend/risk.py) and its tax treatment.
+        if (categoryName === 'Mutual Fund') standardFields['fund_type'] = 'select_fund_type';
         standardFields['risk_level'] = 'select_risk';
       } else {
         standardFields['institution_id'] = 'institution_select';
@@ -171,6 +183,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       standardFields['monthly_contribution'] = 'number';
       standardFields['target_date'] = 'date';
       standardFields['priority'] = 'select_priority';
+      standardFields['low_risk_only'] = 'checkbox';
     } else if (entityType === 'income' || entityType === 'expenses') {
       standardFields['category_id'] = 'category_select';
       standardFields['owner_id'] = 'person_select';
@@ -240,7 +253,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       } else if (type === 'select_frequency') {
         defaultData[k] = isInsurance ? 'Yearly' : 'Monthly';
       } else if (type === 'checkbox') {
-        defaultData[k] = 1;
+        defaultData[k] = k === 'low_risk_only' ? 0 : 1;
+      } else if (type === 'select_fund_type') {
+        defaultData[k] = '';
       } else if (type === 'select_epf_status') {
         defaultData[k] = 'Active';
       } else if (type === 'select_loan_use') {
@@ -311,6 +326,11 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       });
       return;
     }
+    if (key === 'fund_type') {
+      // The fund type sets the risk level, so the two can't disagree.
+      setFormData((prev: any) => ({ ...prev, fund_type: val, risk_level: FUND_TYPE_RISK[val] ?? prev.risk_level }));
+      return;
+    }
     setFormData((prev: any) => ({
       ...prev,
       [key]: val,
@@ -372,6 +392,8 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       acquisition_date: 'Bought on',
       risk_level: 'Risk',
       goal_mapping: 'Counts towards goal',
+      fund_type: 'Fund type',
+      low_risk_only: 'Only low-risk holdings',
       linked_liability_ids: 'Loans on this property',
       linked_asset_id: 'Property it paid for',
       outstanding: isCreditCard ? 'Balance now' : 'Still owed',
@@ -424,6 +446,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
     employee_share: 'From your EPFO passbook, including interest. This and the employer\'s share make up the account\'s value.',
     pension_share: 'Recorded for reference only: a pension entitlement, not a balance you can withdraw, so it isn\'t counted in net worth.',
     uan: 'Your one UAN covers every employer; each employer gets its own member ID.',
+    low_risk_only: 'For money you can\'t afford to see fall, like a reserve: Artha flags any holding counted towards this goal that isn\'t low risk (liquid or debt funds, FDs, PPF, EPF are).',
   };
 
   // How each field is entered: money with ₹ and Indian grouping, rates as %, terms in months.
@@ -503,12 +526,13 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       return field(k, select(k, current, (v) => handleChange(k, v), options.map((f) => ({ value: f, label: f }))));
     }
     if (type === 'checkbox') {
-      return (
+      const toggle = (
         <div key={k} className="df-field df-switch">
           <span className="df-label">{getLabel(k)}</span>
           <Switch checked={!!Number(formData[k])} onChange={(v) => handleChange(k, v ? 1 : 0)} label={getLabel(k)} />
         </div>
       );
+      return HINTS[k] ? <div key={k} className="df-field df-wide">{toggle}<span className="df-hint">{HINTS[k]}</span></div> : toggle;
     }
     if (type === 'goal_select') {
       return field(k, select(k, formData[k] || '', (v) => handleChange(k, v), [
@@ -547,6 +571,18 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       const current = formData[k] || 'Active';
       return field(k, select(k, current, (v) => handleChange(k, v), (options.includes(current) ? options : [current, ...options]).map((o) => ({ value: o, label: o }))));
     }
+    if (type === 'select_fund_type') {
+      const value = formData[k] || '';
+      return field(k, (
+        <>
+          {select(k, value, (v) => handleChange(k, v), [{ value: '', label: 'Choose a type' }, ...FUND_TYPES])}
+          <span className="df-hint">{value
+            ? `${FUND_TYPE_RISK[value]} risk.${value === 'Equity' || value === 'Hybrid' ? '' : ' Its gains are taxed differently from equity funds.'}`
+            : 'Sets the fund\'s risk, and how its gains are taxed.'}</span>
+        </>
+      ));
+    }
+    if (type === 'select_risk' && fields.fund_type && formData.fund_type) return null; // set by the fund type
     if (type === 'select_epf_status') {
       const status = formData[k] || 'Active';
       return field(k, (

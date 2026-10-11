@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from backend.db import get_db_connection, init_db, get_db_path, get_db_dir
 import backend.calculations as calc
 from backend.formatting import inr
+from backend.risk import effective_risk
 import backend.backups as backups
 import backend.tax.engine as tax_engine
 import backend.tax.rules_loader as tax_rules
@@ -304,6 +305,7 @@ def get_init_data():
                     d.update(json.loads(d["metadata_json"]))
                 except:
                     pass
+            d["effective_risk"] = effective_risk(d.get("category_name"), d.get("risk_level"), d.get("metadata_json"))
             if d.get("category_name") == "Insurance":
                 cursor.execute("SELECT * FROM insurance_details WHERE asset_id = ?", (d["id"],))
                 details_row = cursor.fetchone()
@@ -339,7 +341,9 @@ def get_init_data():
                 cursor.execute("SELECT * FROM holding_lots WHERE asset_id = ? ORDER BY purchase_date", (d["id"],))
                 lots = [dict(lot) for lot in cursor.fetchall()]
                 d["holding_lots"] = lots
-                if lots:
+                # No recorded cost (e.g. the auto-migrated 1-unit, ₹0 opening lot): a return
+                # on nothing paid is meaningless, so leave xirr unset.
+                if lots and sum(lot["quantity"] * lot["price_per_unit"] for lot in lots) > 0:
                     cash_flows = [
                         {"date": lot["purchase_date"], "amount": -(lot["quantity"] * lot["price_per_unit"])}
                         for lot in lots
@@ -438,6 +442,8 @@ def get_init_data():
                     d["funding_sources"] = json.loads(d["funding_sources_json"])
                 except:
                     d["funding_sources"] = []
+            # The goal form's "Only low-risk holdings" lives in that blob.
+            d["low_risk_only"] = bool(isinstance(d.get("funding_sources"), dict) and d["funding_sources"].get("low_risk_only"))
             comp_details = calc.calculate_goal_expected_completion(d["target_amount"], d["current_amount"], d.get("monthly_contribution", 0.0))
             d.update(comp_details)
             goals.append(d)

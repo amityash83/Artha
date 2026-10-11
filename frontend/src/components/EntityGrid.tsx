@@ -40,7 +40,7 @@ const CARD_CATEGORIES = ['Credit Card'];
 // categories.entity_type for each kind ("liabilities" doesn't singularise by dropping the s).
 const CATEGORY_ENTITY_TYPE: Record<Kind, string> = { accounts: 'account', assets: 'asset', liabilities: 'liability', income: 'income', expenses: 'expense', goals: 'goal' };
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : Number(v) || 0);
-const units = (n: number, category: string) => `${n.toLocaleString('en-IN', { maximumFractionDigits: 3 })} ${category === 'Stock' ? (n === 1 ? 'share' : 'shares') : 'units'}`;
+const units = (n: number, category: string) => `${n.toLocaleString('en-IN', { maximumFractionDigits: 3 })} ${category === 'Stock' ? (n === 1 ? 'share' : 'shares') : n === 1 ? 'unit' : 'units'}`;
 const monthYear = (iso: string) => {
   const m = /^(\d{4})-(\d{2})/.exec(iso || '');
   return m ? new Date(Number(m[1]), Number(m[2]) - 1, 1).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }) : '';
@@ -64,7 +64,8 @@ const metaOf = (kind: Kind, e: any, showOwner: boolean): string => {
     parts.push(e.institution_name, e.status && e.status !== 'Active' ? e.status : null);
   } else if (kind === 'assets') {
     if (cat === 'Stock' || cat === 'Mutual Fund') {
-      parts.push(e.ticker, num(e.quantity) > 0 ? units(num(e.quantity), cat) : null, e.xirr != null && num(e.quantity) > 0 ? `${num(e.xirr).toFixed(1)}% a year` : null);
+      parts.push(cat === 'Mutual Fund' && e.fund_type ? `${String(e.fund_type).toLowerCase()} fund` : null, e.ticker, num(e.quantity) > 0 && num(e.cost_price) > 0 ? units(num(e.quantity), cat) : num(e.quantity) > 0 ? 'add purchase lots for units and return' : null,
+        e.xirr != null && num(e.quantity) > 0 && num(e.cost_price) > 0 ? `${num(e.xirr).toFixed(1)}% a year` : null);
     } else if (cat === 'Insurance') {
       parts.push(e.policy_type, e.institution_name, num(e.cover) > 0 ? `cover ${formatINR(e.cover)}` : null,
         num(e.premium) > 0 ? `premium ${formatINR(e.premium)}${e.frequency ? ` ${String(e.frequency).toLowerCase()}` : ''}` : null,
@@ -87,7 +88,7 @@ const metaOf = (kind: Kind, e: any, showOwner: boolean): string => {
         num(e.emi) > 0 ? `EMI ${formatINR(e.emi)}` : null, num(e.remaining_tenure) > 0 ? yearsLeft(num(e.remaining_tenure)) : null);
     }
   } else if (kind === 'goals') {
-    parts.push(e.priority ? `${e.priority} priority` : null, num(e.monthly_contribution) > 0 ? `${formatINR(e.monthly_contribution)}/mo` : null,
+    parts.push(e.priority ? `${e.priority} priority` : null, e.low_risk_only ? 'low-risk only' : null, num(e.monthly_contribution) > 0 ? `${formatINR(e.monthly_contribution)}/mo` : null,
       e.target_date ? `aim ${monthYear(e.target_date)}` : null);
   }
   if (showOwner) parts.push(e.owner_name);

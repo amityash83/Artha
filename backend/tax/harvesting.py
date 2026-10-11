@@ -25,6 +25,7 @@ from typing import Dict, List, Optional
 
 from backend.calculations import determine_gain_type
 from backend.tax.prefill import fy_bounds
+from backend.risk import EQUITY_ORIENTED_FUND_TYPES, fund_type, metadata
 
 EQUITY = ("Stock", "Mutual Fund")
 FUND_UNIT_DECIMALS = 3
@@ -98,15 +99,21 @@ def harvest_plan(conn: sqlite3.Connection, person_id: int, financial_year: str, 
     used = min(max(realised["equity_ltcg"], 0.0), exemption)
     budget = exemption - used
 
-    holdings = []
-    for a in conn.execute("""SELECT a.id, a.name, a.current_value, c.name AS category FROM assets a JOIN categories c ON c.id = a.category_id
+    holdings, not_equity = [], []
+    for a in conn.execute("""SELECT a.id, a.name, a.current_value, a.metadata_json, c.name AS category FROM assets a JOIN categories c ON c.id = a.category_id
                              WHERE a.owner_id = ? AND c.name IN ('Stock', 'Mutual Fund') ORDER BY a.name""", (person_id,)):
+        # Debt, liquid and other (gold, international) funds aren't equity-oriented: their
+        # gains are taxed differently and get no yearly exemption, so they're left out.
+        kind = fund_type(metadata(a["metadata_json"])) if a["category"] == "Mutual Fund" else None
+        if kind and kind not in EQUITY_ORIENTED_FUND_TYPES:
+            not_equity.append(f"{a['name']} ({kind.lower()})")
+            continue
         lots = _lots(conn, a["id"])
         qty = sum(float(l["quantity"]) for l in lots)
         if qty <= 0 or float(a["current_value"] or 0) <= 0:
             continue
         holdings.append({"id": a["id"], "name": a["name"], "category": a["category"], "lots": lots, "units_held": qty,
-                         "price": float(a["current_value"]) / qty})
+                         "price": float(a["current_value"]) / qty, "metadata_json": a["metadata_json"]})
 
     # Gain harvesting: biggest available long-term gain first, so the allowance is used
     # with as few sales as possible.
@@ -150,9 +157,12 @@ def harvest_plan(conn: sqlite3.Connection, person_id: int, financial_year: str, 
         "Losses not used this year carry forward for 8 years if you file your return on time.",
         "Record each sale as a Sell transaction so Artha logs the realised gain.",
     ]
-    if any(h["category"] == "Mutual Fund" for h in holdings):
-        notes.append("Mutual funds are treated as equity-oriented. Debt funds bought after 1 April 2023 are taxed at slab rates "
-                     "and don't get this exemption; leave those out.")
+    if not_equity:
+        notes.append(f"Left out as not equity-oriented, by their fund type: {', '.join(not_equity)}. Their gains are taxed differently "
+                     "and don't get this exemption.")
+    if any(h["category"] == "Mutual Fund" and not fund_type(metadata(h.get("metadata_json"))) for h in holdings):
+        notes.append("Mutual funds without a fund type are treated as equity-oriented. Set the fund type on each fund under Assets "
+                     "so debt funds and liquid funds are left out.")
     return {
         "financial_year": financial_year,
         "deadline": year_end.isoformat(),

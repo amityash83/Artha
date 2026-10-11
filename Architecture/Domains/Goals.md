@@ -49,6 +49,8 @@ Goals translate a raw net-worth number into progress toward specific outcomes th
 - Villa Fund shortfall recommendation: if a goal matching "villa" exists and `target_amount > current_amount`, emits a warning recommendation citing the gap and the goal's computed expected completion date.
 - Goal expected-completion status logic (`calculate_goal_expected_completion` in calculations.py): if the target is already met, status is "Green" with 0 months remaining; if `monthly_contribution <= 0`, status is "Red" and `expected_date` is the literal string `"Never"`; otherwise status is "Green" whenever `monthly_contribution > 0` (there is no intermediate "Yellow" branch actually reachable in the current code, despite Yellow being described in the function's docstring/comments as "slow but contributing").
 
+- **Funding rules** (`decision_engine.py` checks 5b and 5c). A goal can exclude whole kinds of asset (`goal_funding_constraints`, "Never count these kinds of asset towards this goal"), and/or be set to **Only low-risk holdings** (`low_risk_only` in the goal's `funding_sources_json` blob, exposed on the goal by `/api/init`). The low-risk check uses each holding's *effective risk* (`backend/risk.py`, also exposed as `assets[].effective_risk`): a mutual fund's fund type (liquid/debt low, hybrid/other medium, equity high), else a risk level set to Low or High, else the usual risk of that kind of asset (FD, PPF, EPF, bonds, insurance low; stocks high). A liquid fund can therefore back a reserve goal while an equity fund linked to it is flagged, which a category exclusion on "Mutual Fund" could not express.
+
 ## Configuration
 
 - DB-editable via `/api/rules`: `no_villa_equity` (unenforced, see above).

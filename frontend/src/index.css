@@ -1076,3 +1076,4 @@ h1, h2, h3, h4, h5 {
 .df-share-link { align-self: flex-start; padding-left: 0; }
 .df-share .settings-affix { width: auto; }
 .df-share .settings-affix input { width: 60px; flex: none; text-align: right; }
+.df-wide > .df-switch { align-self: stretch; }
