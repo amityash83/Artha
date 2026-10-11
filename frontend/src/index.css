@@ -1124,3 +1124,10 @@ h1, h2, h3, h4, h5 {
 .cl-pros { color: var(--success) !important; }
 .cl-rate { font-size: 14px; color: var(--text-primary); padding: 9px 0; font-variant-numeric: tabular-nums; }
 .db-rec-plain { margin: 0; font-size: 13.5px; color: var(--text-secondary); line-height: 1.55; }
+
+/* Ask Artha (components/AskArtha.tsx). */
+.aa-ask { display: flex; gap: 10px; }
+.aa-ask input { flex: 1; font-size: 14px; }
+.aa-suggest { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.aa-qa .settings-row-label { font-weight: 500; }
+.aa-answer { font-size: 13.5px; color: var(--text-secondary); line-height: 1.6; white-space: pre-wrap; }

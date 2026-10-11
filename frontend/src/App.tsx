@@ -369,7 +369,7 @@ const App: React.FC = () => {
           <Taxation data={data} onRefresh={fetchFinanceData} showToast={showToast} />
         )}
         {activeTab === 'ask-artha' && (
-          <AskArtha data={data} showToast={showToast} />
+          <AskArtha data={data} showToast={showToast} onGo={navigateTo} />
         )}
         {activeTab === 'reports' && (
           <Reports data={data} />

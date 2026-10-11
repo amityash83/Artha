@@ -181,10 +181,10 @@ and emphatically, applies to every commit going forward, no exceptions.
 
 ### Deferred
 
-- Credit Cards' Library/Compare tabs, Simulations, Reports and Ask Artha
-  still use the old styling. (Taxation's outer page was done the same day:
+- (Done later the same day: every page now uses the new style. Taxation's
   Profile & Deductions and Old-vs-New Estimate merged into one "Quick
-  estimate", since one was only the input form for the other.)
+  estimate", since one was only the input form for the other; the
+  Simulations "payoff planner" was dropped in favour of the Loan planner.)
 - The payslip view could show the employer's EPF/EPS split; tax doesn't
   need it.
 - Mutual fund gains realised through the ledger are still classified by
