@@ -9,7 +9,7 @@ Properties lets the user track real-estate holdings (a home, a rental flat, land
 - CRUD for property holdings as rows in the generic `assets` table under the `Property` category.
 - Category-specific fields `rental_income` and `maintenance_expenses`, defined in `categories.fields_definition` and stored in the asset's `metadata_json`.
 - A first-class cross-table link from a `Home Loan` liability to the property it financed, via `liabilities.linked_asset_id` (FK → `assets.id`).
-- Bidirectional link maintenance in the UI: editing a Property can set which Home Loan liability points at it, and editing a Home Loan can set which Property it points at; both writes ultimately land in the same `liabilities.linked_asset_id` column.
+- Link maintenance from both sides in the UI: the Property form has a "Loans on this property" checklist (any number of Home Loans, e.g. a home loan plus a top-up), and the Home Loan form picks one Property. Both land in the same `liabilities.linked_asset_id` column. From the Property side the links are written through `PUT /api/liabilities/{id}/property`, which changes only that column (`test_loan_property_link.py`).
 - Aggregation of property value separately from other investments in dashboard summaries (`total_properties`) and in simulations (`sim_properties`).
 
 ## Out of Scope
@@ -17,7 +17,7 @@ Properties lets the user track real-estate holdings (a home, a rental flat, land
 - No rental income cash-flow ledger or history — `rental_income` is a single flat field on the asset's metadata, not a time series of actual rent receipts/transactions.
 - No property document or lease management (no file/document attachment exists for any entity in the current schema).
 - No property appreciation modeling or valuation history — `current_value` is a single user-entered number, updated manually over time, with no snapshot-over-time view specific to properties (only the generic monthly `snapshots` table exists, and it stores net-worth-level aggregates, not per-asset history).
-- No support for a property to be linked to more than one loan, or a loan split across multiple properties — `linked_asset_id` is a single FK per liability row.
+- No support for one loan split across several properties: `linked_asset_id` is a single FK per liability row. (Several loans on one property is supported: each points at it.)
 - No property tax, stamp duty, or capital-gains-on-sale tax computation.
 - No maintenance-expense tracking beyond the single `maintenance_expenses` metadata field (no recurring expense ledger tied to the property, though the general-purpose `expenses` table exists independently).
 
@@ -67,7 +67,7 @@ Legacy: `init_db()` contains a one-way migration that promotes any pre-existing 
 ## API Contracts
 
 - `GET/POST/PUT/DELETE /api/entities/assets` — generic CRUD, shared with Investments and Insurance; Property rows are created/edited/deleted through this one handler with `category_id` set to the `Property` category.
-- `PUT /api/entities/liabilities/{id}` — used by the frontend to set `linked_asset_id` on a Home Loan liability when linking it to a property (part of the generic liabilities CRUD, not a Property-specific endpoint).
+- `PUT /api/liabilities/{id}/property` (`{asset_id}` or `{asset_id: null}`) — sets or clears only `liabilities.linked_asset_id`; the Property form uses it to link and unlink its loans. Not the generic `PUT /api/entities/liabilities/{id}`, which rebuilds `metadata_json` from the payload and so would wipe a loan's other stored fields on a partial save. The Home Loan form still sets `linked_asset_id` as part of its full save.
 - No dedicated Property satellite endpoint exists (unlike `/api/assets/{id}/insurance-details` or `/api/assets/{id}/holdings`) because Property has no satellite table.
 
 ## AI Responsibilities

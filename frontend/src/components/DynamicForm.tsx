@@ -120,7 +120,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         standardFields['owner_id'] = 'person_select';
         standardFields['risk_level'] = 'select_risk';
         if (isProperty) {
-          standardFields['linked_liability_id'] = 'home_loan_select';
+          standardFields['linked_liability_ids'] = 'home_loan_multi';
         }
       }
       standardFields['goal_mapping'] = 'goal_select';
@@ -238,9 +238,11 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       Object.assign(defaultData, meta);
     }
 
-    if (isProperty && 'linked_liability_id' in standardFields) {
-      const linkedLoan = liabilities.find((l) => l.category_name === 'Home Loan' && l.linked_asset_id === initialData?.id);
-      defaultData['linked_liability_id'] = linkedLoan?.id || '';
+    if (isProperty && 'linked_liability_ids' in standardFields) {
+      // Loans point at their property (liabilities.linked_asset_id), so a property can
+      // carry several, e.g. a home loan and a top-up on it.
+      defaultData['linked_liability_ids'] = initialData?.id ? liabilities.filter((l) => l.linked_asset_id === initialData.id).map((l) => l.id) : [];
+      delete defaultData['linked_liability_id']; // the old single-loan field, if it leaked into metadata
     }
 
     setFormData(defaultData);
@@ -340,7 +342,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       acquisition_date: 'Bought on',
       risk_level: 'Risk',
       goal_mapping: 'Counts towards goal',
-      linked_liability_id: 'Home loan on this property',
+      linked_liability_ids: 'Loans on this property',
       linked_asset_id: 'Property it paid for',
       outstanding: isCreditCard ? 'Balance now' : 'Still owed',
       interest_rate: 'Interest rate',
@@ -387,6 +389,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
     statement_balance: 'The amount on your most recent statement.',
     tenure_months: 'The full term when the loan began.',
     goal_mapping: 'Counts this asset towards one of your goals.',
+    linked_asset_id: 'A property can carry more than one loan, such as a home loan and a top-up.',
     surrender_value: 'What the insurer would pay if you surrendered the policy today.',
   };
 
@@ -406,16 +409,13 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
   const detailKeys = keys.filter((k) => !isFigure(k));
   const figureKeys = keys.filter(isFigure);
 
-  // Property's "linked_liability_id" is a form-only convenience field: it selects which Home
-  // Loan liability should have its linked_asset_id set to this property. There is no
-  // linked_liability_id column on assets — liabilities.linked_asset_id is the single source
-  // of truth for this relationship (see EntityGrid's dispatchSatelliteData).
-  const availableHomeLoans = liabilities.filter(
-    (l) => l.category_name === 'Home Loan' && (!l.linked_asset_id || l.linked_asset_id === initialData?.id)
-  );
-  const availableProperties = properties.filter(
-    (p) => !liabilities.some((l) => l.linked_asset_id === p.id && l.id !== initialData?.id)
-  );
+  // Property's "linked_liability_ids" is a form-only field: the loans to point at this
+  // property. There is no such column on assets — liabilities.linked_asset_id is the single
+  // source of truth (see EntityGrid's dispatchSatelliteData). Any home loan can be ticked;
+  // one already on another property moves here. A property may carry several loans.
+  const availableHomeLoans = liabilities.filter((l) => l.category_name === 'Home Loan' || l.linked_asset_id === initialData?.id);
+  const availableProperties = properties;
+  const propertyName = (id: number | null | undefined) => properties.find((p) => p.id === id)?.name;
 
   const field = (k: string, control: React.ReactNode, opts: { wide?: boolean; noLabelFor?: boolean } = {}) => (
     <div key={k} className={`df-field${opts.wide ? ' df-wide' : ''}`}>
@@ -482,10 +482,27 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         { value: '', label: 'None' }, ...(goals || []).map((g) => ({ value: g.name, label: g.name })),
       ]));
     }
-    if (type === 'home_loan_select') {
-      return field(k, select(k, formData[k] || '', (v) => handleChange(k, toId(v)), [
-        { value: '', label: 'None' }, ...availableHomeLoans.map((l) => ({ value: l.id, label: l.name })),
-      ]));
+    if (type === 'home_loan_multi') {
+      const ticked: number[] = Array.isArray(formData[k]) ? formData[k] : [];
+      return (
+        <div key={k} className="df-field df-wide">
+          <span className="df-label">{getLabel(k)}</span>
+          {availableHomeLoans.length === 0 ? <span className="df-hint">No home loans yet. Add one under Liabilities, then tick it here.</span> : (
+            <div className="df-checks">
+              {availableHomeLoans.map((l) => {
+                const elsewhere = l.linked_asset_id && l.linked_asset_id !== initialData?.id ? propertyName(l.linked_asset_id) : null;
+                return (
+                  <label key={l.id} className="df-check">
+                    <input type="checkbox" checked={ticked.includes(l.id)}
+                      onChange={(e) => handleChange(k, e.target.checked ? [...ticked, l.id] : ticked.filter((id) => id !== l.id))} />
+                    <span>{l.name}<small>{[`₹${new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(l.outstanding || 0)} owed`, elsewhere ? `now on ${elsewhere}; ticking moves it here` : null].filter(Boolean).join(' · ')}</small></span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
     }
     if (type === 'property_select') {
       return field(k, select(k, formData[k] || '', (v) => handleChange(k, toId(v)), [

@@ -1122,6 +1122,42 @@ def get_credit_card_details(id: int):
     finally:
         conn.close()
 
+class LoanPropertyLink(BaseModel):
+    asset_id: Optional[int] = None
+
+
+@app.put("/api/liabilities/{id}/property")
+def set_loan_property(id: int, link: LoanPropertyLink):
+    """Set or clear the property a loan is secured on (liabilities.linked_asset_id).
+
+    A property can carry several loans (a home loan and a top-up, say), so the link
+    lives on the loan. This touches only that column: the generic entity PUT rebuilds
+    metadata_json from the payload, so a partial save through it would wipe the loan's
+    other fields.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        loan = cursor.execute("""SELECT c.name AS category FROM liabilities l LEFT JOIN categories c ON c.id = l.category_id
+                                 WHERE l.id = ?""", (id,)).fetchone()
+        if not loan:
+            raise HTTPException(status_code=404, detail="Loan not found")
+        if loan["category"] == "Credit Card":
+            raise HTTPException(status_code=422, detail="A credit card isn't secured on a property")
+        if link.asset_id is not None:
+            asset = cursor.execute("""SELECT c.name AS category FROM assets a LEFT JOIN categories c ON c.id = a.category_id
+                                      WHERE a.id = ?""", (link.asset_id,)).fetchone()
+            if not asset:
+                raise HTTPException(status_code=404, detail="Property not found")
+            if asset["category"] != "Property":
+                raise HTTPException(status_code=422, detail="A loan can only be linked to a Property")
+        cursor.execute("UPDATE liabilities SET linked_asset_id = ? WHERE id = ?", (link.asset_id, id))
+        conn.commit()
+        return {"status": "success"}
+    finally:
+        conn.close()
+
+
 @app.put("/api/liabilities/{id}/credit-card-details")
 def put_credit_card_details(id: int, details: CreditCardDetailsSchema):
     conn = get_db_connection()

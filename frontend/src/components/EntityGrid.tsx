@@ -375,17 +375,24 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
       });
     }
 
-    // Property -> Home Loan link: liabilities.linked_asset_id is the single source of
-    // truth for this relationship (assets has no linked_liability_id column), so this is
-    // only ever written from the Property side. When editing from the Home Loan side,
-    // formData.linked_asset_id is already part of the primary liability save above —
-    // no second write is needed or valid here.
-    if (entityType === 'assets' && categoryName === 'Property' && formData.linked_liability_id) {
-      await fetch(`${API_BASE_URL}/api/entities/liabilities/${formData.linked_liability_id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ linked_asset_id: entityId }),
-      });
+    // Property -> loans link: liabilities.linked_asset_id is the single source of truth
+    // (assets has no loan column), and a property can carry several loans. From the
+    // Property side, point each ticked loan here and release any unticked one that was.
+    // The dedicated route changes only that column; the generic entity PUT would rebuild
+    // the loan's metadata_json from a partial payload. When editing from the loan side,
+    // linked_asset_id is part of the primary liability save above.
+    if (entityType === 'assets' && categoryName === 'Property' && Array.isArray(formData.linked_liability_ids)) {
+      const ticked: number[] = formData.linked_liability_ids;
+      for (const loan of liabilities) {
+        const want = ticked.includes(loan.id);
+        if (want === (loan.linked_asset_id === entityId)) continue;
+        const res = await fetch(`${API_BASE_URL}/api/liabilities/${loan.id}/property`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ asset_id: want ? entityId : null }),
+        }).catch(() => null);
+        if (!res?.ok) throw new Error(`Couldn't ${want ? 'link' : 'unlink'} ${loan.name}`);
+      }
     }
   };
 
@@ -405,7 +412,8 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
       }
 
       const categoryName = categories.find((c) => c.id === formData.category_id)?.name;
-      const { holding_lots, funding_constraints, rental_ledger, insurance_claims, premium_payments, ...primaryPayload } = formData;
+      // Satellite data and form-only fields go to their own routes, not into metadata_json.
+      const { holding_lots, funding_constraints, rental_ledger, insurance_claims, premium_payments, linked_liability_ids, linked_liability_id, ...primaryPayload } = formData;
 
       const res = await fetch(url, {
         method: isEdit ? 'PUT' : 'POST',
@@ -416,11 +424,20 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
       if (res.ok) {
         const data = await res.json();
         const entityId = isEdit ? editingEntity.id : data.id;
-        await dispatchSatelliteData(entityId, categoryName, formData);
+        // The record is saved at this point; a failed follow-up write (lots, claims, loan
+        // links…) is reported, but the form still closes so a retry can't duplicate it.
+        let followUpError: string | null = null;
+        try {
+          await dispatchSatelliteData(entityId, categoryName, formData);
+        } catch (err) {
+          console.error(err);
+          followUpError = err instanceof Error ? err.message : 'Part of it didn\'t save';
+        }
         setIsAdding(false);
         setEditingEntity(null);
         onRefresh();
-        if (showToast) showToast(`${categoryName && CARD_CATEGORIES.includes(categoryName) ? 'Card' : PAGE_TEXT[entityType].noun} saved`, "success");
+        const noun = categoryName && CARD_CATEGORIES.includes(categoryName) ? 'Card' : PAGE_TEXT[entityType].noun;
+        if (showToast) showToast(followUpError ? `${noun} saved, but: ${followUpError}` : `${noun} saved`, followUpError ? 'error' : 'success');
       } else {
         const errorData = await res.json();
         const msg = `Error saving entity: ${errorData.detail || 'Unknown error'}`;
@@ -429,6 +446,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
       }
     } catch (err) {
       console.error(err);
+      if (showToast) showToast("Couldn't save. Check the app is still running and try again.", 'error');
     }
   };
 
@@ -459,6 +477,10 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
       if (entityType === 'liabilities' && cat !== 'Credit Card' && num(e.remaining_interest) > 0) sub = `${formatINR(e.remaining_interest)} interest to go`;
       if (entityType === 'liabilities' && cat === 'Credit Card' && num(e.credit_limit) > 0) sub = `${Math.round((value / num(e.credit_limit)) * 100)}% of limit used`;
       if (entityType === 'assets' && cat === 'Insurance' && num(e.premiums_paid) > 0) sub = `${formatINR(e.premiums_paid)} paid in`;
+      if (entityType === 'assets' && cat === 'Property') {
+        const loansOn = liabilities.filter((l) => l.linked_asset_id === e.id && num(l.outstanding) > 0);
+        if (loansOn.length) sub = `${formatINR(loansOn.reduce((t, l) => t + num(l.outstanding), 0))} owed on ${loansOn.length === 1 ? 'its loan' : `${loansOn.length} loans`}`;
+      }
       if (entityType === 'assets' && (cat === 'Stock' || cat === 'Mutual Fund') && num(e.quantity) > 0 && num(e.cost_price) > 0) {
         const gain = value - num(e.quantity) * num(e.cost_price);
         sub = `${gain >= 0 ? '+' : '−'}${formatINR(Math.abs(gain))} on cost`;
