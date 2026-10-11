@@ -229,15 +229,20 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
 
   const handleDelete = async (id: number) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/entities/${entityType}/${id}`, {
+      // Accounts, assets and loans go with their ledger entries (the confirmation says so);
+      // the backend refuses otherwise, and a loan in a balance transfer either way.
+      const withEntries = ['accounts', 'assets', 'liabilities'].includes(entityType) ? '?with_entries=true' : '';
+      const res = await fetch(`${API_BASE_URL}/api/entities/${entityType}/${id}${withEntries}`, {
         method: 'DELETE',
       });
       if (res.ok) {
         onRefresh();
         if (showToast) showToast(`${PAGE_TEXT[entityType].noun} deleted`, "success");
       } else {
-        if (showToast) showToast('Failed to delete entity', "error");
-        else alert('Failed to delete entity');
+        const reason = (await res.json().catch(() => null))?.detail ?? "Couldn't delete it";
+        if (showToast) showToast(reason, "error");
+        else alert(reason);
+        throw new Error(reason); // keeps the form open
       }
     } catch (err) {
       console.error(err);
@@ -619,8 +624,9 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
               onAfterAction={(message) => { closeForm(); onRefresh(); showToast?.(message, 'success'); }}
               footerStart={editingEntity && (
                 <ConfirmAction label={`Delete this ${CARD_CATEGORIES.includes(editingEntity.category_name) ? 'card' : PAGE_TEXT[entityType].noun.toLowerCase()}`}
-                  confirmLabel="Delete" danger question={`Delete ${editingEntity.name}?`}
-                  onConfirm={async () => { await handleDelete(editingEntity.id); closeForm(); }} />
+                  confirmLabel="Delete" danger question={['accounts', 'assets', 'liabilities'].includes(entityType)
+                    ? `Delete ${editingEntity.name} and its ledger entries? Balances they moved elsewhere are undone.` : `Delete ${editingEntity.name}?`}
+                  onConfirm={async () => { try { await handleDelete(editingEntity.id); closeForm(); } catch { /* reason shown */ } }} />
               )}
             />
           </div>

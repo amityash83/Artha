@@ -192,7 +192,7 @@ export const CardRow: React.FC<{
             <button type="button" className="settings-btn" onClick={onEdit}>Edit card</button>
             <button type="button" className="settings-btn" onClick={onCompare}>Compare with other cards</button>
             <span style={{ flex: 1 }} />
-            <ConfirmAction label="Remove" confirmLabel="Remove" question="Remove this card from Artha?" danger onConfirm={onRemove} />
+            <ConfirmAction label="Remove" confirmLabel="Remove" question="Remove this card, with its spends and payments, from Artha?" danger onConfirm={onRemove} />
           </div>
         </div>
       )}

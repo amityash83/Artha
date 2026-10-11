@@ -359,12 +359,14 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
 
   const handleDeleteCard = async (id: number) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/entities/liabilities/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/entities/liabilities/${id}?with_entries=true`, {
         method: 'DELETE'
       });
       if (res.ok) {
         onRefresh();
         if (showToast) showToast("Card removed", "success");
+      } else if (showToast) {
+        showToast((await res.json().catch(() => null))?.detail ?? "Couldn't remove the card", "error");
       }
     } catch (err) {
       console.error(err);

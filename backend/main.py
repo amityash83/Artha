@@ -1193,8 +1193,30 @@ def update_entity(entity_type: str, id: int, payload: dict):
     finally:
         conn.close()
 
+_REF_TYPE = {"accounts": "Account", "assets": "Asset", "liabilities": "Liability"}
+
+
+def _delete_entity_entries(cursor, entity_type: str, entity_id: int, with_entries: bool) -> None:
+    """Ledger entries that move money to or from an account, asset or loan being deleted.
+    Left behind, they'd point at nothing and still count on their other side. Without
+    with_entries the delete is refused, saying how many there are; with it, each entry is
+    reverted (its effect on the other side undone) and removed. A loan in a balance transfer
+    is refused either way: "Undo this transfer" restores both loans."""
+    ref = _REF_TYPE[entity_type]
+    rows = cursor.execute("""SELECT * FROM transactions WHERE (source_ref_type = ? AND source_ref_id = ?)
+                             OR (dest_ref_type = ? AND dest_ref_id = ?)""", (ref, entity_id, ref, entity_id)).fetchall()
+    if any(r["source_ref_type"] == "Liability" and r["dest_ref_type"] == "Liability" for r in rows):
+        raise HTTPException(status_code=409, detail="This loan is part of a balance transfer; use \"Undo this transfer\" on the new loan first")
+    if rows and not with_entries:
+        raise HTTPException(status_code=409, detail=f"It has {len(rows)} ledger entr{'y' if len(rows) == 1 else 'ies'}; delete with its entries, or mark it closed instead")
+    for r in rows:
+        adjust_double_entry_balances(cursor, r["type"], float(r["amount"]), r["source_ref_type"], r["source_ref_id"],
+                                     r["dest_ref_type"], r["dest_ref_id"], "revert", bool(r["is_balance_exempt"]))
+        cursor.execute("DELETE FROM transactions WHERE id = ?", (r["id"],))
+
+
 @app.delete("/api/entities/{entity_type}/{id}")
-def delete_entity(entity_type: str, id: int):
+def delete_entity(entity_type: str, id: int, with_entries: bool = False):
     allowed_tables = ["accounts", "assets", "liabilities", "income", "expenses", "goals", "transactions"]
     if entity_type not in allowed_tables:
         raise HTTPException(status_code=400, detail=f"Invalid entity type: {entity_type}")
@@ -1221,8 +1243,20 @@ def delete_entity(entity_type: str, id: int):
                     bool(old.get("is_balance_exempt"))
                 )
 
+        if entity_type in ("accounts", "assets", "liabilities"):
+            _delete_entity_entries(cursor, entity_type, id, with_entries)
         if entity_type == "assets":
             cursor.execute("DELETE FROM goal_holdings WHERE asset_id = ?", (id,))
+            # Its own satellite rows (foreign keys aren't enforced, so nothing cascades).
+            for table in ("holding_lots", "insurance_details", "insurance_claims", "insurance_premium_payments",
+                          "property_rental_ledger", "property_costs"):
+                cursor.execute(f"DELETE FROM {table} WHERE asset_id = ?", (id,))
+            cursor.execute("UPDATE liabilities SET linked_asset_id = NULL WHERE linked_asset_id = ?", (id,))
+            # capital_gains_realizations stay: they record past sales, which still count for that year's tax.
+        if entity_type == "liabilities":
+            for table in ("credit_card_details", "loan_rate_changes"):
+                cursor.execute(f"DELETE FROM {table} WHERE liability_id = ?", (id,))
+            cursor.execute("UPDATE expenses SET linked_liability_id = NULL WHERE linked_liability_id = ?", (id,))
 
         doc_files_to_remove = []
         if entity_type in DOCUMENT_REF_TYPE_MAP:
