@@ -58,6 +58,22 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+def _ensure_transaction_columns(cursor):
+    """Adds transactions.category_id / is_balance_exempt where missing (see init_db()).
+    Called twice: early, and again just before the Spend/Liability rebuild, because the
+    older legacy rebuilds in between recreate the table without these columns."""
+    try:
+        cursor.execute("PRAGMA table_info('transactions')")
+        tx_cols_precheck = [col['name'] for col in cursor.fetchall()]
+        if tx_cols_precheck and 'category_id' not in tx_cols_precheck:
+            cursor.execute("ALTER TABLE transactions ADD COLUMN category_id INTEGER REFERENCES categories(id)")
+            print("[Migration] Added category_id column to transactions.")
+        if tx_cols_precheck and 'is_balance_exempt' not in tx_cols_precheck:
+            cursor.execute("ALTER TABLE transactions ADD COLUMN is_balance_exempt INTEGER NOT NULL DEFAULT 0")
+            print("[Migration] Added is_balance_exempt column to transactions.")
+    except Exception as e:
+        print("[Migration Warning] transactions category_id/is_balance_exempt column migration error:", e)
+
 def init_db():
     db_path = get_db_path()
     is_new_db = not os.path.exists(db_path)
@@ -675,17 +691,7 @@ def init_db():
     # reverting its real balance impact, permanently. A column the UI never
     # writes closes both failure modes at the source rather than requiring every
     # call site to carefully reason about which of "old" vs "new" notes to trust.
-    try:
-        cursor.execute("PRAGMA table_info('transactions')")
-        tx_cols_precheck = [col['name'] for col in cursor.fetchall()]
-        if tx_cols_precheck and 'category_id' not in tx_cols_precheck:
-            cursor.execute("ALTER TABLE transactions ADD COLUMN category_id INTEGER REFERENCES categories(id)")
-            print("[Migration] Added category_id column to transactions.")
-        if tx_cols_precheck and 'is_balance_exempt' not in tx_cols_precheck:
-            cursor.execute("ALTER TABLE transactions ADD COLUMN is_balance_exempt INTEGER NOT NULL DEFAULT 0")
-            print("[Migration] Added is_balance_exempt column to transactions.")
-    except Exception as e:
-        print("[Migration Warning] transactions category_id/is_balance_exempt column migration error:", e)
+    _ensure_transaction_columns(cursor)
 
     # Rewards Tables
     cursor.execute("""
@@ -885,6 +891,9 @@ def init_db():
         tx_cols = [row['name'] for row in cursor.fetchall()]
         if 'account_id' in tx_cols or 'source_ref_type' not in tx_cols:
             print("[Migration] Migrating transactions table...")
+            # A leftover from an earlier failed attempt is an incomplete copy (the real
+            # table is only dropped once the copy succeeds): start again from scratch.
+            cursor.execute("DROP TABLE IF EXISTS transactions_temp")
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS transactions_temp (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -967,6 +976,7 @@ def init_db():
         tx_sql_row = cursor.fetchone()
         if tx_sql_row and "'Prepayment'" not in tx_sql_row['sql']:
             print("[Migration] Expanding transactions.type CHECK to include EMI/Prepayment...")
+            cursor.execute("DROP TABLE IF EXISTS transactions_checkfix")  # incomplete copy from a failed run
             cursor.execute("""
             CREATE TABLE transactions_checkfix (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1004,11 +1014,15 @@ def init_db():
     # already exist on the table by this point (added earlier, unconditionally,
     # above) so they're carried through unchanged here — this rebuild only
     # touches the CHECK-constrained columns.
+    # The legacy rebuilds above recreate the table without category_id/is_balance_exempt,
+    # which this rebuild copies: make sure they exist (on an old database they were just dropped).
+    _ensure_transaction_columns(cursor)
     try:
         cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='transactions'")
         tx_sql_row = cursor.fetchone()
         if tx_sql_row and "'Spend'" not in tx_sql_row['sql']:
             print("[Migration] Expanding transactions CHECKs for Spend/Liability, backfilling EMI/Prepayment dest_ref_type...")
+            cursor.execute("DROP TABLE IF EXISTS transactions_checkfix2")  # incomplete copy from a failed run
             cursor.execute("""
             CREATE TABLE transactions_checkfix2 (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
