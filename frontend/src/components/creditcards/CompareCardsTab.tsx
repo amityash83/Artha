@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { Scale, AlertTriangle } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
 import { Liability, CardVariant, CardComparisonResult } from '../../types';
 import { API_BASE_URL } from '../../config';
+import { formatINR } from '../../format';
+import { AmountInput, Group, Row } from '../settings/ui';
 
 interface CompareCardsTabProps {
   ownedCards: Liability[];
@@ -13,205 +14,138 @@ interface CompareCardsTabProps {
 type SelectableItem = { key: string; id: number; source: 'owned' | 'library'; label: string };
 
 const WEIGHT_KEYS = [
-  { key: 'fee_tolerance', label: 'Fee Tolerance' },
-  { key: 'reward_value', label: 'Reward Value' },
-  { key: 'lounge_access', label: 'Lounge Access' },
-  { key: 'milestone_ease', label: 'Milestone Ease' },
-  { key: 'simplicity', label: 'Simplicity' },
+  { key: 'fee_tolerance', label: 'Low fees' },
+  { key: 'reward_value', label: 'Reward value' },
+  { key: 'lounge_access', label: 'Lounge access' },
+  { key: 'milestone_ease', label: 'Easy milestones' },
+  { key: 'simplicity', label: 'Simple to use' },
 ] as const;
+const SCORE_KEYS: { key: keyof CardComparisonResult['cards'][number]['scores']; label: string }[] = [
+  { key: 'fee', label: 'fees' }, { key: 'reward_value', label: 'rewards' }, { key: 'lounge_access', label: 'lounges' },
+  { key: 'milestone_ease', label: 'milestones' }, { key: 'simplicity', label: 'simplicity' },
+];
+const DAY = 86400000;
 
-const formatCurrency = (val: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(val || 0);
+/** Card spend logged in the last 12 months, scaled to a year when there's less history. */
+async function yearlyCardSpend(): Promise<{ amount: number; note: string } | null> {
+  const res = await fetch(`${API_BASE_URL}/api/entities/transactions`).catch(() => null);
+  if (!res?.ok) return null;
+  const since = Date.now() - 365 * DAY;
+  const spends = (await res.json() as any[]).filter((t) => t.type === 'Spend' && new Date(`${t.transaction_date}T00:00:00`).getTime() >= since);
+  if (!spends.length) return null;
+  const total = spends.reduce((s, t) => s + (t.amount || 0), 0);
+  const first = Math.min(...spends.map((t) => new Date(`${t.transaction_date}T00:00:00`).getTime()));
+  const days = Math.max((Date.now() - first) / DAY, 30);
+  if (days >= 330) return { amount: Math.round(total / 1000) * 1000, note: 'your card spend over the last 12 months' };
+  return { amount: Math.round((total * 365) / days / 1000) * 1000, note: `your card spend so far (${Math.round(days)} days), scaled to a year` };
+}
 
 export const CompareCardsTab: React.FC<CompareCardsTabProps> = ({ ownedCards, cardVariants, showToast, preselectLiabilityId }) => {
   const items: SelectableItem[] = [
     ...ownedCards.map((c) => ({ key: `owned-${c.id}`, id: c.id, source: 'owned' as const, label: c.name })),
     ...cardVariants.map((v) => ({ key: `library-${v.id}`, id: v.id, source: 'library' as const, label: v.name })),
   ];
-
-  const [selectedKeys, setSelectedKeys] = useState<string[]>(
-    preselectLiabilityId ? [`owned-${preselectLiabilityId}`] : []
-  );
-  const [weights, setWeights] = useState<Record<string, number>>({
-    fee_tolerance: 20, reward_value: 40, lounge_access: 20, milestone_ease: 10, simplicity: 10,
-  });
-  const [assumedSpend, setAssumedSpend] = useState(600000);
+  const [selectedKeys, setSelectedKeys] = useState<string[]>(preselectLiabilityId ? [`owned-${preselectLiabilityId}`] : []);
+  const [weights, setWeights] = useState<Record<string, number>>({ fee_tolerance: 20, reward_value: 40, lounge_access: 20, milestone_ease: 10, simplicity: 10 });
+  const [spend, setSpend] = useState(0);
+  const [spendNote, setSpendNote] = useState<string | null>(null);
   const [result, setResult] = useState<CardComparisonResult | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const toggleSelection = (key: string) => {
-    setSelectedKeys((prev) => {
-      if (prev.includes(key)) return prev.filter((k) => k !== key);
-      if (prev.length >= 5) {
-        showToast?.('You can compare at most 5 cards at once', 'info');
-        return prev;
-      }
-      return [...prev, key];
-    });
-  };
+  useEffect(() => {
+    void yearlyCardSpend().then((s) => { if (s) { setSpend(s.amount); setSpendNote(s.note); } });
+  }, []);
 
-  const handleCompare = async () => {
-    if (selectedKeys.length < 2) {
-      showToast?.('Select at least 2 cards to compare', 'error');
-      return;
-    }
+  const toggle = (key: string) => setSelectedKeys((prev) => {
+    if (prev.includes(key)) return prev.filter((k) => k !== key);
+    if (prev.length >= 5) { showToast?.('You can compare up to 5 cards at once', 'info'); return prev; }
+    return [...prev, key];
+  });
+
+  const compare = async () => {
     setLoading(true);
     try {
       const selected = items.filter((i) => selectedKeys.includes(i.key));
-      const owned_liability_ids = selected.filter((i) => i.source === 'owned').map((i) => i.id);
-      const library_variant_ids = selected.filter((i) => i.source === 'library').map((i) => i.id);
       const res = await fetch(`${API_BASE_URL}/api/credit-cards/compare`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ owned_liability_ids, library_variant_ids, weights, assumed_annual_spend: assumedSpend }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          owned_liability_ids: selected.filter((i) => i.source === 'owned').map((i) => i.id),
+          library_variant_ids: selected.filter((i) => i.source === 'library').map((i) => i.id),
+          weights, assumed_annual_spend: spend,
+        }),
       });
-      if (res.ok) {
-        setResult(await res.json());
-      } else {
-        const err = await res.json();
-        showToast?.(err.detail || 'Comparison failed', 'error');
-      }
-    } catch (err) {
-      console.error(err);
-      showToast?.('Error running comparison', 'error');
+      if (res.ok) setResult(await res.json());
+      else showToast?.((await res.json().catch(() => ({})))?.detail || "Couldn't compare those cards", 'error');
+    } catch {
+      showToast?.("Couldn't compare those cards", 'error');
     } finally {
       setLoading(false);
     }
   };
 
+  const ready = selectedKeys.length >= 2 && spend > 0;
+  const ranked = result ? [...result.cards].sort((a, b) => b.weighted_total - a.weighted_total) : [];
+  const isWinner = (c: CardComparisonResult['cards'][number]) => !!result && c.id === result.winner_id && c.source === result.winner_source;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      <div className="glass-panel" style={{ padding: '20px' }}>
-        <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '12px' }}>Choose 2 to 5 cards to compare</h3>
-        {items.length === 0 ? (
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>No cards available — register a card or add a Card Library entry first.</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {(['owned', 'library'] as const).filter((src) => items.some((it) => it.source === src)).map((src) => (
-          <div key={src}>
-          <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.5px', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '6px' }}>{src === 'owned' ? 'Your cards' : 'Card library'}</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-            {items.filter((it) => it.source === src).map((item) => {
-              const selected = selectedKeys.includes(item.key);
-              return (
-                <button
-                  key={item.key}
-                  onClick={() => toggleSelection(item.key)}
-                  className="btn btn-secondary"
-                  style={{
-                    padding: '6px 14px', fontSize: '12px', borderRadius: '20px',
-                    background: selected ? 'rgba(139, 92, 246, 0.2)' : undefined,
-                    border: selected ? '1px solid rgba(139, 92, 246, 0.5)' : undefined,
-                    color: selected ? '#c4b5fd' : undefined,
-                  }}
-                >
-                  {item.label}
-                </button>
-              );
-            })}
-          </div>
-          </div>
+    <div className="db-col">
+      <div className="lp-grid">
+        <Group title="Cards to compare" description="Pick 2 to 5: your own cards or any from the library.">
+          {items.length === 0 ? <Row label={<span className="cc-note">Add a card, or a card to the library, first.</span>} /> : (
+            <div className="df-check-grid cc-compare-picks">
+              {items.map((it) => (
+                <label key={it.key} className="df-check">
+                  <input type="checkbox" checked={selectedKeys.includes(it.key)} onChange={() => toggle(it.key)} />
+                  <span>{it.label}<small>{it.source === 'owned' ? 'your card' : 'library'}</small></span>
+                </label>
+              ))}
+            </div>
+          )}
+        </Group>
+
+        <Group title="What matters to you" description="Each card is scored on these; the sliders set how much each counts.">
+          <Row label="Yearly card spend" description={spendNote ? `Starts from ${spendNote}.` : 'No card spending logged yet: enter roughly what you put on cards in a year.'} htmlFor="cc-spend">
+            <AmountInput id="cc-spend" label="Yearly card spend" prefix="₹" width={120} value={spend} onChange={setSpend} />
+          </Row>
+          {WEIGHT_KEYS.map(({ key, label }) => (
+            <Row key={key} label={<>{label} <strong className="cf-slider-value">{weights[key]}</strong></>} htmlFor={`cc-w-${key}`}>
+              <input id={`cc-w-${key}`} type="range" min={0} max={100} value={weights[key]} className="cf-range"
+                onChange={(e) => setWeights({ ...weights, [key]: parseInt(e.target.value) })} />
+            </Row>
           ))}
-          </div>
-        )}
+        </Group>
       </div>
 
-      <div className="glass-panel" style={{ padding: '20px' }}>
-        <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '12px' }}>What matters most to you</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px' }}>
-          {WEIGHT_KEYS.map(({ key, label }) => (
-            <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{label}: {weights[key]}</label>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={weights[key]}
-                onChange={(e) => setWeights({ ...weights, [key]: parseInt(e.target.value) })}
-              />
-            </div>
-          ))}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Assumed Annual Spend</label>
-            <input
-              type="number"
-              className="form-control"
-              value={assumedSpend}
-              onChange={(e) => setAssumedSpend(parseFloat(e.target.value) || 0)}
-            />
-          </div>
-        </div>
-        <button
-          className="btn btn-primary"
-          style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 18px', marginTop: '18px' }}
-          onClick={handleCompare}
-          disabled={loading}
-        >
-          <Scale size={14} /> {loading ? 'Comparing...' : 'Compare'}
-        </button>
+      <div className="tx-actions">
+        <button className="btn btn-primary" onClick={compare} disabled={!ready || loading}>{loading ? 'Comparing…' : 'Compare'}</button>
+        {!ready && <span className="cc-note">{selectedKeys.length < 2 ? 'Pick at least two cards.' : 'Enter your yearly card spend.'}</span>}
       </div>
 
       {result && (
-        <div className="glass-panel" style={{ padding: '20px' }}>
-          <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '14px' }}>Comparison Result</h3>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-              <thead>
-                <tr style={{ textAlign: 'left', color: 'var(--text-muted)', borderBottom: '1px solid var(--border-glass)' }}>
-                  <th style={{ padding: '8px' }}>Card</th>
-                  <th style={{ padding: '8px', textAlign: 'right' }}>Fee</th>
-                  <th style={{ padding: '8px', textAlign: 'right' }}>Reward</th>
-                  <th style={{ padding: '8px', textAlign: 'right' }}>Lounge</th>
-                  <th style={{ padding: '8px', textAlign: 'right' }}>Milestone</th>
-                  <th style={{ padding: '8px', textAlign: 'right' }}>Simplicity</th>
-                  <th style={{ padding: '8px', textAlign: 'right' }}>Weighted Total</th>
-                  <th style={{ padding: '8px', textAlign: 'right' }}>Net Annual Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                {result.cards
-                  .slice()
-                  .sort((a, b) => b.weighted_total - a.weighted_total)
-                  .map((c) => (
-                    <tr
-                      key={`${c.source}-${c.id}`}
-                      style={{
-                        borderBottom: '1px solid rgba(255,255,255,0.02)',
-                        background: c.id === result.winner_id && c.source === result.winner_source ? 'rgba(16,185,129,0.06)' : undefined,
-                      }}
-                    >
-                      <td style={{ padding: '8px', color: '#e2e8f0' }}>
-                        {c.label}
-                        {c.id === result.winner_id && c.source === result.winner_source && (
-                          <span className="badge badge-green" style={{ fontSize: '9px', marginLeft: '8px' }}>Best Fit</span>
-                        )}
-                      </td>
-                      <td style={{ padding: '8px', textAlign: 'right' }}>{c.scores.fee}</td>
-                      <td style={{ padding: '8px', textAlign: 'right' }}>{c.scores.reward_value}</td>
-                      <td style={{ padding: '8px', textAlign: 'right' }}>{c.scores.lounge_access}</td>
-                      <td style={{ padding: '8px', textAlign: 'right' }}>{c.scores.milestone_ease}</td>
-                      <td style={{ padding: '8px', textAlign: 'right' }}>{c.scores.simplicity}</td>
-                      <td style={{ padding: '8px', textAlign: 'right', fontWeight: 700, color: '#f8fafc' }}>{c.weighted_total}</td>
-                      <td style={{ padding: '8px', textAlign: 'right', color: c.net_annual_value >= 0 ? '#10b981' : '#ef4444' }}>
-                        {formatCurrency(c.net_annual_value)}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
+        <section aria-label="Comparison">
+          <div className="settings-group-head">
+            <h3 className="settings-group-title">Best fit for you: {ranked[0]?.label}</h3>
+            <span className="cc-note">Scores compare these cards with each other: on each point the best gets 100 and the weakest 0, then they're weighted by what matters to you.</span>
           </div>
-          <div style={{
-            marginTop: '16px', padding: '10px 14px', borderRadius: '10px',
-            background: 'rgba(245, 158, 11, 0.06)', border: '1px solid rgba(245, 158, 11, 0.2)',
-            fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '4px',
-          }}>
-            {result.caveats.map((c, i) => (
-              <div key={i} style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-                <AlertTriangle size={12} style={{ color: 'var(--warning)', flexShrink: 0, marginTop: '1px' }} />
-                <span>{c}</span>
+          <div className="settings-group">
+            {ranked.map((c) => (
+              <div key={`${c.source}-${c.id}`} className={`ie-row fc-row${isWinner(c) ? ' cc-compare-win' : ''}`}>
+                <span className="ie-row-text">
+                  <strong>{c.label}</strong>
+                  <span>{SCORE_KEYS.map((s) => `${s.label} ${c.scores[s.key]}`).join(' · ')}</span>
+                  <span className="cc-meter cc-compare-bar"><span style={{ width: `${Math.min(c.weighted_total, 100)}%`, background: isWinner(c) ? 'var(--success)' : 'var(--accent)' }} /></span>
+                </span>
+                <span className="ie-row-amount">
+                  <strong style={{ color: c.net_annual_value >= 0 ? 'var(--success)' : '#fca5a5' }}>{c.net_annual_value >= 0 ? '' : '−'}{formatINR(Math.abs(c.net_annual_value))}</strong>
+                  <span>a year after fees · score {c.weighted_total}</span>
+                </span>
               </div>
             ))}
           </div>
-        </div>
+          {result.caveats.length > 0 && (
+            <ul className="db-facts cc-compare-caveats">{result.caveats.map((c) => <li key={c} className="cc-note">{c}</li>)}</ul>
+          )}
+        </section>
       )}
     </div>
   );
