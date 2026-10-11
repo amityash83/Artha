@@ -172,6 +172,36 @@ request rather than a pre-existing documented gap:
   (preload bridge), and one cross-platform `artha` CLI for
   start/stop/restart/status/logs/build/package.
 
+- **Design pass and money model** (2026-10-11): every page in one plain style;
+  a top bar with Go-to search; and Artha's own desktop menu. Overlapping pages
+  were merged: the Loan planner, and the monthly snapshot on the Dashboard.
+  Misleading figures were fixed, including card dues repeated monthly, ₹0
+  purchase lots and imaginary capital gains. The money model changes are in
+  `16-Session-Log.md`:
+  - Loans and cards follow the direction of the money.
+  - EMIs can be posted automatically, MMEX-style (interest charged, then the
+    EMI transferred).
+  - Floating-rate loans take dated rate changes.
+  - A property can carry several loans, and keeps a cost list (tax cost vs
+    total paid).
+  - Loans can move bank to bank by balance transfer.
+  - Fund type drives risk and tax.
+  - EPF accounts split employer EPF and pension.
+- **Off-machine backups, reminders, statement import** (2026-10-11):
+  - Every backup can also be copied to a second folder (cloud-synced or an
+    external disk).
+  - Payments due soon show under a bell in the top bar, and as desktop
+    notifications, with an account-short warning before EMIs.
+  - Bank statements (CSV/.xlsx) import into the ledger: duplicates are left
+    out, and each import can be undone. See `Domains/Calendar.md` and
+    `Domains/Banking.md`.
+- **Taxation simplified** (2026-10-11): one planner per person and year with
+  five tabs (Summary, Income, Deductions, Pay & TDS, Ways to save); the
+  specialist views are under More. The separate Quick estimate was folded in.
+  See `Domains/Taxation.md`.
+- **End-to-end tests** (2026-10-11): Playwright smoke tests (`e2e/`) open
+  every page and walk the key flows, in CI.
+
 ## Explicitly Not Planned
 
 Per `00-Project-Constitution.md`'s Non-Scope: transaction-level
