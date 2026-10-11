@@ -28,6 +28,7 @@ import backend.tax.epf as tax_epf
 import backend.tax.prefill as tax_prefill_mod
 import backend.tax.payslip_pdf as tax_payslip_pdf_mod
 import backend.tax.advance_tax as tax_advance_mod
+import backend.tax.harvesting as tax_harvesting_mod
 from backend.decision_engine import generate_recommendations, generate_credit_card_annual_reviews
 
 # Shared-secret auth for the Docker/web deployment path only. Empty/unset (the
@@ -2043,6 +2044,14 @@ def tax_advance(req: TaxAdvanceRequest):
     def run(conn):
         rules, _meta = _resolve_for(conn, req.financial_year, req.rule_set_id, req.rule_set_version)
         return tax_advance_mod.advance_tax_schedule(req.inputs, rules, expected_tds=req.expected_tds, regime=req.regime)
+    return _tax_store_call(run)
+
+@app.get("/api/tax/harvesting")
+def tax_harvesting(person_id: int, financial_year: Optional[str] = None):
+    """Gain- and loss-harvesting suggestions from this person's equity purchase lots (read-only)."""
+    def run(conn):
+        rules, _meta = _resolve_for(conn, financial_year, None, None)
+        return tax_harvesting_mod.harvest_plan(conn, person_id, rules["financial_year"], rules)
     return _tax_store_call(run)
 
 PLANNER_SLOT_PATTERN = re.compile(r"^p(\d+)-(\d{4}-\d{2})$")

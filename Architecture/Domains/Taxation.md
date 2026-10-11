@@ -21,6 +21,7 @@ Help a salaried user understand and plan their Indian income tax: which regime i
 - **Reports**: CSV per table or all-in-one, and a printable report saved as PDF (Electron `printToPDF` via the preload bridge; browser print dialog on the web).
 - The older **profile estimate** (Profile & Deductions / Old vs New Estimate tabs, `tax_profiles` + `tax_deductions`) now runs on the same engine and rule resolution.
 - **Capital gains**: realized gains log (`capital_gains_realizations`) and unrealized estimates from holding lots; special-rate gains (111A/112A/112) are taxed by the engine.
+- **Harvesting** (`harvesting.py`, Capital Gains tab, `GET /api/tax/harvesting`): sell-and-rebuy suggestions that use the year's tax-free long-term equity allowance (the rule set's `ltcg_112a_exemption`, net of long-term equity gains already realised), taking each holding's lots oldest first (FIFO) and stopping before a short-term lot; and holdings below cost whose losses would offset this year's taxable gains (short-term losses against short- or long-term gains, long-term against long-term) or carry forward. Read-only suggestions; mutual funds are assumed equity-oriented.
 
 ## Out of Scope
 
@@ -85,7 +86,7 @@ Taxation page tabs: **Tax Planner** (default), Profile & Deductions, Old vs New 
 - `POST /api/tax/compute`: inputs + FY (or explicit rule set) → full result.
 - `GET /api/tax/input-metadata`, `GET/POST/PUT/DELETE /api/tax/rule-sets[/{id}]`, `/versions`, `/diff`, `/archive`, `/restore`, `PUT /api/tax/rule-set-selection/{fy}`.
 - `GET/POST/DELETE /api/tax/scenarios[/{id}]`, `POST /api/tax/scenarios/{id}/recalculate`.
-- `POST /api/tax/nps-scenarios`, `/payslip` (optional `month_index` with month-by-month entry), `/waterfall`, `/sensitivity`, `/nps-target`, `/epf-suggestion`, `/advance-tax`.
+- `POST /api/tax/nps-scenarios`, `/payslip` (optional `month_index` with month-by-month entry), `/waterfall`, `/sensitivity`, `/nps-target`, `/epf-suggestion`, `/advance-tax`; `GET /api/tax/harvesting?person_id=&financial_year=`.
 - `GET /api/tax/prefill?financial_year=&person_id=`: proposals from Artha's records (read-only).
 - `GET/PUT/DELETE /api/tax/planner-draft/{slot}`.
 - `GET /api/tax-profiles/{id}/estimate`: the profile estimate, on the same engine.

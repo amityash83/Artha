@@ -6,6 +6,7 @@ import { TaxDeductionsEditor } from './TaxDeductionsEditor';
 import { InfoTooltip } from './InfoTooltip';
 import { TaxPlanner } from './tax/TaxPlanner';
 import { TaxRulesManager } from './tax/TaxRulesManager';
+import { HarvestingPanel } from './tax/HarvestingPanel';
 
 interface TaxationProps {
   data: InitData;
@@ -42,7 +43,7 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
 
   const [activeSubTab, setActiveSubTab] = useState<'planner' | 'profile' | 'estimate' | 'capital-gains' | 'rules'>('planner');
   const profileTab = activeSubTab === 'profile' || activeSubTab === 'estimate' || activeSubTab === 'capital-gains';
-  const [selectedPersonId, setSelectedPersonId] = useState<number | null>(people[0]?.id ?? null);
+  const [selectedPersonId, setSelectedPersonId] = useState<number | null>((people.find((p) => p.role === 'Primary Owner') ?? people[0])?.id ?? null);
   const [selectedFY, setSelectedFY] = useState<string>(getCurrentFY());
 
   const [formData, setFormData] = useState<TaxProfile>(emptyProfile(selectedPersonId || 0));
@@ -441,6 +442,8 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
           )}
 
           {activeSubTab === 'capital-gains' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <HarvestingPanel personId={selectedPersonId} financialYear={selectedFY} />
             <div className="glass-panel" style={{ padding: '20px' }}>
               <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '14px' }}>Realized Capital Gains ({selectedFY})</h3>
               {!selectedProfile ? (
@@ -479,6 +482,7 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
                   </table>
                 </div>
               )}
+            </div>
             </div>
           )}
         </>
