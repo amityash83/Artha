@@ -50,7 +50,7 @@ not a one-column special case — see the gap inventory below.
 ## Backups
 
 Logic lives in `backend/backups.py`; `/api/backup/create`, `/restore`, `/list`,
-`/details` and `/auto-run` are thin routes over it.
+`/details`, `/auto-run` and `/mirror` are thin routes over it.
 
 - **When:** the backend backs up at startup, before `init_db()` runs migrations, on
   every platform (desktop, web, Docker). Electron additionally triggers one on window
@@ -65,6 +65,15 @@ Logic lives in `backend/backups.py`; `/api/backup/create`, `/restore`, `/list`,
   then `init_db()` re-applies migrations to the restored data.
 - **Retention:** `auto_*` and `pre_restore_*` copies are pruned by count
   (`backup_count_limit`, default 10), not by age. Manual `backup_*` copies are never pruned.
+- **Second copy (`mirror_backup_dir`):** an optional folder off this machine (cloud-synced
+  folder, external disk), set through `/api/settings/backup-mirror` (which refuses a relative,
+  missing or unwritable folder, or the database's or backups' own folder). After every backup,
+  and on a skipped automatic one, `mirror_backups()` copies whatever backups the folder is
+  missing (`.partial` then rename, keeping the file time) and prunes it by the same rules.
+  It never fails the backup: when the folder is unavailable the error is kept in settings
+  (`mirror_last_error`) and shown in Settings › Backups, and the next run catches up.
+  Artha only writes files there; syncing them off the machine is the cloud client's job.
+  `/api/backup/mirror` runs it on demand.
 - **Protection:** none beyond the live database's: no encryption or compression. A backup
   file is exactly as protected (or unprotected) as the database itself.
 

@@ -3960,7 +3960,22 @@ def list_backups():
 
 @app.get("/api/backup/details")
 def list_backup_details():
-    return {"folder": backups.backup_dir(), "backups": backups.list_backups()}
+    return {"folder": backups.backup_dir(), "backups": backups.list_backups(), "mirror": backups.mirror_status()}
+
+class BackupMirrorRequest(BaseModel):
+    folder: str = ""
+
+@app.post("/api/settings/backup-mirror")
+def set_backup_mirror(req: BackupMirrorRequest):
+    # A second folder off this machine (cloud-synced folder, external disk); "" turns it off.
+    return _backup_call(backups.set_mirror_folder, req.folder)
+
+@app.post("/api/backup/mirror")
+def run_backup_mirror():
+    out = backups.mirror_backups()
+    if out is None:
+        raise HTTPException(status_code=400, detail="No second backup folder is set.")
+    return {**out, **backups.mirror_status()}
 
 @app.api_route("/api/backup/auto-run", methods=["GET", "POST"])
 def auto_run_backup(trigger: str = "open"):
@@ -3983,7 +3998,8 @@ def get_database_settings():
         "backup_on_open": settings.get("backup_on_open", True),
         "backup_on_close": settings.get("backup_on_close", True),
         "backup_count_limit": settings.get("backup_count_limit", 10),
-        "custom_backup_dir": settings.get("custom_backup_dir", "")
+        "custom_backup_dir": settings.get("custom_backup_dir", ""),
+        "mirror_backup_dir": settings.get("mirror_backup_dir", ""),
     }
 
 class BackupSettingsRequest(BaseModel):

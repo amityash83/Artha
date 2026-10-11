@@ -9,6 +9,7 @@ interface ArthaDesktopApi {
   isDesktop: true;
   selectDbFile: (mode: 'open' | 'create') => Promise<string | null>;
   savePdf: (suggestedName: string) => Promise<string | null>;
+  selectFolder?: (title: string) => Promise<string | null>;
   onMenuCommand?: (callback: (command: string) => void) => () => void;
 }
 
@@ -35,6 +36,12 @@ export async function saveAsPdf(suggestedName: string): Promise<string | null> {
 export function onMenuCommand(callback: (command: AppCommand) => void): () => void {
   if (!window.artha?.onMenuCommand) return () => {};
   return window.artha.onMenuCommand((c) => callback(c as AppCommand));
+}
+
+/** Native folder picker. Desktop only; null if cancelled or unavailable (the web build types a path instead). */
+export async function selectFolder(title: string): Promise<string | null> {
+  if (!window.artha?.selectFolder) return null;
+  return window.artha.selectFolder(title);
 }
 
 /** Native file dialog for picking/creating a database file. Desktop only; null if cancelled or unavailable. */

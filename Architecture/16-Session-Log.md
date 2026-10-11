@@ -190,3 +190,20 @@ and emphatically, applies to every commit going forward, no exceptions.
 - (Done: realised mutual fund gains are classified by fund type at read
   time, in the tax prefill and harvesting, so a liquid fund's sale goes to
   slab rate and doesn't use the 112A allowance.)
+
+### Second backup folder (2026-10-11)
+
+- Backups used to live only on the same machine as the database, so a lost
+  or dead laptop took both. Settings › Backups now has an optional second
+  folder (iCloud Drive / Google Drive / OneDrive folder, or an external
+  disk) that every backup is also copied to.
+- **Folder copy, not a cloud API.** Artha writes files into a folder and
+  leaves the upload to the provider's own sync client. That keeps it
+  offline-first with no credentials, and it works for any provider or a
+  USB disk.
+- **Never blocks a backup.** An unplugged drive is recorded and shown in
+  Settings, not raised. The next run (including a skipped "nothing
+  changed" automatic one) copies whatever the folder is missing.
+- The folder must already exist; Artha never creates it. A typo, or a
+  drive mounted at a path that is missing, would otherwise get quietly
+  filled on the local disk.

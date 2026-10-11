@@ -1,3 +1,6 @@
+import { mkdtempSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 
 // Smoke tests against the seeded household (e2e/seed.ts). Each test starts from the
@@ -133,4 +136,20 @@ test('taxation quick estimate compares the regimes', async ({ page }) => {
   await page.locator('.tx-actions .btn-primary').click();
   await expect(page.getByText(/Better for you: the (old|new) regime/)).toBeVisible();
   await expect(page.locator('.cf-compare')).toContainText('Total tax');
+});
+
+test('backups are also copied to a second folder', async ({ page }) => {
+  const second = mkdtempSync(join(tmpdir(), 'artha-e2e-second-'));
+  await open(page);
+  await go(page, 'Settings');
+  await page.locator('.settings-nav-item', { hasText: 'Backups' }).click();
+  await page.getByLabel('Folder for the second copy').fill(join(second, 'missing'));
+  await page.getByRole('button', { name: 'Use', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText("isn't available");
+  await page.getByLabel('Folder for the second copy').fill(second);
+  await page.getByRole('button', { name: 'Use', exact: true }).click();
+  await expect(page.getByText(/Up to date as of/)).toBeVisible();
+  await page.getByRole('button', { name: 'Back up now' }).click();
+  await expect(page.getByText('Backup saved and copied to the second folder')).toBeVisible();
+  expect(readdirSync(second).filter((n) => n.startsWith('backup_'))).toHaveLength(1);
 });

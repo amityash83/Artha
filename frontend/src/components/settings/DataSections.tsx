@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { FolderOpen, Plus, Upload } from 'lucide-react';
-import { isDesktop, selectDatabaseFile } from '../../platform';
+import { isDesktop, selectDatabaseFile, selectFolder } from '../../platform';
 import { AmountInput, api, ConfirmAction, Group, Row, SaveStatus, SectionHeader, SectionProps, shortPath, splitPath, Switch, useAutoSave } from './ui';
 
 interface DbSettings {
@@ -101,12 +101,88 @@ function whenOf(iso: string): string {
   return `${d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}, ${time}`;
 }
 
+interface MirrorStatus { folder: string; last_copied_at?: string | null; last_error?: string | null; last_error_at?: string | null }
+
+/**
+ * The second copy: every backup is also copied to a folder off this machine (a cloud-synced
+ * folder or an external disk), so a lost or broken computer doesn't take the backups with it.
+ */
+const SecondCopyGroup: React.FC<{ mirror: MirrorStatus | undefined; onChanged: () => void; showToast?: SectionProps['showToast'] }> = ({ mirror, onChanged, showToast }) => {
+  const desktop = isDesktop();
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const setFolder = async (folder: string) => {
+    setBusy(true);
+    try {
+      const out = await api<MirrorStatus & { copied: string[] }>('/api/settings/backup-mirror', { method: 'POST', body: JSON.stringify({ folder }) });
+      setError(null);
+      setDraft('');
+      showToast?.(folder ? `Backups will also be copied to ${splitPath(folder.replace(/[\\/]+$/, '')).name}${out.copied.length ? ` (${out.copied.length} copied now)` : ''}` : 'Stopped copying backups elsewhere', 'success');
+      onChanged();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const choose = async () => {
+    const folder = await selectFolder('Choose a folder for the second copy of your backups').catch(() => null);
+    if (folder) await setFolder(folder);
+  };
+  const copyNow = async () => {
+    setBusy(true);
+    try {
+      const out = await api<{ status: string; message?: string; copied: string[] }>('/api/backup/mirror', { method: 'POST' });
+      if (out.status === 'success') showToast?.(out.copied.length ? `Copied ${out.copied.length} backup${out.copied.length === 1 ? '' : 's'}` : 'Already up to date', 'success');
+      else showToast?.(out.message ?? "Couldn't copy the backups", 'error');
+    } catch (e) {
+      showToast?.((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+      onChanged();
+    }
+  };
+
+  const folder = mirror?.folder ?? '';
+  const failing = !!mirror?.last_error;
+  return (
+    <Group title="Second copy elsewhere"
+      description="Backups next to the database are lost with this computer. Choose a folder somewhere else, such as an iCloud Drive, Google Drive or OneDrive folder, or an external disk, and every backup is copied there too.">
+      {folder ? (
+        <>
+          <Row label={<PathText path={folder.replace(/[\\/]+$/, '')} />}
+            description={failing
+              ? <span style={{ color: '#fca5a5' }}>{mirror?.last_error}</span>
+              : mirror?.last_copied_at ? `Up to date as of ${whenOf(mirror.last_copied_at)}` : 'Not copied yet'}>
+            <button type="button" className="settings-btn" disabled={busy} onClick={() => void copyNow()}>{failing ? 'Try again' : 'Copy now'}</button>
+            <ConfirmAction label="Stop" confirmLabel="Stop copying" question="Stop copying backups to this folder? Copies already there are kept." onConfirm={() => setFolder('')} />
+          </Row>
+          {failing && <Row label={<span className="settings-note">Backups still go to the usual folder. Whatever this folder is missing is copied the next time it's available.</span>} />}
+        </>
+      ) : (
+        <Row label="Copy every backup to" description={desktop ? 'Older automatic copies there are deleted just like here; ones you make yourself are kept.' : 'The full path of a folder the Artha server can write to.'}>
+          {desktop
+            ? <button type="button" className="settings-btn" disabled={busy} onClick={() => void choose()}><FolderOpen size={13} /> Choose folder…</button>
+            : <>
+                <input className="settings-input" style={{ width: '220px' }} aria-label="Folder for the second copy" placeholder="/path/to/folder" value={draft} onChange={(e) => setDraft(e.target.value)} />
+                <button type="button" className="settings-btn" disabled={busy || !draft.trim()} onClick={() => void setFolder(draft.trim())}>Use</button>
+              </>}
+        </Row>
+      )}
+      {error && <Row label={<span role="alert" style={{ fontSize: '12.5px', color: '#fca5a5' }}>{error}</span>} />}
+      <Row label={<span className="settings-note">On a new computer: install Artha, set this folder as the backup folder above, and restore the newest backup.</span>} />
+    </Group>
+  );
+};
+
 export const BackupsSection: React.FC<SectionProps> = ({ onRefresh, showToast }) => {
   const { db } = useDbSettings();
   const [prefs, setPrefs] = useState<{ open: boolean; close: boolean; keep: number; folder: string } | null>(null);
-  const [list, setList] = useState<{ folder: string; backups: BackupInfo[] } | null>(null);
+  const [list, setList] = useState<{ folder: string; backups: BackupInfo[]; mirror?: MirrorStatus } | null>(null);
   const [showAll, setShowAll] = useState(false);
-  const loadList = useCallback(() => { api<{ folder: string; backups: BackupInfo[] }>('/api/backup/details').then(setList).catch(() => setList(null)); }, []);
+  const loadList = useCallback(() => { api<{ folder: string; backups: BackupInfo[]; mirror?: MirrorStatus }>('/api/backup/details').then(setList).catch(() => setList(null)); }, []);
   useEffect(loadList, [loadList]);
   useEffect(() => {
     if (db && !prefs) setPrefs({ open: db.backup_on_open ?? true, close: db.backup_on_close ?? true, keep: db.backup_count_limit ?? 10, folder: db.custom_backup_dir ?? '' });
@@ -125,8 +201,9 @@ export const BackupsSection: React.FC<SectionProps> = ({ onRefresh, showToast })
 
   const backupNow = async () => {
     try {
-      await api('/api/backup/create', { method: 'POST' });
-      showToast?.('Backup saved', 'success');
+      const out = await api<{ mirror?: { status: string; message?: string } | null }>('/api/backup/create', { method: 'POST' });
+      if (out.mirror?.status === 'error') showToast?.(`Backup saved here, but not copied to the second folder: ${out.mirror.message}`, 'error');
+      else showToast?.(out.mirror ? 'Backup saved and copied to the second folder' : 'Backup saved', 'success');
       loadList();
     } catch (e) {
       showToast?.(`Backup failed: ${(e as Error).message}`, 'error');
@@ -168,6 +245,7 @@ export const BackupsSection: React.FC<SectionProps> = ({ onRefresh, showToast })
           </Row>
         </Group>
       )}
+      {list && <SecondCopyGroup mirror={list.mirror} onChanged={loadList} showToast={showToast} />}
       <Group title="Saved backups" description={list ? <>In <span className="settings-mono" title={list.folder}>{shortPath(splitPath(list.folder + '/x').folder)}</span></> : undefined}
         actions={<button type="button" className="settings-btn settings-btn--primary" onClick={backupNow}>Back up now</button>}>
         {backups.length === 0 && <Row label={<span className="settings-note">No backups yet.</span>} />}

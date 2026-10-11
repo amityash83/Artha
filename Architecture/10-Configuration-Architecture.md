@@ -19,7 +19,8 @@ Two distinct configuration surfaces exist, and they're easy to conflate:
    configuration, not financial policy: `active_db_path`,
    `recent_databases` (capped at 5, most-recent-first),
    `backup_on_open`/`backup_on_close`/`backup_count_limit`/
-   `custom_backup_dir`. Read/written by `backend/db.py`'s
+   `custom_backup_dir`, `mirror_backup_dir` (second backup folder) and its
+   `mirror_last_copied_at`/`mirror_last_error` status. Read/written by `backend/db.py`'s
    `load_settings()`/`save_settings()`, exposed via
    `/api/settings/database` and `/api/settings/backup`.
 

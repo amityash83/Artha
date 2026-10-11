@@ -12,8 +12,14 @@ taken while the app has the database open is always a consistent snapshot.
 - Restore checks the file is an intact Artha database, saves the current database as
   "pre_restore_*" first, then copies the backup into the live database through the backup
   API (which takes SQLite's write lock, rather than swapping files under open connections).
+- Second copy ("mirror_backup_dir"): an optional folder elsewhere (cloud-synced folder, external
+  disk) that every backup is also copied to, so losing this computer doesn't lose the backups
+  with it. Copying never fails a backup: when the folder is missing (drive unplugged) the error
+  is recorded and shown, and the next backup copies whatever the folder is missing. The folder
+  is pruned to the same limits as the main one; backups made by hand are kept in both.
 """
 import os
+import shutil
 import sqlite3
 from datetime import datetime
 from typing import List, Optional
@@ -38,6 +44,7 @@ def backup_settings() -> dict:
         "backup_on_close": s.get("backup_on_close", True),
         "backup_count_limit": int(s.get("backup_count_limit", DEFAULT_KEEP) or DEFAULT_KEEP),
         "custom_backup_dir": s.get("custom_backup_dir", "") or "",
+        "mirror_backup_dir": s.get("mirror_backup_dir", "") or "",
     }
 
 
@@ -92,8 +99,8 @@ def _unchanged_since_last_backup(db_path: str) -> bool:
     return os.path.getmtime(db_path) <= newest
 
 
-def _prune(prefix: str, keep: int) -> int:
-    folder = backup_dir()
+def _prune(prefix: str, keep: int, folder: Optional[str] = None) -> int:
+    folder = folder or backup_dir()
     files = sorted((os.path.join(folder, n) for n in os.listdir(folder) if n.startswith(prefix) and n.endswith(".db")),
                    key=os.path.getmtime)
     removed = 0
@@ -124,7 +131,85 @@ def create_backup(kind: str = "manual") -> Optional[dict]:
     _copy(db_path, path)
     keep = backup_settings()["backup_count_limit"]
     purged = _prune(AUTO_PREFIX, keep) if kind in ("open", "close") else _prune(PRE_RESTORE_PREFIX, keep) if kind == "pre_restore" else 0
-    return {"backup_file": path, "name": os.path.basename(path), "purged": purged}
+    return {"backup_file": path, "name": os.path.basename(path), "purged": purged, "mirror": mirror_backups()}
+
+
+# --- Second copy elsewhere ---------------------------------------------------------------
+
+def _same_folder(a: str, b: str) -> bool:
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+
+
+def check_mirror_folder(folder: str) -> Optional[str]:
+    """Why a folder can't hold the second copy, or None when it can."""
+    if not os.path.isabs(folder):
+        return "Give the full path of the folder."
+    if not os.path.isdir(folder):
+        return f"{folder} isn't available. Is the drive connected, or the cloud folder synced?"
+    if _same_folder(folder, backup_dir()) or _same_folder(folder, db.get_db_dir()):
+        return "Choose a folder other than where the database and its backups already are."
+    if not os.access(folder, os.W_OK):
+        return f"Artha can't write to {folder}."
+    return None
+
+
+def mirror_status() -> dict:
+    s = db.load_settings()
+    return {"folder": s.get("mirror_backup_dir", "") or "", "last_copied_at": s.get("mirror_last_copied_at"),
+            "last_error": s.get("mirror_last_error"), "last_error_at": s.get("mirror_last_error_at")}
+
+
+def _record(**fields) -> None:
+    s = db.load_settings()
+    s.update(fields)
+    db.save_settings(s)
+
+
+def mirror_backups() -> Optional[dict]:
+    """Copy the backups the second folder is missing there, then prune it. Returns None when no
+    second folder is set; otherwise {"status": "success"|"error", ...}. Never raises."""
+    folder = backup_settings()["mirror_backup_dir"]
+    if not folder:
+        return None
+    problem = check_mirror_folder(folder)
+    copied = []
+    if problem is None:
+        try:
+            have = set(os.listdir(folder))
+            source = backup_dir()
+            for b in reversed(list_backups()):  # oldest first, so the newest lands last
+                if b["name"] not in have:
+                    tmp = os.path.join(folder, b["name"] + ".partial")
+                    try:
+                        shutil.copy2(os.path.join(source, b["name"]), tmp)  # keeps the time, which pruning goes by
+                        os.replace(tmp, os.path.join(folder, b["name"]))
+                    finally:
+                        if os.path.exists(tmp):
+                            os.remove(tmp)
+                    copied.append(b["name"])
+            keep = backup_settings()["backup_count_limit"]
+            _prune(AUTO_PREFIX, keep, folder)
+            _prune(PRE_RESTORE_PREFIX, keep, folder)
+        except OSError as e:
+            problem = f"Copying to {folder} failed: {e.strerror or e}"
+    now = datetime.now().isoformat(timespec="seconds")
+    if problem:
+        _record(mirror_last_error=problem, mirror_last_error_at=now)
+        return {"status": "error", "folder": folder, "message": problem, "copied": copied}
+    _record(mirror_last_copied_at=now, mirror_last_error=None, mirror_last_error_at=None)
+    return {"status": "success", "folder": folder, "copied": copied}
+
+
+def set_mirror_folder(folder: str) -> dict:
+    """Set (or, with "", clear) the second folder, copying the existing backups there now."""
+    folder = (folder or "").strip()
+    if folder:
+        problem = check_mirror_folder(folder)
+        if problem:
+            raise BackupError(problem, 422)
+    _record(mirror_backup_dir=folder, mirror_last_copied_at=None, mirror_last_error=None, mirror_last_error_at=None)
+    result = mirror_backups()
+    return {**mirror_status(), "copied": (result or {}).get("copied", [])}
 
 
 def auto_backup(trigger: str) -> dict:
@@ -137,7 +222,8 @@ def auto_backup(trigger: str) -> dict:
         return {"status": "skipped", "reason": "no database yet"}
     made = create_backup(trigger)
     if made is None:
-        return {"status": "skipped", "reason": "no changes since the last backup"}
+        # Nothing new, but the second folder may have been unavailable last time.
+        return {"status": "skipped", "reason": "no changes since the last backup", "mirror": mirror_backups()}
     return {"status": "success", **made}
 
 

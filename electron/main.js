@@ -310,6 +310,16 @@ ipcMain.handle('select-db-file', async (event, mode) => {
   }
 });
 
+// Pick a folder (the second backup folder). Resolves to the chosen path, or null if cancelled.
+ipcMain.handle('select-folder', async (event, title) => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: typeof title === 'string' && title.length <= 120 ? title : 'Choose a folder',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  return result.canceled ? null : result.filePaths[0] || null;
+});
+
 // Save the current page as a PDF (the report view uses print CSS, which printToPDF honours).
 ipcMain.handle('save-pdf', async (event, suggestedName) => {
   if (!mainWindow) return null;

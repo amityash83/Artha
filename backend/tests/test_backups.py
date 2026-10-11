@@ -145,3 +145,81 @@ def test_packaged_entry_point_leaves_init_db_to_the_lifespan():
     import pathlib
     run_py = pathlib.Path(__file__).resolve().parents[1] / "run.py"
     assert "init_db()" not in run_py.read_text().split("# init_db() runs")[0]
+
+
+# --- Second copy elsewhere ------------------------------------------------------------
+
+def test_every_backup_is_copied_to_the_second_folder(initialized_db, tmp_path):
+    second = tmp_path / "cloud"
+    second.mkdir()
+    _touch_db("one")
+    early = backups.create_backup("manual")  # made before the second folder was set
+    out = backups.set_mirror_folder(str(second))
+    assert out["copied"] == [early["name"]] and out["last_error"] is None
+    _touch_db("two")
+    made = backups.create_backup("manual")
+    assert made["mirror"] == {"status": "success", "folder": str(second), "copied": [made["name"]]}
+    assert _probe(str(second / made["name"])) == "two"
+    assert os.path.getmtime(second / made["name"]) == os.path.getmtime(made["backup_file"])
+    assert not any(n.endswith(".partial") for n in os.listdir(second))
+
+
+def test_a_missing_second_folder_never_fails_a_backup_and_catches_up_later(initialized_db, tmp_path):
+    second = tmp_path / "usb"
+    second.mkdir()
+    backups.set_mirror_folder(str(second))
+    second.rmdir()  # the drive is unplugged
+    _touch_db("a")
+    made = backups.create_backup("manual")
+    assert os.path.exists(made["backup_file"])
+    assert made["mirror"]["status"] == "error" and "isn't available" in made["mirror"]["message"]
+    assert backups.mirror_status()["last_error"]
+    second.mkdir()  # plugged back in: an unchanged auto backup is skipped but still copies what's missing
+    db.save_settings({**db.load_settings(), "backup_on_open": True})
+    backups.create_backup("open")  # make the newest backup current so the next open is skipped
+    skipped = backups.auto_backup("open")
+    assert skipped["status"] == "skipped" and skipped["mirror"]["status"] == "success"
+    assert made["name"] in os.listdir(second)
+    assert backups.mirror_status()["last_error"] is None
+
+
+def test_second_folder_is_pruned_like_the_main_one(initialized_db, tmp_path):
+    second = tmp_path / "cloud"
+    second.mkdir()
+    db.save_settings({"backup_count_limit": 2})
+    backups.set_mirror_folder(str(second))
+    manual = backups.create_backup("manual")
+    for v in "abcd":
+        _touch_db(v)
+        backups.auto_backup("open")
+    autos = sorted(n for n in os.listdir(second) if n.startswith("auto_"))
+    assert autos == sorted(b["name"] for b in backups.list_backups() if b["name"].startswith("auto_"))
+    assert len(autos) == 2 and manual["name"] in os.listdir(second)
+
+
+@pytest.mark.parametrize("which", ["relative", "missing", "backups", "database"])
+def test_second_folder_must_be_somewhere_else(initialized_db, tmp_path, which):
+    folder = {"relative": "cloud", "missing": str(tmp_path / "nope"),
+              "backups": backups.backup_dir(), "database": db.get_db_dir()}[which]
+    with pytest.raises(backups.BackupError) as e:
+        backups.set_mirror_folder(folder)
+    assert e.value.status_code == 422
+    assert backups.backup_settings()["mirror_backup_dir"] == ""
+
+
+def test_second_folder_routes(initialized_db, tmp_path):
+    from backend.main import app
+    second = tmp_path / "cloud"
+    second.mkdir()
+    with TestClient(app) as client:
+        assert client.post("/api/backup/mirror").status_code == 400
+        assert client.post("/api/settings/backup-mirror", json={"folder": str(tmp_path / "nope")}).status_code == 422
+        r = client.post("/api/settings/backup-mirror", json={"folder": str(second)})
+        assert r.status_code == 200 and r.json()["folder"] == str(second)
+        assert client.get("/api/settings/database").json()["mirror_backup_dir"] == str(second)
+        assert client.post("/api/backup/create").json()["mirror"]["status"] == "success"
+        details = client.get("/api/backup/details").json()
+        assert details["mirror"]["last_copied_at"] and details["mirror"]["last_error"] is None
+        assert {b["name"] for b in details["backups"]} <= set(os.listdir(second))
+        assert client.post("/api/backup/mirror").json()["copied"] == []
+        assert client.post("/api/settings/backup-mirror", json={"folder": ""}).json()["folder"] == ""
