@@ -207,3 +207,20 @@ and emphatically, applies to every commit going forward, no exceptions.
 - The folder must already exist; Artha never creates it. A typo, or a
   drive mounted at a path that is missing, would otherwise get quietly
   filled on the local disk.
+
+### Due-date reminders (2026-10-11)
+
+- Built on the Financial Calendar's own events (`calendar_events()`, split out of the route),
+  so a reminder can never disagree with the calendar. `backend/reminders.py` keeps the ones
+  within each kind's lead time; see `Architecture/Domains/Calendar.md`.
+- **Account check, not just a date.** The useful reminder before an EMI is "the account it
+  comes from is short", especially with automatic EMIs (posted whether or not the money is
+  there). EMIs from one account are counted in date order against its derived balance.
+- **The backend decides what to notify.** Electron only polls `POST /api/reminders/notify`,
+  which returns each reminder once when it comes into range and once on the day, and records
+  that in `reminder_state` (per database). Polling often, or restarting, never repeats a
+  notification, and the logic is testable in pytest rather than living in main.js.
+- EMIs with no debit day set are left out: their calendar date is a placeholder (the 1st, or
+  today for this month), which would nag daily.
+- Go-to search now ranks matches at the start of a word first: "EMI" was finding
+  "R*emi*nders" ahead of the Loan planner.

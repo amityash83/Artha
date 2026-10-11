@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Archive, Database, Landmark, Palette, SlidersHorizontal, Sparkles, Tags, Upload, Users } from 'lucide-react';
+import { Archive, Bell, Database, Landmark, Palette, SlidersHorizontal, Sparkles, Tags, Upload, Users } from 'lucide-react';
 import { BackupsSection, DatabaseSection, ImportSection } from './settings/DataSections';
 import { CategoriesSection, InstitutionsSection, PeopleSection, RulesSection } from './settings/PlanningSections';
 import { AiSection, AppearanceSection } from './settings/OtherSections';
 import type { SectionProps } from './settings/ui';
+import { RemindersSection } from './Reminders';
 
 interface SettingsProps {
   onRefresh: () => void;
@@ -12,7 +13,7 @@ interface SettingsProps {
   openSection?: { id: string; nonce: number } | null;
 }
 
-type SectionId = 'database' | 'backups' | 'import' | 'rules' | 'categories' | 'people' | 'institutions' | 'ai' | 'appearance';
+type SectionId = 'database' | 'backups' | 'import' | 'reminders' | 'rules' | 'categories' | 'people' | 'institutions' | 'ai' | 'appearance';
 
 const NAV: { heading: string; items: { id: SectionId; label: string; icon: React.ReactNode }[] }[] = [
   { heading: 'Data', items: [
@@ -22,6 +23,7 @@ const NAV: { heading: string; items: { id: SectionId; label: string; icon: React
   ] },
   { heading: 'Planning', items: [
     { id: 'rules', label: 'Planning rules', icon: <SlidersHorizontal size={15} /> },
+    { id: 'reminders', label: 'Reminders', icon: <Bell size={15} /> },
     { id: 'categories', label: 'Categories', icon: <Tags size={15} /> },
     { id: 'people', label: 'People', icon: <Users size={15} /> },
     { id: 'institutions', label: 'Banks & institutions', icon: <Landmark size={15} /> },
@@ -34,6 +36,7 @@ const KEYWORDS: Record<SectionId, string> = {
   database: 'file switch open new',
   backups: 'restore copy automatic',
   import: 'mmex money manager csv',
+  reminders: 'notifications due dates bills premiums alerts',
   rules: 'emergency fund thresholds savings rate',
   categories: 'custom fields schema',
   people: 'household owner spouse',
@@ -49,6 +52,7 @@ const SECTIONS: Record<SectionId, React.FC<SectionProps>> = {
   database: DatabaseSection,
   backups: BackupsSection,
   import: ImportSection,
+  reminders: RemindersSection,
   rules: RulesSection,
   categories: CategoriesSection,
   people: PeopleSection,

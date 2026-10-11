@@ -175,6 +175,10 @@ def mirror_backups() -> Optional[dict]:
     copied = []
     if problem is None:
         try:
+            keep = backup_settings()["backup_count_limit"]
+            # Prune here first, so a lowered limit doesn't copy what the second folder is about to drop.
+            _prune(AUTO_PREFIX, keep)
+            _prune(PRE_RESTORE_PREFIX, keep)
             have = set(os.listdir(folder))
             source = backup_dir()
             for b in reversed(list_backups()):  # oldest first, so the newest lands last
@@ -187,7 +191,6 @@ def mirror_backups() -> Optional[dict]:
                         if os.path.exists(tmp):
                             os.remove(tmp)
                     copied.append(b["name"])
-            keep = backup_settings()["backup_count_limit"]
             _prune(AUTO_PREFIX, keep, folder)
             _prune(PRE_RESTORE_PREFIX, keep, folder)
         except OSError as e:

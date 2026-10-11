@@ -1145,3 +1145,43 @@ h1, h2, h3, h4, h5 {
 .pc-summary strong { font-size: 16px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .pc-note { width: 180px; font-size: 13px; padding: 6px 8px; }
 .lt-panel { border: 1px solid var(--border-glass); border-radius: var(--radius-sm); padding: 12px 14px; gap: 10px; }
+
+/* Reminders bell (components/Reminders.tsx) */
+.topbar-bell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 7px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.topbar-bell:hover { background: rgba(255, 255, 255, 0.05); color: var(--text-primary); }
+.topbar-bell-count {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.16);
+  color: var(--text-primary);
+  font: 600 10.5px/16px var(--font-sans);
+  text-align: center;
+}
+.topbar-bell--urgent .topbar-bell-count { background: var(--warning); color: #1a1205; }
+.rm-panel { width: min(400px, calc(100vw - 32px)); padding: 6px 0; gap: 0; z-index: 50; }
+.rm-head { padding: 6px 14px 8px; font: 600 12px var(--font-sans); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.rm-empty { padding: 10px 14px 14px; color: var(--text-secondary); font-size: 13px; }
+.rm-item { display: flex; align-items: flex-start; gap: 10px; padding: 9px 14px; border-top: 1px solid var(--border-glass); }
+.rm-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.rm-title { padding: 0; border: none; background: none; color: var(--text-primary); font: 500 13px var(--font-sans); text-align: left; cursor: pointer; }
+.rm-title:hover { text-decoration: underline; }
+.rm-sub { color: var(--text-muted); font-size: 12px; }
+.rm-soon { color: var(--warning); }
+.rm-warn { color: var(--warning); font-size: 12px; }
+.rm-amount { color: var(--text-primary); font: 500 13px var(--font-sans); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rm-foot { display: flex; justify-content: space-between; padding: 9px 14px 4px; border-top: 1px solid var(--border-glass); }

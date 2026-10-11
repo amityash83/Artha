@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, Notification, powerMonitor } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 
@@ -345,10 +345,63 @@ ipcMain.handle('save-pdf', async (event, suggestedName) => {
   return result.filePath;
 });
 
+// Due-date reminders as system notifications. The backend decides what's due and marks
+// each one as raised (POST /api/reminders/notify returns a reminder once when it comes into
+// range and again on its due day), so polling often never repeats one. Clicking opens the
+// app on its reminders list.
+const REMINDER_POLL_MS = 30 * 60 * 1000;
+const rupees = (n) => `₹${Math.round(n).toLocaleString('en-IN')}`;
+const dueText = (days) => (days === 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} days`);
+
+function showReminders() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    // A new window has to load and reach the backend first; the reminders list opens from the top bar.
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.webContents.send('menu-command', 'reminders');
+}
+
+async function checkReminders() {
+  if (!Notification.isSupported()) return;
+  let items = [];
+  try {
+    const res = await fetch(`http://127.0.0.1:${BACKEND_PORT}/api/reminders/notify`, { method: 'POST' });
+    if (!res.ok) return;
+    items = (await res.json()).items || [];
+  } catch (err) {
+    return; // backend not up yet (or gone): try again next time
+  }
+  if (!items.length) return;
+  const one = (it) => {
+    const short = it.warning ? ` · ${it.warning.account} is short by ${rupees(it.warning.short_by)}` : '';
+    return { title: `${it.title}${it.amount ? `: ${rupees(it.amount)}` : ''}`, body: `Due ${dueText(it.days_left)}${short}` };
+  };
+  const shown = items.length <= 3 ? items.map(one) : [{
+    title: `${items.length} payments due soon`,
+    body: items.slice(0, 3).map((it) => `${it.title} ${dueText(it.days_left)}`).join('\n') + (items.length > 3 ? '\n…' : ''),
+  }];
+  for (const n of shown) {
+    const note = new Notification({ title: n.title, body: n.body, silent: false });
+    note.on('click', showReminders);
+    note.show();
+  }
+}
+
+function startReminderPolling() {
+  setTimeout(checkReminders, 20 * 1000); // after startup settles (auto EMIs posted, backup done)
+  setInterval(checkReminders, REMINDER_POLL_MS);
+  powerMonitor.on('resume', () => setTimeout(checkReminders, 10 * 1000)); // a laptop opened the next morning
+}
+
 app.on('ready', () => {
   startBackend();
   // Wait 1.5 seconds for FastAPI server to boot up before opening React window
   setTimeout(createWindow, 1500);
+  startReminderPolling();
 });
 
 app.on('window-all-closed', () => {

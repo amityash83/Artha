@@ -426,6 +426,16 @@ def init_db():
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_loan_rate_changes_liability ON loan_rate_changes(liability_id)")
 
+    # Due-date reminders (backend/reminders.py): which ones were marked done or already raised
+    # as a notification. key = "<type>|<title>|<due date>", so a moved date is a new reminder.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS reminder_state (
+        key TEXT PRIMARY KEY,
+        dismissed_at TEXT,
+        notified_on TEXT
+    )
+    """)
+
     # What a property cost, by kind (main.PROPERTY_COST_KINDS): which kinds count towards the
     # cost for capital gains, and which only towards what it really cost. Loan interest is
     # not entered here: it comes from the Interest rows of the property's loans.

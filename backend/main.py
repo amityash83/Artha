@@ -8,7 +8,7 @@ import uuid
 import calendar
 import sqlite3
 from datetime import datetime, date
-from typing import List, Optional
+from typing import Dict, List, Optional
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Header, Depends
 from fastapi.responses import StreamingResponse, FileResponse
@@ -4258,17 +4258,22 @@ def delete_emi_profile(profile_id: int):
  # --- Financial Calendar Endpoint ---
 @app.get("/api/calendar")
 def get_financial_calendar():
+    return calendar_events()
+
+def calendar_events(today=None) -> list:
+    """Every dated payment for the next 12 months (EMIs, goal SIPs, premiums, card bills,
+    advance tax). The Financial Calendar shows them all; reminders (backend/reminders.py)
+    pick the ones due soon. EMI events carry liability_id so a reminder can check the
+    paying account."""
     from datetime import datetime, date
-    import calendar
-    from backend.db import get_db_connection
     
     conn = get_db_connection()
     cursor = conn.cursor()
     
     # Fetch loans (liabilities where interest_rate > 0 and emi > 0 and outstanding > 0)
     cursor.execute("""
-        SELECT name, emi, outstanding, metadata_json 
-        FROM liabilities 
+        SELECT id, name, emi, outstanding, metadata_json
+        FROM liabilities
         WHERE outstanding > 0 AND emi > 0 AND interest_rate > 0
     """)
     loans_raw = cursor.fetchall()
@@ -4354,8 +4359,8 @@ def get_financial_calendar():
     conn.close()
     
     events = []
-    today = date.today()
-    
+    today = today or date.today()
+
     # Generate calendar events for the next 12 months
     for m_offset in range(12):
         target_month_val = today.month + m_offset
@@ -4381,6 +4386,8 @@ def get_financial_calendar():
                     "type": "EMI",
                     "date": due_date.isoformat(),
                     "details": details,
+                    "liability_id": l["id"],
+                    "day_known": bool(l["emi_day"]),
                 })
                 
         # B. Goals Savings contributions (1st of month)
@@ -4469,6 +4476,66 @@ def get_financial_calendar():
         print("[Calendar] Tax events unavailable:", e)
     events.sort(key=lambda x: x["date"])
     return events
+
+# --- Due-date reminders (logic in backend/reminders.py) ---
+def _reminder_items(conn, include_done=False):
+    from backend import reminders
+    return reminders.due_reminders(conn, calendar_events(), include_done=include_done)
+
+@app.get("/api/reminders")
+def get_reminders(include_done: bool = False):
+    from backend import reminders
+    conn = get_db_connection()
+    try:
+        return {"items": _reminder_items(conn, include_done), "preferences": reminders.preferences()}
+    finally:
+        conn.close()
+
+@app.post("/api/reminders/notify")
+def take_reminder_notifications():
+    # Polled by the desktop app (electron/main.js): the reminders to raise as system
+    # notifications now. Each is returned once when it comes into range and once on its day.
+    from backend import reminders
+    conn = get_db_connection()
+    try:
+        reminders.prune_state(conn)
+        return {"items": reminders.take_notifications(conn, _reminder_items(conn))}
+    finally:
+        conn.close()
+
+class ReminderDoneRequest(BaseModel):
+    key: str
+    done: bool = True
+
+@app.post("/api/reminders/done")
+def mark_reminder_done(req: ReminderDoneRequest):
+    from backend import reminders
+    if not req.key or len(req.key) > 300 or req.key.count("|") < 2:
+        raise HTTPException(status_code=400, detail="Invalid reminder")
+    conn = get_db_connection()
+    try:
+        reminders.mark_done(conn, req.key, req.done)
+        return {"status": "success"}
+    finally:
+        conn.close()
+
+class ReminderPreferences(BaseModel):
+    enabled: bool = True
+    desktop_notifications: bool = True
+    lead_days: Dict[str, int] = {}
+
+@app.get("/api/settings/reminders")
+def get_reminder_preferences():
+    from backend import reminders
+    return {**reminders.preferences(), "kinds": reminders.REMINDER_TYPES, "max_lead_days": reminders.MAX_LEAD_DAYS}
+
+@app.post("/api/settings/reminders")
+def post_reminder_preferences(req: ReminderPreferences):
+    from backend import reminders
+    try:
+        return reminders.save_preferences(req.enabled, req.desktop_notifications, req.lead_days)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 # --- Multi-Loan Payoff Optimizer Endpoint ---
 class CompareCardsRequest(BaseModel):

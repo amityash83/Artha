@@ -153,3 +153,23 @@ test('backups are also copied to a second folder', async ({ page }) => {
   await expect(page.getByText('Backup saved and copied to the second folder')).toBeVisible();
   expect(readdirSync(second).filter((n) => n.startsWith('backup_'))).toHaveLength(1);
 });
+
+test('a payment due soon shows under the bell, with a short account', async ({ page, request }) => {
+  const backend = `http://127.0.0.1:${process.env.E2E_BACKEND_PORT}/api`;
+  const init = await (await request.get(`${backend}/init`)).json();
+  const savings = init.accounts.find((a: { name: string }) => a.name === 'Savings');
+  const homeLoan = init.categories.find((c: { entity_type: string; name: string }) => c.entity_type === 'Liability' && c.name === 'Home Loan');
+  const tomorrow = new Date(Date.now() + 86400000).getDate();
+  await request.post(`${backend}/entities/liabilities`, { data: { name: 'Bridge loan', category_id: homeLoan.id, outstanding: 2000000, interest_rate: 9,
+    emi: 900000, emi_day: tomorrow, emi_account_id: savings.id } });
+  await open(page);
+  await page.getByRole('button', { name: /due soon/ }).click();
+  const item = page.locator('.rm-item', { hasText: 'Bridge loan EMI' });
+  await expect(item).toContainText('Due tomorrow');
+  await expect(item).toContainText(/Savings has .* add/);
+  await item.getByRole('button', { name: 'Done' }).click();
+  await expect(item).toHaveCount(0);
+  await page.getByRole('button', { name: 'Reminder settings' }).click();
+  await expect(page.getByRole('heading', { name: 'Reminders' }).first()).toBeVisible();
+  await expect(page.getByText('Loan EMIs')).toBeVisible();
+});

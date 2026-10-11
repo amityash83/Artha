@@ -6,6 +6,7 @@ import { isDesktop } from '../platform';
 import { AppCommand, NAV_ITEMS, NEW_ITEMS } from '../navigation';
 import { SETTINGS_SECTIONS } from './Settings';
 import { useModalA11y } from '../hooks/useModalA11y';
+import { RemindersButton } from './Reminders';
 
 export interface NavigateOptions { search?: string; settingsSection?: string }
 
@@ -34,7 +35,9 @@ export const TopBar: React.FC<{
   refreshKey?: number;
   onCommand: (c: AppCommand) => void;
   onNavigate: (page: string, opts?: NavigateOptions) => void;
-}> = ({ data, refreshKey, onCommand, onNavigate }) => {
+  /** Changes to open the reminders list (a desktop notification was clicked). */
+  remindersNonce?: number;
+}> = ({ data, refreshKey, onCommand, onNavigate, remindersNonce }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [db, setDb] = useState<{ name: string; path: string; lastBackup: string | null } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -67,6 +70,7 @@ export const TopBar: React.FC<{
         <kbd>{GOTO_SHORTCUT}</kbd>
       </button>
       <div style={{ flex: 1 }} />
+      <RemindersButton refreshKey={data} openNonce={remindersNonce} onNavigate={onNavigate} />
       {db && (
         <button type="button" className="topbar-chip" title={`${db.path}\nOpen backup settings`} onClick={() => onNavigate('settings', { settingsSection: 'backups' })}>
           <Database size={13} />
@@ -137,9 +141,15 @@ export const CommandPalette: React.FC<{
   const results = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (!words.length) return entries.filter((e) => e.hint === 'Page' || e.hint === 'Action').slice(0, 40);
-    // Earlier matches first (a name beats a late keyword); ties keep the list's order.
+    // Matches at the start of a word before ones inside a word ("EMI" finds "EMI calculator"
+    // before "Reminders"), then earlier matches first (a name beats a late keyword); ties keep
+    // the list's order.
     const hits = entries.filter((e) => words.every((w) => e.haystack.includes(w)));
-    const at = (e: (typeof entries)[number]) => e.haystack.indexOf(words[0]);
+    const startsWord = new RegExp(`(^|[^a-z0-9])${words[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
+    const at = (e: (typeof entries)[number]) => {
+      const m = startsWord.exec(e.haystack);
+      return m ? m.index : e.haystack.length + e.haystack.indexOf(words[0]);
+    };
     return hits.map((e, i) => ({ e, i, pos: at(e) })).sort((a, b) => a.pos - b.pos || a.i - b.i).map((x) => x.e).slice(0, 40);
   }, [entries, query]);
   useEffect(() => setActive(0), [query]);

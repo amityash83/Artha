@@ -39,6 +39,7 @@ const App: React.FC = () => {
   const [addRequest, setAddRequest] = useState<{ page: string; view?: 'income' | 'expenses'; nonce: number } | null>(null);
   const [searchSeed, setSearchSeed] = useState<{ page: string; text: string; nonce: number } | null>(null);
   const [settingsSection, setSettingsSection] = useState<{ id: string; nonce: number } | null>(null);
+  const [remindersNonce, setRemindersNonce] = useState(0);
   const [statusTick, setStatusTick] = useState(0);
 
   // Toast notifications state
@@ -136,6 +137,7 @@ const App: React.FC = () => {
       case 'goto': setPaletteOpen(true); break;
       case 'settings': navigateTo('settings'); break;
       case 'help': navigateTo('help'); break;
+      case 'reminders': setRemindersNonce(Date.now()); break;
       case 'open-database': await switchDatabase('open'); break;
       case 'new-database': await switchDatabase('create'); break;
       case 'backup-now': {
@@ -276,7 +278,7 @@ const App: React.FC = () => {
 
       {/* Main Content Render */}
       <main className="main-content">
-        <TopBar data={data} refreshKey={statusTick} onCommand={(c) => { void runCommand(c); }} onNavigate={navigateTo} />
+        <TopBar data={data} refreshKey={statusTick} onCommand={(c) => { void runCommand(c); }} onNavigate={navigateTo} remindersNonce={remindersNonce} />
         {activeTab === 'dashboard' && (
           <Dashboard data={data} onNavigate={handleNavigate} onGo={navigateTo} onCommand={(c) => { void runCommand(c); }} onRefresh={fetchFinanceData} showToast={showToast} />
         )}

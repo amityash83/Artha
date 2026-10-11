@@ -223,3 +223,17 @@ def test_second_folder_routes(initialized_db, tmp_path):
         assert {b["name"] for b in details["backups"]} <= set(os.listdir(second))
         assert client.post("/api/backup/mirror").json()["copied"] == []
         assert client.post("/api/settings/backup-mirror", json={"folder": ""}).json()["folder"] == ""
+
+
+def test_a_lowered_limit_does_not_copy_what_it_then_prunes(initialized_db, tmp_path):
+    second = tmp_path / "cloud"
+    second.mkdir()
+    for v in "abcd":
+        _touch_db(v)
+        backups.auto_backup("open")
+    backups.set_mirror_folder(str(second))
+    db.save_settings({**db.load_settings(), "backup_count_limit": 2})
+    out = backups.mirror_backups()
+    assert out["copied"] == []  # all four were already there; the two oldest are now gone from both
+    assert len([n for n in os.listdir(second) if n.startswith("auto_")]) == 2
+    assert len([b for b in backups.list_backups() if b["name"].startswith("auto_")]) == 2
