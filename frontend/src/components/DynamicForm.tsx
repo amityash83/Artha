@@ -8,6 +8,7 @@ import { InsuranceClaimsEditor } from './InsuranceClaimsEditor';
 import { InsurancePremiumPaymentsEditor } from './InsurancePremiumPaymentsEditor';
 import { API_BASE_URL } from '../config';
 import { FREQUENCIES } from '../frequency';
+import { AmountInput, Switch } from './settings/ui';
 
 interface DynamicFormProps {
   entityType: 'accounts' | 'assets' | 'liabilities' | 'income' | 'expenses' | 'goals';
@@ -21,6 +22,8 @@ interface DynamicFormProps {
   properties?: any[];
   onSubmit: (data: any) => void;
   onCancel: () => void;
+  /** Shown at the left of the footer, e.g. a delete action when editing. */
+  footerStart?: React.ReactNode;
 }
 
 const HOLDING_CATEGORIES = ['Stock', 'Mutual Fund'];
@@ -44,6 +47,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
   properties = [],
   onSubmit,
   onCancel,
+  footerStart,
 }) => {
   const [formData, setFormData] = useState<any>({});
   const [fields, setFields] = useState<Record<string, string>>({});
@@ -93,7 +97,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         standardFields['institution_id'] = 'institution_select';
         standardFields['policy_number'] = 'text';
         standardFields['premium'] = 'number';
-        standardFields['frequency'] = 'text';
+        standardFields['frequency'] = 'select_frequency';
         standardFields['renewal_date'] = 'date';
         (INSURANCE_TYPE_FIELDS[policyType || 'Life'] || []).forEach((f) => {
           standardFields[f] = f === 'vehicle_registration' ? 'text' : 'number';
@@ -217,9 +221,11 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       } else if (type === 'select_policy_type') {
         defaultData[k] = 'Life';
       } else if (type === 'select_frequency') {
-        defaultData[k] = 'Monthly';
+        defaultData[k] = isInsurance ? 'Yearly' : 'Monthly';
       } else if (type === 'checkbox') {
         defaultData[k] = 1;
+      } else if (k === 'currency') {
+        defaultData[k] = 'INR'; // accounts.currency's column default
       } else {
         defaultData[k] = '';
       }
@@ -305,55 +311,100 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
     onSubmit(payload);
   };
 
-  const getLabel = (key: string) => {
-    if (currentCategory && currentCategory.fields_definition) {
-      try {
-        const customDefs = typeof currentCategory.fields_definition === 'string'
-          ? JSON.parse(currentCategory.fields_definition)
-          : currentCategory.fields_definition;
-        if (Array.isArray(customDefs)) {
-          const found = customDefs.find((item: any) => item && item.name === key);
-          if (found && found.label) {
-            return found.label;
-          }
-        }
-      } catch (e) {
-        // Fallback to normal key split
-      }
+  const customDefs = (): any[] => {
+    if (!currentCategory?.fields_definition) return [];
+    try {
+      const defs = typeof currentCategory.fields_definition === 'string'
+        ? JSON.parse(currentCategory.fields_definition)
+        : currentCategory.fields_definition;
+      return Array.isArray(defs) ? defs : [];
+    } catch {
+      return [];
     }
+  };
+
+  const getLabel = (key: string) => {
+    const found = customDefs().find((item: any) => item && item.name === key);
+    // The input shows the unit itself, so drop a "(%)"-style unit from custom labels.
+    if (found?.label) return String(found.label).replace(/\s*\((%|₹|months?)\)\s*$/i, '');
 
     const knownLabels: Record<string, string> = {
-      institution_id: 'Institution',
-      lender_institution_id: 'Lender',
+      name: 'Name',
+      institution_id: entityType === 'accounts' ? 'Bank' : 'Held with',
+      lender_institution_id: isCreditCard ? 'Card issuer' : 'Lender',
       owner_id: 'Owner',
-      current_balance: 'Opening Balance',
-      opening_balance: 'Opening Balance',
-      linked_liability_id: 'Linked Home Loan',
-      linked_asset_id: 'Linked Property',
-      sum_assured: 'Sum Assured',
-      surrender_value: 'Surrender Value',
-      sum_insured: 'Sum Insured',
-      claims_made: 'Claims Made',
-      claims_amount: 'Claims Amount',
-      idv: 'Insured Declared Value (IDV)',
-      vehicle_registration: 'Vehicle Registration No.',
-      credit_limit: 'Credit Limit',
-      statement_balance: 'Statement Balance',
-      statement_date: 'Statement Day of Month',
-      due_date: 'Due Day of Month',
-      annual_fee: 'Annual Fee',
-      policy_type: 'Policy Type',
-      policy_number: 'Policy Number',
+      current_balance: 'Opening balance',
+      opening_balance: 'Opening balance',
+      current_value: 'Current value',
+      invested_amount: 'Amount invested',
+      acquisition_date: 'Bought on',
+      risk_level: 'Risk',
+      goal_mapping: 'Counts towards goal',
+      linked_liability_id: 'Home loan on this property',
+      linked_asset_id: 'Property it paid for',
+      outstanding: isCreditCard ? 'Balance now' : 'Still owed',
+      interest_rate: 'Interest rate',
+      emi: 'Monthly EMI',
+      tenure_months: 'Original tenure',
+      premium: 'Premium',
+      frequency: entityType === 'assets' ? 'Paid' : 'How often',
+      renewal_date: 'Next renewal',
+      sum_assured: 'Sum assured',
+      surrender_value: 'Surrender value',
+      sum_insured: 'Sum insured',
+      claims_made: 'Claims made',
+      claims_amount: 'Claimed so far',
+      idv: 'Insured declared value (IDV)',
+      vehicle_registration: 'Registration number',
+      credit_limit: 'Credit limit',
+      statement_balance: 'Last statement',
+      statement_date: 'Statement day',
+      due_date: 'Payment due day',
+      annual_fee: 'Annual fee',
+      policy_type: 'Policy type',
+      policy_number: 'Policy number',
+      target_amount: 'Target',
+      current_amount: 'Saved so far',
+      monthly_contribution: 'Putting in each month',
+      target_date: 'Aim to reach by',
+      priority: 'Priority',
       amount: entityType === 'income' ? 'Amount per period (gross)' : 'Amount per period',
       taxable: 'Taxable income',
+      currency: 'Currency',
+      status: 'Status',
     };
     if (knownLabels[key]) return knownLabels[key];
+    if (key === entityType) return ({ accounts: 'Account', assets: 'Asset', liabilities: 'Loan', income: 'Income', expenses: 'Expense', goals: 'Goal' } as Record<string, string>)[key] ?? key;
 
-    return key
-      .split('_')
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
+    const words = key.split('_').join(' ');
+    return words.charAt(0).toUpperCase() + words.slice(1);
   };
+
+  // A line of help under fields whose meaning isn't obvious.
+  const HINTS: Record<string, string> = {
+    current_balance: 'What the account held when you started tracking it. Later changes come from transactions.',
+    opening_balance: 'What the account held when you started tracking it. Later changes come from transactions.',
+    statement_balance: 'The amount on your most recent statement.',
+    tenure_months: 'The full term when the loan began.',
+    goal_mapping: 'Counts this asset towards one of your goals.',
+    surrender_value: 'What the insurer would pay if you surrendered the policy today.',
+  };
+
+  // How each field is entered: money with ₹ and Indian grouping, rates as %, terms in months.
+  const MONEY = new Set([
+    'current_balance', 'opening_balance', 'current_value', 'invested_amount', 'outstanding', 'credit_limit', 'statement_balance',
+    'annual_fee', 'emi', 'premium', 'sum_assured', 'surrender_value', 'sum_insured', 'claims_amount', 'idv',
+    'target_amount', 'current_amount', 'monthly_contribution', 'amount',
+  ]);
+  const SUFFIX: Record<string, string> = { interest_rate: '%', tenure_months: 'months' };
+  const DAY_OF_MONTH = new Set(['statement_date', 'due_date']);
+
+  // Two sections: who/what the record is, then its figures and dates. Category-defined
+  // custom fields follow the same rule by type.
+  const isFigure = (k: string) => fields[k] === 'number' || fields[k] === 'date' || DAY_OF_MONTH.has(k);
+  const keys = Object.keys(fields);
+  const detailKeys = keys.filter((k) => !isFigure(k));
+  const figureKeys = keys.filter(isFigure);
 
   // Property's "linked_liability_id" is a form-only convenience field: it selects which Home
   // Loan liability should have its linked_asset_id set to this property. There is no
@@ -366,305 +417,186 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
     (p) => !liabilities.some((l) => l.linked_asset_id === p.id && l.id !== initialData?.id)
   );
 
+  const field = (k: string, control: React.ReactNode, opts: { wide?: boolean; noLabelFor?: boolean } = {}) => (
+    <div key={k} className={`df-field${opts.wide ? ' df-wide' : ''}`}>
+      {opts.noLabelFor ? <span className="df-label">{getLabel(k)}</span> : <label htmlFor={`field-${k}`} className="df-label">{getLabel(k)}</label>}
+      {control}
+      {HINTS[k] && <span className="df-hint">{HINTS[k]}</span>}
+    </div>
+  );
+
+  const select = (k: string, value: any, onChange: (v: string) => void, options: { value: any; label: string }[], required = false) => (
+    <select id={`field-${k}`} className="form-control" value={value ?? ''} onChange={(e) => onChange(e.target.value)} required={required}>
+      {options.map((o) => <option key={String(o.value)} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+  const toId = (v: string) => (v ? parseInt(v) : null);
+
+  const renderField = (k: string) => {
+    const type = fields[k];
+
+    if (type === 'institution_select') {
+      const required = entityType === 'accounts';
+      const sorted = [...institutions].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+      return field(k, select(k, formData[k] || '', (v) => handleChange(k, toId(v)), [
+        { value: '', label: required ? 'Choose a bank' : entityType === 'liabilities' ? 'Not set' : 'None (held yourself)' }, ...sorted.map((i) => ({ value: i.id, label: i.name })),
+      ], required));
+    }
+    if (type === 'person_select') {
+      return field(k, select(k, formData[k] || '', (v) => handleChange(k, parseInt(v)), [
+        { value: '', label: 'Choose a person' },
+        ...people.map((p) => ({ value: p.id, label: p.role === 'Primary Owner' ? p.name : `${p.name} (${p.role})` })),
+      ], true));
+    }
+    if (type === 'category_select') {
+      const catEntityType = ({ accounts: 'Account', liabilities: 'Liability', income: 'Income', expenses: 'Expense' } as Record<string, string>)[entityType] ?? 'Asset';
+      // assets.category_id is NOT NULL; accounts.category_id is nullable —
+      // an account that fits no defined type may stay uncategorized.
+      const required = entityType !== 'accounts';
+      const label = entityType === 'accounts' ? 'Account type' : entityType === 'assets' ? 'Kind of asset' : entityType === 'liabilities' ? (isCreditCard ? 'Type' : 'Loan type') : 'Category';
+      return (
+        <div key={k} className="df-field">
+          <label htmlFor={`field-${k}`} className="df-label">{label}</label>
+          {select(k, formData[k] || '', (v) => handleChange(k, toId(v)), [
+            { value: '', label: required ? 'Choose one' : 'Uncategorised' },
+            ...(categories || []).filter((c) => c.entity_type === catEntityType).map((c) => ({ value: c.id, label: c.name })),
+          ], required)}
+        </div>
+      );
+    }
+    if (type === 'select_frequency') {
+      const current = formData[k] || 'Monthly';
+      const options: string[] = (FREQUENCIES as readonly string[]).includes(current) ? [...FREQUENCIES] : [current, ...FREQUENCIES];
+      return field(k, select(k, current, (v) => handleChange(k, v), options.map((f) => ({ value: f, label: f }))));
+    }
+    if (type === 'checkbox') {
+      return (
+        <div key={k} className="df-field df-switch">
+          <span className="df-label">{getLabel(k)}</span>
+          <Switch checked={!!Number(formData[k])} onChange={(v) => handleChange(k, v ? 1 : 0)} label={getLabel(k)} />
+        </div>
+      );
+    }
+    if (type === 'goal_select') {
+      return field(k, select(k, formData[k] || '', (v) => handleChange(k, v), [
+        { value: '', label: 'None' }, ...(goals || []).map((g) => ({ value: g.name, label: g.name })),
+      ]));
+    }
+    if (type === 'home_loan_select') {
+      return field(k, select(k, formData[k] || '', (v) => handleChange(k, toId(v)), [
+        { value: '', label: 'None' }, ...availableHomeLoans.map((l) => ({ value: l.id, label: l.name })),
+      ]));
+    }
+    if (type === 'property_select') {
+      return field(k, select(k, formData[k] || '', (v) => handleChange(k, toId(v)), [
+        { value: '', label: 'None' }, ...availableProperties.map((p) => ({ value: p.id, label: p.name })),
+      ]));
+    }
+    if (type === 'select_status') {
+      const options = ['Active', 'Closed', 'Matured'];
+      const current = formData[k] || 'Active';
+      return field(k, select(k, current, (v) => handleChange(k, v), (options.includes(current) ? options : [current, ...options]).map((o) => ({ value: o, label: o }))));
+    }
+    if (type === 'select_priority') {
+      return field(k, select(k, formData[k] || 'Medium', (v) => handleChange(k, v), ['High', 'Medium', 'Low'].map((o) => ({ value: o, label: o }))));
+    }
+    if (type === 'select_risk') {
+      return field(k, select(k, formData[k] || 'Medium', (v) => handleChange(k, v), ['Low', 'Medium', 'High'].map((o) => ({ value: o, label: o }))));
+    }
+    if (type === 'select_policy_type') {
+      return field(k, select(k, formData[k] || 'Life', (v) => handleChange(k, v), ['Life', 'Term', 'Health', 'Vehicle'].map((o) => ({ value: o, label: o }))));
+    }
+    if (DAY_OF_MONTH.has(k)) {
+      const day = Number(formData[k]) || 0;
+      return field(k, select(k, day || '', (v) => handleChange(k, v ? parseInt(v) : 0), [
+        { value: '', label: 'Not set' }, ...Array.from({ length: 31 }, (_, i) => ({ value: i + 1, label: `${i + 1}${['th', 'st', 'nd', 'rd'][(i + 1) % 10 > 3 || [11, 12, 13].includes(i + 1) ? 0 : (i + 1) % 10]} of the month` })),
+      ]));
+    }
+    if (type === 'number' && (MONEY.has(k) || SUFFIX[k])) {
+      return field(k, (
+        <AmountInput id={`field-${k}`} label={getLabel(k)} value={Number(formData[k]) || 0} onChange={(v) => handleChange(k, v)}
+          prefix={MONEY.has(k) ? '₹' : undefined} suffix={SUFFIX[k]} allowNegative={k === 'current_balance' || k === 'opening_balance'} />
+      ));
+    }
+    return field(k, (
+      <input
+        id={`field-${k}`}
+        type={type === 'number' ? 'number' : type === 'date' ? 'date' : 'text'}
+        step={type === 'number' ? 'any' : undefined}
+        className="form-control"
+        value={formData[k] !== undefined && formData[k] !== null ? formData[k] : ''}
+        onChange={(e) => handleChange(k, type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value)}
+        required={k === 'name'}
+        autoFocus={k === 'name' && !initialData}
+      />
+    ), { wide: k === 'name' });
+  };
+
+  const hasDocuments = (entityType === 'accounts' || entityType === 'assets' || entityType === 'liabilities' || entityType === 'goals') && !!initialData?.id;
+  const hasExtras = isHolding || isProperty || isInsurance || entityType === 'goals' || hasDocuments;
+
   return (
-    <form onSubmit={handleSubmit} className="glass-panel" style={{ padding: '24px', borderRadius: '12px', border: '1px solid var(--border-glass)' }}>
-      <h3 style={{ fontSize: '18px', fontWeight: 600, color: '#f8fafc', marginBottom: '20px' }}>
-        {initialData ? 'Edit' : 'Add'} {currentCategory ? currentCategory.name : getLabel(entityType)}
-      </h3>
+    <form onSubmit={handleSubmit} className="glass-panel df-form">
+      <div className="df-head">
+        <h3>{initialData ? `Edit ${initialData.name || getLabel(entityType).toLowerCase()}` : `Add ${(currentCategory?.name || getLabel(entityType)).toLowerCase()}`}</h3>
+        {initialData && currentCategory && <span className="cc-note">{currentCategory.name}</span>}
+      </div>
 
+      <div className="df-body">
+        <section className="df-section" aria-label="Details">
+          <div className="df-grid">{detailKeys.map(renderField)}</div>
+        </section>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
-        {Object.keys(fields).map((k) => {
-          const type = fields[k];
+        {figureKeys.length > 0 && (
+          <section className="df-section" aria-label="Amounts and dates">
+            <h4>Amounts and dates</h4>
+            <div className="df-grid">{figureKeys.map(renderField)}</div>
+          </section>
+        )}
 
-          if (type === 'institution_select') {
-            const institutionRequired = entityType === 'accounts';
-            return (
-              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
-                <select
-                  id={`field-${k}`}
-                  className="form-control"
-                  value={formData[k] || ''}
-                  onChange={(e) => handleChange(k, e.target.value ? parseInt(e.target.value) : null)}
-                  required={institutionRequired}
-                >
-                  <option value="">{institutionRequired ? 'Select Institution' : 'None (self-held)'}</option>
-                  {[...institutions].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })).map((inst) => (
-                    <option key={inst.id} value={inst.id}>
-                      {inst.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            );
-          }
+        {hasExtras && (
+          <div className="df-grid df-extras">
+            {isHolding && (
+              <HoldingLotsEditor lots={holdingLots} onChange={setHoldingLots} xirr={initialData?.xirr} />
+            )}
 
-          if (type === 'person_select') {
-            return (
-              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
-                <select
-                  id={`field-${k}`}
-                  className="form-control"
-                  value={formData[k] || ''}
-                  onChange={(e) => handleChange(k, parseInt(e.target.value))}
-                  required
-                >
-                  <option value="">Select Owner</option>
-                  {people.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.role})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            );
-          }
+            {isProperty && (
+              <PropertyRentalLedgerEditor entries={rentalLedger} onChange={setRentalLedger} />
+            )}
 
-          if (type === 'category_select') {
-            const catEntityType = ({ accounts: 'Account', liabilities: 'Liability', income: 'Income', expenses: 'Expense' } as Record<string, string>)[entityType] ?? 'Asset';
-            const assetCategories = categories ? categories.filter((c) => c.entity_type === catEntityType) : [];
-            const catLabel = entityType === 'accounts' ? 'Account Type (Category)' : entityType === 'assets' ? 'Asset Class (Category)' : entityType === 'liabilities' ? 'Loan type' : 'Category';
-            // assets.category_id is NOT NULL; accounts.category_id is nullable —
-            // an account that fits no defined type may stay uncategorized.
-            const categoryRequired = entityType !== 'accounts';
-            return (
-              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{catLabel}</label>
-                <select
-                  id={`field-${k}`}
-                  className="form-control"
-                  value={formData[k] || ''}
-                  onChange={(e) => handleChange(k, e.target.value ? parseInt(e.target.value) : null)}
-                  required={categoryRequired}
-                >
-                  <option value="">{categoryRequired ? 'Select Category' : 'Uncategorized'}</option>
-                  {assetCategories.map((cat) => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            );
-          }
+            {isInsurance && (
+              <>
+                <InsuranceClaimsEditor claims={insuranceClaims} onChange={setInsuranceClaims} />
+                <InsurancePremiumPaymentsEditor payments={premiumPayments} onChange={setPremiumPayments} />
+              </>
+            )}
 
-          if (type === 'select_frequency') {
-            const current = formData[k] || 'Monthly';
-            const options: string[] = (FREQUENCIES as readonly string[]).includes(current) ? [...FREQUENCIES] : [current, ...FREQUENCIES];
-            return (
-              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
-                <select id={`field-${k}`} className="form-control" value={current} onChange={(e) => handleChange(k, e.target.value)}>
-                  {options.map((f) => <option key={f} value={f}>{f}</option>)}
-                </select>
-              </div>
-            );
-          }
-
-          if (type === 'checkbox') {
-            return (
-              <label key={k} htmlFor={`field-${k}`} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-secondary)', paddingTop: '18px' }}>
-                <input id={`field-${k}`} type="checkbox" checked={!!Number(formData[k])} onChange={(e) => handleChange(k, e.target.checked ? 1 : 0)} />
-                {getLabel(k)}
-              </label>
-            );
-          }
-
-          if (type === 'goal_select') {
-            const activeGoals = goals || [];
-            return (
-              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Linked Financial Goal</label>
-                <select
-                  id={`field-${k}`}
-                  className="form-control"
-                  value={formData[k] || ''}
-                  onChange={(e) => handleChange(k, e.target.value)}
-                >
-                  <option value="">None (Unmapped)</option>
-                  {activeGoals.map((g) => (
-                    <option key={g.id} value={g.name}>
-                      {g.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            );
-          }
-
-          if (type === 'home_loan_select') {
-            return (
-              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
-                <select
-                  id={`field-${k}`}
-                  className="form-control"
-                  value={formData[k] || ''}
-                  onChange={(e) => handleChange(k, e.target.value ? parseInt(e.target.value) : null)}
-                >
-                  <option value="">None</option>
-                  {availableHomeLoans.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            );
-          }
-
-          if (type === 'property_select') {
-            return (
-              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
-                <select
-                  id={`field-${k}`}
-                  className="form-control"
-                  value={formData[k] || ''}
-                  onChange={(e) => handleChange(k, e.target.value ? parseInt(e.target.value) : null)}
-                >
-                  <option value="">None</option>
-                  {availableProperties.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            );
-          }
-
-          if (type === 'select_status') {
-            return (
-              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Status</label>
-                <select
-                  id={`field-${k}`}
-                  className="form-control"
-                  value={formData[k] || 'Active'}
-                  onChange={(e) => handleChange(k, e.target.value)}
-                >
-                  <option value="Active">Active</option>
-                  <option value="Closed">Closed</option>
-                  <option value="Matured">Matured</option>
-                </select>
-              </div>
-            );
-          }
-
-          if (type === 'select_priority') {
-            return (
-              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Priority</label>
-                <select
-                  id={`field-${k}`}
-                  className="form-control"
-                  value={formData[k] || 'Medium'}
-                  onChange={(e) => handleChange(k, e.target.value)}
-                >
-                  <option value="High">High</option>
-                  <option value="Medium">Medium</option>
-                  <option value="Low">Low</option>
-                </select>
-              </div>
-            );
-          }
-
-          if (type === 'select_risk') {
-            return (
-              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Risk Level</label>
-                <select
-                  id={`field-${k}`}
-                  className="form-control"
-                  value={formData[k] || 'Medium'}
-                  onChange={(e) => handleChange(k, e.target.value)}
-                >
-                  <option value="Low">Low</option>
-                  <option value="Medium">Medium</option>
-                  <option value="High">High</option>
-                </select>
-              </div>
-            );
-          }
-
-          if (type === 'select_policy_type') {
-            return (
-              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Policy Type</label>
-                <select
-                  id={`field-${k}`}
-                  className="form-control"
-                  value={formData[k] || 'Life'}
-                  onChange={(e) => handleChange(k, e.target.value)}
-                >
-                  <option value="Life">Life</option>
-                  <option value="Term">Term</option>
-                  <option value="Health">Health</option>
-                  <option value="Vehicle">Vehicle</option>
-                </select>
-              </div>
-            );
-          }
-
-          return (
-            <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
-              <input
-                id={`field-${k}`}
-                type={type === 'number' ? 'number' : type === 'date' ? 'date' : 'text'}
-                step={type === 'number' ? 'any' : undefined}
-                className="form-control"
-                value={formData[k] !== undefined ? formData[k] : ''}
-                onChange={(e) => handleChange(k, type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value)}
-                required={k === 'name'}
+            {entityType === 'goals' && categories && (
+              <GoalFundingConstraintsEditor
+                categories={categories}
+                constraints={fundingConstraints}
+                onChange={setFundingConstraints}
               />
-            </div>
-          );
-        })}
+            )}
 
-        {isHolding && (
-          <HoldingLotsEditor lots={holdingLots} onChange={setHoldingLots} xirr={initialData?.xirr} />
-        )}
-
-        {isProperty && (
-          <PropertyRentalLedgerEditor entries={rentalLedger} onChange={setRentalLedger} />
-        )}
-
-        {isInsurance && (
-          <>
-            <InsuranceClaimsEditor claims={insuranceClaims} onChange={setInsuranceClaims} />
-            <InsurancePremiumPaymentsEditor payments={premiumPayments} onChange={setPremiumPayments} />
-          </>
-        )}
-
-        {entityType === 'goals' && categories && (
-          <GoalFundingConstraintsEditor
-            categories={categories}
-            constraints={fundingConstraints}
-            onChange={setFundingConstraints}
-          />
-        )}
-
-        {/* Documents apply generically at the entity-type level (not per-category, unlike
-            most other satellite editors) and manage their own upload/download/delete
-            calls directly rather than staging through the JSON satellite-dispatch flow,
-            since file bytes can't travel inside the form's JSON payload. Only shown once
-            the entity actually has an id — an unsaved new entity has nothing to attach to. */}
-        {(entityType === 'accounts' || entityType === 'assets' || entityType === 'liabilities' || entityType === 'goals') && initialData?.id && (
-          <DocumentsEditor entityType={entityType} entityId={initialData.id} />
+            {/* Documents apply generically at the entity-type level (not per-category, unlike
+                most other satellite editors) and manage their own upload/download/delete
+                calls directly rather than staging through the JSON satellite-dispatch flow,
+                since file bytes can't travel inside the form's JSON payload. Only shown once
+                the entity actually has an id — an unsaved new entity has nothing to attach to. */}
+            {hasDocuments && (
+              <DocumentsEditor entityType={entityType} entityId={initialData.id} />
+            )}
+          </div>
         )}
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-        <button type="button" className="btn btn-secondary" onClick={onCancel}>
-          Cancel
-        </button>
-        <button type="submit" className="btn btn-primary">
-          Save
-        </button>
+      <div className="df-foot">
+        <div>{footerStart}</div>
+        <div className="df-actions">
+          <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancel</button>
+          <button type="submit" className="btn btn-primary">{initialData ? 'Save changes' : 'Add'}</button>
+        </div>
       </div>
     </form>
   );

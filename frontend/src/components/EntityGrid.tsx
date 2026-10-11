@@ -420,7 +420,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
         setIsAdding(false);
         setEditingEntity(null);
         onRefresh();
-        if (showToast) showToast(`${PAGE_TEXT[entityType].noun} saved`, "success");
+        if (showToast) showToast(`${categoryName && CARD_CATEGORIES.includes(categoryName) ? 'Card' : PAGE_TEXT[entityType].noun} saved`, "success");
       } else {
         const errorData = await res.json();
         const msg = `Error saving entity: ${errorData.detail || 'Unknown error'}`;
@@ -560,7 +560,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
           padding: '20px'
         }}>
           <div
-            style={{ width: '100%', maxWidth: '600px' }}
+            style={{ width: '100%', maxWidth: '680px' }}
             ref={modalRef}
             role="dialog"
             aria-modal="true"
@@ -579,14 +579,12 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
               properties={properties}
               onSubmit={handleFormSubmit}
               onCancel={closeForm}
-            />
-            {editingEntity && (
-              <div className="eg-form-foot">
-                <ConfirmAction label={`Delete this ${CARD_CATEGORIES.includes(editingEntity.category_name) ? 'card' : PAGE_TEXT[entityType].noun.toLowerCase()}`} confirmLabel="Delete" danger
-                  question={`Delete ${editingEntity.name}? This can't be undone.`}
+              footerStart={editingEntity && (
+                <ConfirmAction label={`Delete this ${CARD_CATEGORIES.includes(editingEntity.category_name) ? 'card' : PAGE_TEXT[entityType].noun.toLowerCase()}`}
+                  confirmLabel="Delete" danger question={`Delete ${editingEntity.name}?`}
                   onConfirm={async () => { await handleDelete(editingEntity.id); closeForm(); }} />
-              </div>
-            )}
+              )}
+            />
           </div>
         </div>
       )}

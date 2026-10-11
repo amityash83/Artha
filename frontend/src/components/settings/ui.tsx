@@ -63,7 +63,9 @@ const groupIndian = (n: number) => new Intl.NumberFormat('en-IN', { maximumFract
 /** A number with an optional ₹ prefix or %/days suffix; shows Indian digit grouping until focused. */
 export const AmountInput: React.FC<{
   id?: string; value: number; onChange: (v: number) => void; prefix?: string; suffix?: string; label: string; width?: number;
-}> = ({ id, value, onChange, prefix, suffix, label, width }) => {
+  /** Accept values below zero (e.g. an overdrawn opening balance). */
+  allowNegative?: boolean;
+}> = ({ id, value, onChange, prefix, suffix, label, width, allowNegative }) => {
   const [focused, setFocused] = useState(false);
   const [draft, setDraft] = useState(String(value));
   useEffect(() => { if (!focused) setDraft(String(value)); }, [value, focused]);
@@ -77,7 +79,7 @@ export const AmountInput: React.FC<{
         onChange={(e) => {
           setDraft(e.target.value);
           const n = parseFloat(e.target.value.replace(/,/g, ''));
-          if (Number.isFinite(n) && n >= 0) onChange(n);
+          if (Number.isFinite(n) && (allowNegative || n >= 0)) onChange(n);
         }} />
       {suffix && <span aria-hidden>{suffix}</span>}
     </span>

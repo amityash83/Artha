@@ -923,7 +923,6 @@ h1, h2, h3, h4, h5 {
 .eg-goal { min-width: 200px; }
 .eg-goal .cc-meter { width: 100%; display: block; }
 .eg-goal .cc-meter > span { display: block; height: 100%; border-radius: 3px; }
-.eg-form-foot { display: flex; justify-content: flex-end; margin-top: 10px; padding: 0 4px; }
 
 /* ---------------------------------------------------------------------------
    Dashboard (components/Dashboard.tsx); reuses the cc-summary strip, eg-head and
@@ -1010,3 +1009,24 @@ h1, h2, h3, h4, h5 {
 .snap-foot { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; border-top: 1px solid var(--border-glass); padding-top: 14px; }
 .snap-foot > div:first-child { display: flex; flex-direction: column; gap: 2px; }
 .snap-actions { display: flex; gap: 8px; }
+
+/* Add/edit form (components/DynamicForm.tsx), in EntityGrid's panel. The body scrolls
+   between a fixed title and footer, so long forms (insurance, holdings) fit any window. */
+.df-form { display: flex; flex-direction: column; max-height: calc(100vh - 40px); padding: 0; overflow: hidden; }
+.df-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 20px 24px 14px; border-bottom: 1px solid var(--border-glass); }
+.df-head h3 { margin: 0; font-size: 17px; font-weight: 600; color: var(--text-primary); }
+.df-body { overflow-y: auto; padding: 18px 24px 22px; display: flex; flex-direction: column; gap: 22px; }
+.df-section h4 { margin: 0 0 12px; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.df-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
+@media (max-width: 640px) { .df-grid { grid-template-columns: 1fr; } }
+.df-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.df-wide { grid-column: 1 / -1; }
+.df-label { font-size: 12px; color: var(--text-secondary); }
+.df-hint { font-size: 11.5px; color: var(--text-muted); line-height: 1.45; }
+.df-field .settings-affix { width: 100%; }
+.df-field .settings-affix input { flex: 1; width: auto; min-width: 0; text-align: left; padding: 9px 12px; font-size: 14px; }
+.df-field .settings-affix span:first-child { padding-right: 0; }
+.df-switch { flex-direction: row; justify-content: space-between; align-items: center; padding: 10px 12px; border: 1px solid var(--border-glass); border-radius: var(--radius-sm); align-self: end; }
+.df-extras { border-top: 1px solid var(--border-glass); padding-top: 18px; }
+.df-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 24px; border-top: 1px solid var(--border-glass); }
+.df-actions { display: flex; gap: 8px; }
