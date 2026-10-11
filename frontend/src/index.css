@@ -1,5 +1,6 @@
 /* Design System Tokens */
 :root {
+  color-scheme: dark; /* native selects, date pickers and checkboxes match the dark theme */
   --bg-primary: #07090e;
   --bg-secondary: #0d111d;
   --bg-glass: rgba(13, 17, 29, 0.7);
@@ -295,7 +296,8 @@ h1, h2, h3, h4, h5 {
   color: var(--text-secondary);
 }
 
-.form-input {
+.form-input,
+.form-control {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border-glass);
   border-radius: var(--radius-sm);
@@ -307,7 +309,8 @@ h1, h2, h3, h4, h5 {
   transition: var(--transition-fast);
 }
 
-.form-input:focus {
+.form-input:focus,
+.form-control:focus {
   border-color: var(--accent);
   background: rgba(255, 255, 255, 0.05);
   box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15);
@@ -324,7 +327,8 @@ h1, h2, h3, h4, h5 {
 
 /* .form-input already has its own bespoke focus treatment above — don't stack
    a second outline ring on top of it. */
-.form-input:focus-visible {
+.form-input:focus-visible,
+.form-control:focus-visible {
   outline: none;
 }
 
@@ -336,7 +340,8 @@ h1, h2, h3, h4, h5 {
   }
 }
 
-.form-input option {
+.form-input option,
+.form-control option {
   background-color: var(--bg-secondary);
   color: var(--text-primary);
 }
@@ -451,4 +456,170 @@ h1, h2, h3, h4, h5 {
   /* Long tables may span pages; keep each title with its table and never split a row. */
   .print-root h3, .print-root h3 + p { break-after: avoid; }
   .print-root tr { break-inside: avoid; }
+}
+
+
+/* ---------------------------------------------------------------------------
+   Settings: a section list on the left, and on the right groups of
+   "label + description | control" rows (the pattern of macOS System Settings,
+   MMEX's Options dialog, VS Code...). Every section uses the same pieces
+   (components/settings/ui.tsx).
+   --------------------------------------------------------------------------- */
+.settings-layout {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 36px;
+  align-items: start;
+}
+.settings-nav {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-nav-heading {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 14px 12px 6px;
+}
+.settings-nav-heading:first-child { padding-top: 0; }
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: 500 13.5px var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+.settings-nav-item:hover { background: rgba(255, 255, 255, 0.04); color: var(--text-primary); }
+.settings-nav-item[aria-current="page"] { background: rgba(139, 92, 246, 0.12); color: var(--text-primary); }
+.settings-nav-item svg { opacity: 0.8; flex-shrink: 0; }
+.settings-content { display: flex; flex-direction: column; gap: 28px; max-width: 780px; min-width: 0; }
+.settings-section-title { font: 600 20px var(--font-display); color: var(--text-primary); margin: 0; }
+.settings-section-intro { font-size: 13px; color: var(--text-secondary); line-height: 1.55; margin: 6px 0 0; }
+.settings-group-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin: 0 0 8px; }
+.settings-group-title { font-size: 13px; font-weight: 600; color: var(--text-primary); margin: 0; }
+.settings-group-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin: 3px 0 0; }
+.settings-group {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 13px 16px;
+  min-height: 52px;
+}
+.settings-row + .settings-row { border-top: 1px solid var(--border-glass); }
+.settings-row--stacked { flex-direction: column; align-items: stretch; gap: 10px; }
+.settings-row-text { min-width: 0; flex: 1; }
+.settings-row-label { font-size: 13.5px; color: var(--text-primary); display: flex; align-items: center; gap: 6px; }
+.settings-row-desc { font-size: 12px; color: var(--text-muted); line-height: 1.45; margin-top: 2px; }
+.settings-row-control { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.settings-input {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font: 13px var(--font-sans);
+  padding: 7px 10px;
+  outline: none;
+  transition: var(--transition-fast);
+}
+.settings-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15); }
+.settings-input:disabled { opacity: 0.5; }
+.settings-affix {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-sm);
+  transition: var(--transition-fast);
+}
+.settings-affix:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15); }
+.settings-affix span { font-size: 12.5px; color: var(--text-muted); padding: 0 8px; }
+.settings-affix input {
+  background: transparent; border: none; outline: none; color: var(--text-primary);
+  font: 13px var(--font-sans); padding: 7px 0; width: 120px; text-align: right; font-variant-numeric: tabular-nums;
+}
+.settings-affix input:first-child { padding-left: 10px; }
+.settings-affix input:last-child { padding-right: 10px; }
+.settings-switch {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  border: none;
+  background: rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: var(--transition-fast);
+}
+.settings-switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: var(--transition-fast);
+}
+.settings-switch[aria-checked="true"] { background: var(--accent); }
+.settings-switch[aria-checked="true"]::after { transform: translateX(16px); }
+.settings-switch:disabled { opacity: 0.4; cursor: default; }
+.settings-btn {
+  border: 1px solid var(--border-glass);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  font: 500 12.5px var(--font-sans);
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  transition: var(--transition-fast);
+}
+.settings-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); }
+.settings-btn:disabled { opacity: 0.45; cursor: default; }
+.settings-btn--primary { background: var(--accent); border-color: transparent; color: #fff; }
+.settings-btn--primary:hover:not(:disabled) { background: var(--accent-dark); }
+.settings-btn--danger { color: #fca5a5; }
+.settings-btn--danger:hover:not(:disabled) { background: var(--danger-bg); }
+.settings-link {
+  border: none; background: none; padding: 4px 6px; border-radius: 6px; cursor: pointer;
+  font: 500 12.5px var(--font-sans); color: var(--accent-light);
+}
+.settings-link:hover:not(:disabled) { background: rgba(139, 92, 246, 0.1); }
+.settings-link--danger { color: #fca5a5; }
+.settings-link--danger:hover:not(:disabled) { background: var(--danger-bg); }
+.settings-saved { font-size: 12px; color: var(--text-muted); min-height: 16px; }
+.settings-saved--saved { color: var(--success); }
+.settings-saved--error { color: #fca5a5; }
+.settings-note { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+.settings-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--text-secondary); word-break: break-all; }
+@media (max-width: 900px) {
+  .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .settings-nav { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px; }
+  .settings-nav-heading { display: none; }
+  .settings-nav-item { width: auto; }
+  .settings-row { flex-wrap: wrap; }
 }
