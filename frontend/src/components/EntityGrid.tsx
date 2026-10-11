@@ -60,7 +60,7 @@ const valueOf = (kind: Kind, e: any): number => {
 };
 
 /** The short line under a record's name: only the details that matter for its category. */
-const metaOf = (kind: Kind, e: any, showOwner: boolean): string => {
+const metaOf = (kind: Kind, e: any, showOwner: boolean, entitiesById: Map<number, any> = new Map()): string => {
   const cat = e.category_name || '';
   const parts: (string | null | undefined)[] = [];
   if (kind === 'accounts') {
@@ -85,7 +85,8 @@ const metaOf = (kind: Kind, e: any, showOwner: boolean): string => {
     if (cat === 'Credit Card') {
       parts.push(e.lender_name, num(e.credit_limit) > 0 ? `limit ${formatINR(e.credit_limit)}` : null, e.due_date ? `due on the ${e.due_date}` : null);
     } else {
-      parts.push(e.lender_name, e.loan_use === 'repair' ? 'for repairs' : e.loan_use === 'other' ? 'not for the house' : null,
+      const movedTo = e.transferred_to ? entitiesById.get(Number(e.transferred_to))?.name : null;
+      parts.push(e.lender_name, movedTo ? `moved to ${movedTo}` : null, e.loan_use === 'repair' ? 'for repairs' : e.loan_use === 'other' ? 'not for the house' : null,
         num(e.house_share_pct) > 0 && num(e.house_share_pct) < 100 ? `${num(e.house_share_pct)}% for the house` : null,
         num(e.interest_rate) > 0 ? `${num(e.interest_rate)}%` : null,
         num(e.emi) > 0 ? `EMI ${formatINR(e.emi)}${num(e.emi_day) > 0 ? ` on the ${ordinal(num(e.emi_day))}` : ''}` : null,
@@ -207,6 +208,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
   const visible = entities.filter((e) => !query || [e.name, e.institution_name, e.lender_name, e.category_name, e.owner_name]
     .some((v) => typeof v === 'string' && v.toLowerCase().includes(query)));
   const showOwner = new Set(entities.map((e) => e.owner_name).filter(Boolean)).size > 1;
+  const byId = new Map(entities.map((e) => [e.id, e]));
 
   // Records grouped by category, in the categories' own order; biggest first within a group.
   const groups: { key: string; title: string; category?: Category; items: any[] }[] = [];
@@ -504,7 +506,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
         </span>
       );
     }
-    const meta = metaOf(entityType, e, showOwner);
+    const meta = metaOf(entityType, e, showOwner, byId);
     return (
       <button key={e.id} type="button" className={`ie-row${e.status && !['Active', 'Open'].includes(e.status) && entityType !== 'goals' ? ' ie-row--paused' : ''}`} onClick={() => setEditingEntity(e)}>
         <span className="ie-row-text">
@@ -614,6 +616,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
               accounts={accounts}
               onSubmit={handleFormSubmit}
               onCancel={closeForm}
+              onAfterAction={(message) => { closeForm(); onRefresh(); showToast?.(message, 'success'); }}
               footerStart={editingEntity && (
                 <ConfirmAction label={`Delete this ${CARD_CATEGORIES.includes(editingEntity.category_name) ? 'card' : PAGE_TEXT[entityType].noun.toLowerCase()}`}
                   confirmLabel="Delete" danger question={`Delete ${editingEntity.name}?`}

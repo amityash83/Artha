@@ -4,6 +4,8 @@ import { HoldingLotsEditor } from './HoldingLotsEditor';
 import { GoalFundingConstraintsEditor } from './GoalFundingConstraintsEditor';
 import { DocumentsEditor } from './DocumentsEditor';
 import { LoanRateChangesEditor } from './LoanRateChangesEditor';
+import { LoanTransferPanel } from './LoanTransferPanel';
+import { PropertyCostsEditor } from './PropertyCostsEditor';
 import { PropertyRentalLedgerEditor } from './PropertyRentalLedgerEditor';
 import { InsuranceClaimsEditor } from './InsuranceClaimsEditor';
 import { InsurancePremiumPaymentsEditor } from './InsurancePremiumPaymentsEditor';
@@ -26,6 +28,8 @@ interface DynamicFormProps {
   onCancel: () => void;
   /** Shown at the left of the footer, e.g. a delete action when editing. */
   footerStart?: React.ReactNode;
+  /** After an action that changes other records (a loan transfer): close and reload. */
+  onAfterAction?: (message: string) => void;
 }
 
 const HOLDING_CATEGORIES = ['Stock', 'Mutual Fund'];
@@ -68,6 +72,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
   onSubmit,
   onCancel,
   footerStart,
+  onAfterAction,
 }) => {
   const [formData, setFormData] = useState<any>({});
   const [fields, setFields] = useState<Record<string, string>>({});
@@ -716,6 +721,8 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
               <HoldingLotsEditor lots={holdingLots} onChange={setHoldingLots} xirr={initialData?.xirr} />
             )}
 
+            {isProperty && initialData?.id && <PropertyCostsEditor assetId={initialData.id} />}
+
             {isProperty && (
               <PropertyRentalLedgerEditor entries={rentalLedger} onChange={setRentalLedger} />
             )}
@@ -732,6 +739,10 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
                 calls directly rather than staging through the JSON satellite-dispatch flow,
                 since file bytes can't travel inside the form's JSON payload. Only shown once
                 the entity actually has an id — an unsaved new entity has nothing to attach to. */}
+            {isLoan && initialData?.id && (
+              <LoanTransferPanel loan={initialData} institutions={institutions} onDone={(m) => onAfterAction?.(m)} />
+            )}
+
             {isLoan && initialData?.id && (
               <LoanRateChangesEditor loanId={initialData.id} onTermsChange={(rate, emi) => {
                 handleChange('interest_rate', rate);

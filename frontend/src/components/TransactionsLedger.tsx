@@ -25,6 +25,8 @@ interface Transaction {
   notes?: string;
   related_entity_type?: string;
   related_entity_id?: number;
+  /** A balance transfer (loan -> loan): made by "Move to another bank", not editable here. */
+  locked?: boolean;
 }
 
 export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, onRefresh, showToast, addRequest }) => {
@@ -75,6 +77,12 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
         account_id = t.source_ref_id;
         break;
       case 'Transfer':
+        if (t.source_ref_type === 'Liability') {
+          displayType = 'LoanTransfer';
+          related_entity_type = 'Liability';
+          related_entity_id = t.dest_ref_id;
+          break;
+        }
         account_id = t.source_ref_id;
         related_entity_type = 'Account';
         related_entity_id = t.dest_ref_id;
@@ -119,6 +127,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
       notes: t.notes,
       related_entity_type,
       related_entity_id,
+      locked: displayType === 'LoanTransfer',
     };
   };
 
@@ -244,6 +253,11 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
   };
 
   const handleEdit = (tx: Transaction) => {
+    if (tx.locked) {
+      // Editing it as an account transfer would corrupt both loans' balances.
+      showToast?.('This balance transfer was made by moving a loan to another bank, so it can\'t be edited here.', 'info');
+      return;
+    }
     setEditingId(tx.id);
     setType(tx.type);
     setAccountId(tx.account_id != null ? tx.account_id.toString() : '');
@@ -306,7 +320,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
   };
   const MONEY_IN = ['Credit', 'Redemption'];
   // Not cash in or out: a transfer between your own accounts, or a charge on a loan/card.
-  const NEUTRAL = ['Transfer', 'Interest', 'Fee'];
+  const NEUTRAL = ['Transfer', 'Interest', 'Fee', 'LoanTransfer'];
 
   const accountName = (id: number) => data.accounts.find((a) => a.id === id)?.name;
   const categoryName = (id?: number) => (id ? data.categories.find((c) => c.id === id)?.name : undefined);
@@ -323,12 +337,13 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
       case 'Prepayment': return `Paid off ${debt()}`;
       case 'Spend': return categoryName(tx.category_id) ?? 'Card spend';
       case 'Interest': return `Interest: ${debt()}`;
+      case 'LoanTransfer': return tx.notes || `Balance transfer: ${debt()}`;
       case 'Fee': return `Charge: ${debt()}`;
       default: return categoryName(tx.category_id) ?? tx.notes ?? (tx.type === 'Credit' ? 'Money in' : 'Money out');
     }
   };
   /** Which account (or card) it touched. */
-  const where = (tx: Transaction) => (['Spend', 'Interest', 'Fee'].includes(tx.type)
+  const where = (tx: Transaction) => (['Spend', 'Interest', 'Fee', 'LoanTransfer'].includes(tx.type)
     ? data.liabilities.find((l) => l.id === tx.related_entity_id)?.name ?? 'A card'
     : accountName(tx.account_id) ?? 'An account');
 

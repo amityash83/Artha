@@ -426,6 +426,21 @@ def init_db():
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_loan_rate_changes_liability ON loan_rate_changes(liability_id)")
 
+    # What a property cost, by kind (main.PROPERTY_COST_KINDS): which kinds count towards the
+    # cost for capital gains, and which only towards what it really cost. Loan interest is
+    # not entered here: it comes from the Interest rows of the property's loans.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS property_costs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+        cost_date TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        amount REAL NOT NULL CHECK(amount > 0),
+        notes TEXT
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_property_costs_asset ON property_costs(asset_id)")
+
     # Insurance claims (satellite table: 1:many with assets, individual claim events)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS insurance_claims (

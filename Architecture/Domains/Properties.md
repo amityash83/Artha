@@ -87,3 +87,9 @@ The following are NOT YET BUILT — reasonable roadmap ideas only:
 - A dedicated Properties report/CSV export that surfaces rental income, maintenance expenses, and linked loan details.
 - Property valuation history / appreciation tracking over time, distinct from the generic net-worth `snapshots`.
 - Support for multiple properties financed by a single loan, or a loan split across properties.
+
+## What a property cost (October 2026)
+
+- `property_costs` (one row per cost: date, kind, amount, note) with kinds in `main.PROPERTY_COST_KINDS`, each marked as counting towards the **cost for tax** (purchase price, stamp duty and registration, legal/brokerage/buying costs, improvements) or only towards the **total paid** (maintenance and repairs, loan fees, interest paid before tracking, other). Loan interest isn't entered: it's the `Interest` ledger rows of every loan linked to the property (`liabilities.linked_asset_id`), including closed or transferred ones.
+- `property_cost_summary()` / `GET /api/assets/{id}/property-costs`: value today, cost for tax and the gain on it, total paid, rent less expenses from the rental ledger, and the overall gain. With no purchase entry it falls back to the property's `invested_amount`, saying so. Interest is not part of the tax cost (only arguably, when never deducted; the UI says to check with a CA). `test_property_costs_and_transfer.py`.
+- **Balance transfer** (`POST /api/liabilities/{id}/transfer`): creates the new loan (same property, owner, type, use, EMI settings; new bank, rate, EMI) and records the new loan paying off the old as one loan-to-loan `Transfer` row (liability -> liability pays the old down and raises the new, by the ledger's direction rule). The old loan is marked Closed with `transferred_to`; fees go on the property's costs as a loan fee. The Ledger shows that row as "Balance transfer" and doesn't edit it (its account-transfer form would corrupt both loans); deleting it undoes both balances.

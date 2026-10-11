@@ -679,8 +679,9 @@ def adjust_double_entry_balances(cursor, t_type: str, amount: float, source_type
     # 2. Update Liability outstanding by the direction of the money, like accounts and
     # assets (the type is only a label: EMI, Prepayment, Spend, Interest, Fee...):
     #   account/asset -> liability  pays it down        (EMI, prepayment, card bill)
+    #   liability     -> liability  pays it down too    (a balance transfer: the new loan pays the old)
     #   outside       -> liability  is a charge on it   (card spend, loan interest, fees)
-    #   liability     -> anywhere   is borrowing more   (a disbursal or top-up)
+    #   liability     -> anywhere   is borrowing more   (a disbursal, a top-up, a balance transfer's new loan)
     # Every entry that existed before this rule had one of the first two shapes with the
     # same effect (EMI/Prepayment came from an account, Spend from outside), so existing
     # balances are unchanged (test_ledger_direction.py). A row flagged is_balance_exempt
@@ -689,7 +690,7 @@ def adjust_double_entry_balances(cursor, t_type: str, amount: float, source_type
     if is_balance_exempt:
         return
     if dest_type == 'Liability' and dest_id:
-        paid_from_own_money = source_type in ('Account', 'Asset')
+        paid_from_own_money = source_type in ('Account', 'Asset', 'Liability')
         cursor.execute("UPDATE liabilities SET outstanding = outstanding + ? WHERE id = ?",
                        ((-amount if paid_from_own_money else amount) * factor, dest_id))
     if source_type == 'Liability' and source_id:
@@ -1333,6 +1334,186 @@ def delete_rate_change(id: int, change_id: int):
         apply_rate_changes(cursor)
         conn.commit()
         return {"status": "success"}
+    finally:
+        conn.close()
+
+
+# Kinds of property cost: (label, counts towards the cost for capital gains).
+# Purchase, stamp duty and registration, and buying costs make the cost of acquisition;
+# improvements the cost of improvement. Maintenance, loan fees and interest are what the
+# property really cost you, but not part of the tax cost (interest only arguably, when it
+# was never deducted: left out, with a note).
+PROPERTY_COST_KINDS = {
+    "purchase": ("Purchase price", True),
+    "stamp_registration": ("Stamp duty and registration", True),
+    "buying_costs": ("Legal, brokerage and other buying costs", True),
+    "improvement": ("Renovation or improvement", True),
+    "maintenance": ("Maintenance and repairs", False),
+    "loan_fee": ("Loan processing and other loan fees", False),
+    "past_interest": ("Loan interest paid before tracking in Artha", False),
+    "other": ("Other", False),
+}
+
+
+def property_cost_summary(cursor, asset_id: int) -> dict:
+    asset = cursor.execute("SELECT id, name, current_value, metadata_json FROM assets WHERE id = ?", (asset_id,)).fetchone()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Property not found")
+    entries = [dict(r) for r in cursor.execute("SELECT * FROM property_costs WHERE asset_id = ? ORDER BY cost_date, id", (asset_id,))]
+    by_kind = {k: 0.0 for k in PROPERTY_COST_KINDS}
+    for e in entries:
+        by_kind[e["kind"] if e["kind"] in by_kind else "other"] += float(e["amount"])
+    notes = []
+    if by_kind["purchase"] <= 0:
+        try:
+            invested = float(json.loads(asset["metadata_json"] or "{}").get("invested_amount") or 0)
+        except (TypeError, ValueError):
+            invested = 0.0
+        if invested > 0:
+            by_kind["purchase"] = invested
+            notes.append("No purchase price entered, so the property's \"Amount invested\" is used.")
+    loans = [dict(r) for r in cursor.execute("SELECT id, name, outstanding FROM liabilities WHERE linked_asset_id = ?", (asset_id,))]
+    interest = 0.0
+    for loan in loans:
+        loan["interest"] = float(cursor.execute("""SELECT COALESCE(SUM(amount), 0) AS i FROM transactions
+                                                   WHERE type = 'Interest' AND dest_ref_type = 'Liability' AND dest_ref_id = ?""", (loan["id"],)).fetchone()["i"])
+        interest += loan["interest"]
+    rent = cursor.execute("SELECT COALESCE(SUM(rent_amount), 0) AS r, COALESCE(SUM(expenses_amount), 0) AS e FROM property_rental_ledger WHERE asset_id = ?",
+                          (asset_id,)).fetchone()
+    tax_cost = sum(v for k, v in by_kind.items() if PROPERTY_COST_KINDS[k][1])
+    total_paid = sum(by_kind.values()) + interest
+    value = float(asset["current_value"] or 0)
+    net_rent = float(rent["r"]) - float(rent["e"])
+    if loans and interest == 0 and by_kind["past_interest"] == 0:
+        notes.append("No loan interest recorded yet: it comes from the loans' \"Loan interest\" entries (automatic EMIs add them). "
+                     "Add interest paid before then as \"Loan interest paid before tracking in Artha\".")
+    return {
+        "asset_id": asset_id,
+        "entries": entries,
+        "kinds": {k: {"label": v[0], "tax_cost": v[1]} for k, v in PROPERTY_COST_KINDS.items()},
+        "by_kind": {k: round(v, 2) for k, v in by_kind.items()},
+        "loans": loans,
+        "interest_recorded": round(interest, 2),
+        "value": value,
+        "tax_cost": round(tax_cost, 2),
+        "total_paid": round(total_paid, 2),
+        "net_rent": round(net_rent, 2),
+        "gain_for_tax": round(value - tax_cost, 2),
+        "gain_overall": round(value + net_rent - total_paid, 2),
+        "notes": notes,
+    }
+
+
+class PropertyCost(BaseModel):
+    cost_date: str
+    kind: str
+    amount: float
+    notes: Optional[str] = ""
+
+
+@app.get("/api/assets/{asset_id}/property-costs")
+def get_property_costs(asset_id: int):
+    conn = get_db_connection()
+    try:
+        return property_cost_summary(conn.cursor(), asset_id)
+    finally:
+        conn.close()
+
+
+@app.post("/api/assets/{asset_id}/property-costs")
+def add_property_cost(asset_id: int, cost: PropertyCost):
+    if cost.kind not in PROPERTY_COST_KINDS:
+        raise HTTPException(status_code=422, detail=f"kind must be one of {', '.join(PROPERTY_COST_KINDS)}")
+    if cost.amount <= 0:
+        raise HTTPException(status_code=422, detail="Amount must be above zero")
+    try:
+        date.fromisoformat(cost.cost_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="cost_date must be YYYY-MM-DD")
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        if not cursor.execute("SELECT 1 FROM assets WHERE id = ?", (asset_id,)).fetchone():
+            raise HTTPException(status_code=404, detail="Property not found")
+        cursor.execute("INSERT INTO property_costs (asset_id, cost_date, kind, amount, notes) VALUES (?, ?, ?, ?, ?)",
+                       (asset_id, cost.cost_date, cost.kind, cost.amount, cost.notes or ""))
+        conn.commit()
+        return property_cost_summary(cursor, asset_id)
+    finally:
+        conn.close()
+
+
+@app.delete("/api/assets/{asset_id}/property-costs/{cost_id}")
+def delete_property_cost(asset_id: int, cost_id: int):
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM property_costs WHERE id = ? AND asset_id = ?", (cost_id, asset_id))
+        if not cursor.rowcount:
+            raise HTTPException(status_code=404, detail="Cost not found")
+        conn.commit()
+        return property_cost_summary(cursor, asset_id)
+    finally:
+        conn.close()
+
+
+class LoanTransfer(BaseModel):
+    lender_institution_id: Optional[int] = None
+    name: str
+    interest_rate: float
+    emi: float
+    transfer_date: str
+    fees: Optional[float] = 0.0
+
+
+@app.post("/api/liabilities/{id}/transfer")
+def transfer_loan(id: int, req: LoanTransfer):
+    """Balance transfer: a new loan (another bank, new terms) pays off this one. Recorded as
+    a loan-to-loan transfer row, so the new loan's balance rises and this one's falls to nil
+    through the ledger. The new loan keeps the property, owner, type, use and EMI settings;
+    this one is marked Closed and "transferred", its history kept. Fees, if any, go on the
+    property's cost list as a loan fee."""
+    try:
+        day = date.fromisoformat(req.transfer_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="transfer_date must be YYYY-MM-DD")
+    if not req.name.strip() or req.interest_rate < 0 or req.emi < 0:
+        raise HTTPException(status_code=422, detail="A name, a rate and an EMI are needed")
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        old = cursor.execute("""SELECT l.*, c.name AS category FROM liabilities l LEFT JOIN categories c ON c.id = l.category_id
+                                WHERE l.id = ?""", (id,)).fetchone()
+        if not old:
+            raise HTTPException(status_code=404, detail="Loan not found")
+        if old["category"] == "Credit Card":
+            raise HTTPException(status_code=422, detail="Card balances aren't transferred this way")
+        owed = float(old["outstanding"] or 0)
+        if owed <= 0:
+            raise HTTPException(status_code=422, detail="Nothing is owed on this loan")
+        old_meta = json.loads(old["metadata_json"] or "{}")
+        carry = {k: old_meta[k] for k in ("loan_use", "house_share_pct", "emi_day", "emi_account_id", "auto_emi") if k in old_meta}
+        if carry.get("auto_emi"):
+            carry["auto_emi_since"] = day.isoformat()
+        carry.update({"status": "Active", "transferred_from": id})
+        cursor.execute("""INSERT INTO liabilities (name, category_id, owner_id, lender_institution_id, outstanding, interest_rate, emi,
+                                                   tenure_months, linked_asset_id, metadata_json)
+                          VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)""",
+                       (req.name.strip(), old["category_id"], old["owner_id"], req.lender_institution_id, req.interest_rate, req.emi,
+                        old["tenure_months"], old["linked_asset_id"], json.dumps(carry)))
+        new_id = cursor.lastrowid
+        cursor.execute("""INSERT INTO transactions (source_ref_type, source_ref_id, dest_ref_type, dest_ref_id, type, amount, transaction_date, notes)
+                          VALUES ('Liability', ?, 'Liability', ?, 'Transfer', ?, ?, ?)""",
+                       (new_id, id, owed, day.isoformat(), f"Balance transfer to {req.name.strip()}"))
+        adjust_double_entry_balances(cursor, "Transfer", owed, "Liability", new_id, "Liability", id, "add")
+        old_meta.update({"status": "Closed", "transferred_to": new_id, "auto_emi": 0})
+        old_meta.pop("auto_emi_since", None)
+        cursor.execute("UPDATE liabilities SET metadata_json = ? WHERE id = ?", (json.dumps(old_meta), id))
+        if (req.fees or 0) > 0 and old["linked_asset_id"]:
+            cursor.execute("INSERT INTO property_costs (asset_id, cost_date, kind, amount, notes) VALUES (?, ?, 'loan_fee', ?, ?)",
+                           (old["linked_asset_id"], day.isoformat(), req.fees, f"Balance transfer to {req.name.strip()}"))
+        conn.commit()
+        return {"status": "success", "new_loan_id": new_id, "amount": owed}
     finally:
         conn.close()
 
