@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { formatDate } from '../format';
-import { 
-  Plus, Edit2, Trash2, ArrowUpRight, ArrowDownRight, 
-  ArrowRightLeft, Save, Info, RefreshCw, X
-} from 'lucide-react';
+import { Plus, Search } from 'lucide-react';
+import { formatINR } from '../format';
+import { AmountInput, ConfirmAction } from './settings/ui';
 import { InitData } from '../types';
 import { API_BASE_URL } from '../config';
 import { useModalA11y } from '../hooks/useModalA11y';
@@ -34,7 +33,6 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
   const [modalOpen, setModalOpen] = useState<boolean>(false);
   const modalRef = useModalA11y(modalOpen, () => setModalOpen(false));
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [deletingTxId, setDeletingTxId] = useState<number | null>(null);
 
   // Search & Filter states
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -42,13 +40,8 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   
-  // Sorting states
-  const [sortColumn, setSortColumn] = useState<string>('date');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-
-  // Pagination states
-  const [currentPage, setCurrentPage] = useState<number>(1);
-  const [pageSize] = useState<number>(10);
+  // How many rows to show; "Show more" raises it.
+  const [shown, setShown] = useState<number>(60);
 
   // Form State
   const [type, setType] = useState<string>('Debit');
@@ -233,7 +226,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
         setSpendCategoryId('');
         fetchTransactions();
         onRefresh();
-        if (showToast) showToast("Transaction saved successfully!", "success");
+        if (showToast) showToast("Transaction saved", "success");
       } else {
         const err = await res.json();
         const msg = "Failed to save transaction: " + (err.detail || "Unknown error");
@@ -274,6 +267,8 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
     setAmount('');
     setNotes('');
     setCounterpartId('');
+    setSpendCategoryId('');
+    setDate(new Date().toISOString().split('T')[0]); // not the date of whatever was edited last
     setModalOpen(true);
   };
   useEffect(() => {
@@ -286,9 +281,11 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
         method: 'DELETE'
       });
       if (res.ok) {
+        setModalOpen(false);
+        setEditingId(null);
         fetchTransactions();
         onRefresh();
-        if (showToast) showToast("Transaction deleted successfully!", "success");
+        if (showToast) showToast("Transaction deleted", "success");
       } else {
         if (showToast) showToast("Failed to delete transaction", "error");
         else alert("Failed to delete transaction");
@@ -298,531 +295,236 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
     }
   };
 
-  // Helper resolvers for displaying names
-  const getAccountName = (id: number) => {
-    const acc = data.accounts.find(a => a.id === id);
-    return acc ? `${acc.name} (${acc.institution_name || 'Bank'})` : `Account #${id}`;
+  // Plain names for the ledger's types, in the form and the filter.
+  const TYPE_LABELS: Record<string, string> = {
+    Debit: 'Money out', Credit: 'Money in', Transfer: 'Transfer between accounts', Investment: 'Invest in an asset',
+    Redemption: 'Sell or redeem an asset', EMI: 'Loan EMI', Prepayment: 'Loan prepayment or card bill', Spend: 'Card spend',
   };
+  const MONEY_IN = ['Credit', 'Redemption'];
+  const NEUTRAL = ['Transfer'];
 
-  const getCounterpartText = (tx: Transaction) => {
-    if (tx.type === 'Transfer') {
-      return tx.related_entity_id ? `→ ${getAccountName(tx.related_entity_id)}` : 'Destination Account';
-    }
-    if (tx.type === 'Investment' || tx.type === 'Redemption') {
-      const asset = data.assets.find(a => a.id === tx.related_entity_id);
-      const symbol = tx.type === 'Investment' ? '→' : '←';
-      return asset ? `${symbol} Asset: ${asset.name}` : `Asset #${tx.related_entity_id}`;
-    }
-    if (tx.type === 'EMI' || tx.type === 'Prepayment') {
-      const liab = data.liabilities.find(l => l.id === tx.related_entity_id);
-      return liab ? `→ Debt: ${liab.name}` : `Debt #${tx.related_entity_id}`;
-    }
-    if (tx.type === 'Spend') {
-      const card = data.liabilities.find(l => l.id === tx.related_entity_id);
-      const cat = data.categories.find(c => c.id === tx.category_id);
-      const cardText = card ? card.name : `Card #${tx.related_entity_id}`;
-      return cat ? `→ ${cardText} (${cat.name})` : `→ ${cardText}`;
-    }
-    if (tx.category_id) {
-      const cat = data.categories.find(c => c.id === tx.category_id);
-      return cat ? `Category: ${cat.name}` : `Category #${tx.category_id}`;
-    }
-    return '-';
-  };
+  const accountName = (id: number) => data.accounts.find((a) => a.id === id)?.name;
+  const categoryName = (id?: number) => (id ? data.categories.find((c) => c.id === id)?.name : undefined);
 
-  const getTypeIcon = (typeStr: string) => {
-    switch (typeStr) {
-      case 'Credit':
-      case 'Redemption':
-        return <ArrowDownRight size={16} style={{ color: 'var(--success)' }} />;
-      case 'Debit':
-      case 'Investment':
-      case 'EMI':
-      case 'Prepayment':
-      case 'Spend':
-        return <ArrowUpRight size={16} style={{ color: 'var(--danger)' }} />;
-      case 'Transfer':
-        return <ArrowRightLeft size={16} style={{ color: 'var(--info)' }} />;
-      default:
-        return <Info size={16} style={{ color: 'var(--text-muted)' }} />;
+  /** What the entry was, in words: the line a bank statement would show. */
+  const describe = (tx: Transaction): string => {
+    const asset = () => data.assets.find((a) => a.id === tx.related_entity_id)?.name ?? 'an asset';
+    const debt = () => data.liabilities.find((l) => l.id === tx.related_entity_id)?.name ?? 'a loan';
+    switch (tx.type) {
+      case 'Transfer': return `Transfer to ${accountName(tx.related_entity_id ?? 0) ?? 'another account'}`;
+      case 'Investment': return `Invested in ${asset()}`;
+      case 'Redemption': return `Redeemed from ${asset()}`;
+      case 'EMI': return `EMI: ${debt()}`;
+      case 'Prepayment': return `Paid off ${debt()}`;
+      case 'Spend': return categoryName(tx.category_id) ?? 'Card spend';
+      default: return categoryName(tx.category_id) ?? tx.notes ?? (tx.type === 'Credit' ? 'Money in' : 'Money out');
     }
   };
+  /** Which account (or card) it touched. */
+  const where = (tx: Transaction) => (tx.type === 'Spend'
+    ? data.liabilities.find((l) => l.id === tx.related_entity_id)?.name ?? 'A card'
+    : accountName(tx.account_id) ?? 'An account');
 
-  const formatCurrency = (val: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      maximumFractionDigits: 0
-    }).format(val);
-  };
+  const q = searchQuery.trim().toLowerCase();
+  const filtered = transactions.filter((tx) => {
+    if (filterType !== 'All' && tx.type !== filterType) return false;
+    if (startDate && tx.transaction_date < startDate) return false;
+    if (endDate && tx.transaction_date > endDate) return false;
+    return !q || [describe(tx), where(tx), tx.notes || '', TYPE_LABELS[tx.type] || tx.type].some((t) => t.toLowerCase().includes(q));
+  }).sort((a, b) => b.transaction_date.localeCompare(a.transaction_date) || b.id - a.id);
 
-  // Lists for counterpart choices depending on type
-  const targetAccountsList = data.accounts.filter(a => a.id.toString() !== accountId);
-  const targetAssetsList = data.assets;
-  const targetLiabilitiesList = data.liabilities;
-  const categoriesList = data.categories.filter(c => {
+  const totalIn = filtered.filter((t) => MONEY_IN.includes(t.type)).reduce((s, t) => s + t.amount, 0);
+  const totalOut = filtered.filter((t) => !MONEY_IN.includes(t.type) && !NEUTRAL.includes(t.type)).reduce((s, t) => s + t.amount, 0);
+  const visible = filtered.slice(0, shown);
+  const months: { key: string; rows: Transaction[] }[] = [];
+  for (const tx of visible) {
+    const key = tx.transaction_date.slice(0, 7);
+    const last = months[months.length - 1];
+    if (last && last.key === key) last.rows.push(tx); else months.push({ key, rows: [tx] });
+  }
+  const monthLabel = (ym: string) => new Date(`${ym}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+  const filtering = !!(q || filterType !== 'All' || startDate || endDate);
+
+  // Choices for the form, by type.
+  const targetAccountsList = data.accounts.filter((a) => a.id.toString() !== accountId);
+  const categoriesList = data.categories.filter((c) => {
     if (type === 'Debit' || type === 'Spend') return c.entity_type === 'Expense';
     if (type === 'Credit') return c.entity_type === 'Income';
     return false;
   });
-  const targetCreditCardsList = data.liabilities.filter((l: any) => l.category_name === 'Credit Card');
-
-  const handleSort = (col: string) => {
-    if (sortColumn === col) {
-      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortColumn(col);
-      setSortOrder('asc');
-    }
-  };
-
-  const filteredTransactions = transactions.filter(tx => {
-    const notesMatch = tx.notes ? tx.notes.toLowerCase().includes(searchQuery.toLowerCase()) : false;
-    const accountMatch = getAccountName(tx.account_id).toLowerCase().includes(searchQuery.toLowerCase());
-    const counterpartMatch = getCounterpartText(tx).toLowerCase().includes(searchQuery.toLowerCase());
-    const typeMatch = tx.type.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchesSearch = searchQuery === '' || notesMatch || accountMatch || counterpartMatch || typeMatch;
-    const matchesType = filterType === 'All' || tx.type === filterType;
-
-    const txDate = new Date(tx.transaction_date).getTime();
-    const matchesStart = startDate === '' || txDate >= new Date(startDate).getTime();
-    const matchesEnd = endDate === '' || txDate <= new Date(endDate).getTime();
-
-    return matchesSearch && matchesType && matchesStart && matchesEnd;
-  });
-
-  const sortedTransactions = [...filteredTransactions].sort((a, b) => {
-    let valA: any = a.transaction_date;
-    let valB: any = b.transaction_date;
-
-    if (sortColumn === 'date') {
-      valA = new Date(a.transaction_date).getTime();
-      valB = new Date(b.transaction_date).getTime();
-    } else if (sortColumn === 'type') {
-      valA = a.type;
-      valB = b.type;
-    } else if (sortColumn === 'account') {
-      valA = getAccountName(a.account_id);
-      valB = getAccountName(b.account_id);
-    } else if (sortColumn === 'counterpart') {
-      valA = getCounterpartText(a);
-      valB = getCounterpartText(b);
-    } else if (sortColumn === 'amount') {
-      valA = a.amount;
-      valB = b.amount;
-    } else if (sortColumn === 'notes') {
-      valA = a.notes || '';
-      valB = b.notes || '';
-    }
-
-    if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
-    if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
-    return 0;
-  });
-
-  const totalItems = sortedTransactions.length;
-  const totalPages = Math.ceil(totalItems / pageSize);
-  const paginatedTransactions = sortedTransactions.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const cards = data.liabilities.filter((l: any) => l.category_name === 'Credit Card');
+  const opt = (label: string) => <option value="">{label}</option>;
 
   return (
-    <div style={{ paddingBottom: '40px' }}>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div className="db-page">
+      <div className="eg-head">
         <div>
           <h1 className="page-title">Transactions Ledger</h1>
           <p className="page-subtitle">Every payment, transfer and purchase. Account balances are worked out from these entries.</p>
         </div>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button className="btn btn-secondary" onClick={fetchTransactions} title="Refresh list">
-            <RefreshCw size={16} />
-          </button>
-          <button className="btn btn-primary" onClick={openNew}>
-            <Plus size={16} /> Log Transaction
-          </button>
-        </div>
+        <button className="btn btn-primary eg-add" onClick={openNew}><Plus size={15} /> Log a transaction</button>
       </div>
 
-      {!loading && (
-        <div className="glass-panel" style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1.2fr 1.2fr auto', gap: '16px', padding: '16px', marginBottom: '20px', alignItems: 'flex-end' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <label style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 500 }}>Search Notes / Accounts / Counterpart</label>
-            <input 
-              type="text" 
-              className="form-input" 
-              style={{ padding: '8px 12px', fontSize: '13px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#fff' }}
-              placeholder="Search..." 
-              value={searchQuery}
-              onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-            />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <label style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 500 }}>Type</label>
-            <select 
-              className="form-input" 
-              style={{ padding: '8px 12px', fontSize: '13px', background: 'rgba(15,23,42,0.8)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#fff' }}
-              value={filterType} 
-              onChange={(e) => { setFilterType(e.target.value); setCurrentPage(1); }}
-            >
-              <option value="All">All Types</option>
-              <option value="Debit">Debit</option>
-              <option value="Credit">Credit</option>
-              <option value="Transfer">Transfer</option>
-              <option value="Investment">Investment</option>
-              <option value="Redemption">Redemption</option>
-              <option value="EMI">EMI</option>
-              <option value="Prepayment">Prepayment</option>
-              <option value="Spend">Card Spend</option>
-            </select>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <label style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 500 }}>From Date</label>
-            <input 
-              type="date" 
-              className="form-input" 
-              style={{ padding: '8px 12px', fontSize: '13px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#fff' }}
-              value={startDate}
-              onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }}
-            />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <label style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 500 }}>To Date</label>
-            <input 
-              type="date" 
-              className="form-input" 
-              style={{ padding: '8px 12px', fontSize: '13px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#fff' }}
-              value={endDate}
-              onChange={(e) => { setEndDate(e.target.value); setCurrentPage(1); }}
-            />
-          </div>
-          <button 
-            className="btn btn-secondary" 
-            style={{ height: '38px', fontSize: '12px', padding: '0 16px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
-            onClick={() => {
-              setSearchQuery('');
-              setFilterType('All');
-              setStartDate('');
-              setEndDate('');
-              setCurrentPage(1);
-            }}
-          >
-            Clear Filters
-          </button>
+      <div className="tl-filters">
+        <div className="eg-search">
+          <Search size={14} />
+          <input type="search" className="form-control" placeholder="Search" aria-label="Search transactions" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
         </div>
-      )}
+        <select className="form-control" aria-label="Type" value={filterType} onChange={(e) => setFilterType(e.target.value)}>
+          <option value="All">All types</option>
+          {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <label className="tl-date"><span>From</span><input type="date" className="form-control" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></label>
+        <label className="tl-date"><span>To</span><input type="date" className="form-control" value={endDate} onChange={(e) => setEndDate(e.target.value)} /></label>
+        {filtering && <button type="button" className="settings-link" onClick={() => { setSearchQuery(''); setFilterType('All'); setStartDate(''); setEndDate(''); }}>Clear</button>}
+        {!loading && filtered.length > 0 && (
+          <span className="tl-totals">{filtered.length} entr{filtered.length === 1 ? 'y' : 'ies'} · <span className="tl-in">in {formatINR(totalIn)}</span> · out {formatINR(totalOut)}</span>
+        )}
+      </div>
 
-      {loading ? (
-        <div style={{ padding: '48px', textTransform: 'uppercase', textAlign: 'center', color: 'var(--text-muted)' }}>
-          Loading Transactions Ledger...
-        </div>
-      ) : filteredTransactions.length === 0 ? (
-        <div className="glass-panel" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-muted)' }}>
-          <Info size={40} style={{ margin: '0 auto 16px auto', opacity: 0.5 }} />
-          <h3>No Matching Transactions</h3>
-          <p style={{ maxWidth: '400px', margin: '8px auto 20px auto', fontSize: '13px' }}>
-            No transaction records matched your search query or filters. Try adjusting your parameters.
-          </p>
-        </div>
+      {loading ? <p className="cc-note">Loading…</p> : transactions.length === 0 ? (
+        <div className="settings-group"><div className="ie-empty">
+          <p>No transactions yet. Log money coming in and going out, and your account balances will follow.</p>
+          <div><button type="button" className="settings-btn" onClick={openNew}><Plus size={12} /> Log a transaction</button></div>
+        </div></div>
+      ) : filtered.length === 0 ? (
+        <div className="settings-group"><div className="ie-empty"><p>Nothing matches these filters.</p></div></div>
       ) : (
-        <div className="glass-panel" style={{ overflowX: 'auto', padding: 0 }}>
-          <table className="entity-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--border-glass)', textAlign: 'left' }}>
-                <th 
-                  style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}
-                  onClick={() => handleSort('date')}
-                >
-                  Date {sortColumn === 'date' ? (sortOrder === 'asc' ? ' ▲' : ' ▼') : ''}
-                </th>
-                <th 
-                  style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}
-                  onClick={() => handleSort('type')}
-                >
-                  Type {sortColumn === 'type' ? (sortOrder === 'asc' ? ' ▲' : ' ▼') : ''}
-                </th>
-                <th 
-                  style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}
-                  onClick={() => handleSort('account')}
-                >
-                  Primary Account {sortColumn === 'account' ? (sortOrder === 'asc' ? ' ▲' : ' ▼') : ''}
-                </th>
-                <th 
-                  style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}
-                  onClick={() => handleSort('counterpart')}
-                >
-                  Post / Counterpart {sortColumn === 'counterpart' ? (sortOrder === 'asc' ? ' ▲' : ' ▼') : ''}
-                </th>
-                <th 
-                  style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}
-                  onClick={() => handleSort('amount')}
-                >
-                  Amount {sortColumn === 'amount' ? (sortOrder === 'asc' ? ' ▲' : ' ▼') : ''}
-                </th>
-                <th 
-                  style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}
-                  onClick={() => handleSort('notes')}
-                >
-                  Notes {sortColumn === 'notes' ? (sortOrder === 'asc' ? ' ▲' : ' ▼') : ''}
-                </th>
-                <th style={{ padding: '14px 20px', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', textAlign: 'right' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paginatedTransactions.map(tx => (
-                <tr key={tx.id} style={{ borderBottom: '1px solid var(--border-glass)' }}>
-                  <td style={{ padding: '14px 20px', fontSize: '13px', whiteSpace: 'nowrap' }}>{formatDate(tx.transaction_date)}</td>
-                  <td style={{ padding: '14px 20px', fontSize: '13px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      {getTypeIcon(tx.type)}
-                      <span>{tx.type}</span>
-                    </div>
-                  </td>
-                  <td style={{ padding: '14px 20px', fontSize: '13px', fontWeight: 500 }}>{getAccountName(tx.account_id)}</td>
-                  <td style={{ padding: '14px 20px', fontSize: '13px', color: '#cbd5e1' }}>{getCounterpartText(tx)}</td>
-                  <td style={{ padding: '14px 20px', fontSize: '13px', fontWeight: 600, color: (tx.type === 'Credit' || tx.type === 'Redemption') ? 'var(--success-light)' : '#f1f5f9' }}>
-                    {formatCurrency(tx.amount)}
-                  </td>
-                  <td style={{ padding: '14px 20px', fontSize: '13px', color: 'var(--text-muted)', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {tx.notes || '-'}
-                  </td>
-                  <td style={{ padding: '14px 20px', fontSize: '13px', textAlign: 'right' }}>
-                    {deletingTxId === tx.id ? (
-                      <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
-                        <span style={{ color: 'var(--danger-light)', fontSize: '11px', fontWeight: 500 }}>Confirm?</span>
-                        <button 
-                          className="btn btn-secondary" 
-                          style={{ padding: '3px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444' }}
-                          onClick={() => {
-                            handleDelete(tx.id);
-                            setDeletingTxId(null);
-                          }}
-                        >
-                          Yes
-                        </button>
-                        <button 
-                          className="btn btn-secondary" 
-                          style={{ padding: '3px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px' }}
-                          onClick={() => setDeletingTxId(null)}
-                        >
-                          No
-                        </button>
-                      </div>
-                    ) : (
-                      <div style={{ display: 'inline-flex', gap: '8px' }}>
-                        <button className="btn btn-secondary" style={{ padding: '4px 8px' }} onClick={() => handleEdit(tx)}>
-                          <Edit2 size={12} />
-                        </button>
-                        <button className="btn btn-danger" style={{ padding: '4px 8px' }} onClick={() => setDeletingTxId(tx.id)}>
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {/* Pagination Controls */}
-          {totalPages > 1 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderTop: '1px solid var(--border-glass)', background: 'rgba(255,255,255,0.01)' }}>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, totalItems)} of {totalItems} entries
-              </span>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button 
-                  className="btn btn-secondary" 
-                  style={{ padding: '4px 10px', fontSize: '12px' }}
-                  disabled={currentPage === 1}
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                >
-                  Previous
-                </button>
-                <button 
-                  className="btn btn-secondary" 
-                  style={{ padding: '4px 10px', fontSize: '12px' }}
-                  disabled={currentPage === totalPages}
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                >
-                  Next
-                </button>
-              </div>
-            </div>
+        <div className="eg-groups">
+          {months.map((m) => {
+            const mIn = m.rows.filter((t) => MONEY_IN.includes(t.type)).reduce((s, t) => s + t.amount, 0);
+            const mOut = m.rows.filter((t) => !MONEY_IN.includes(t.type) && !NEUTRAL.includes(t.type)).reduce((s, t) => s + t.amount, 0);
+            return (
+              <section key={m.key} aria-label={monthLabel(m.key)}>
+                <div className="settings-group-head">
+                  <h3 className="settings-group-title">{monthLabel(m.key)}</h3>
+                  <span className="eg-group-total"><span className="tl-in">in {formatINR(mIn)}</span> · out {formatINR(mOut)}</span>
+                </div>
+                <div className="settings-group">
+                  {m.rows.map((tx) => {
+                    const sign = MONEY_IN.includes(tx.type) ? '+' : NEUTRAL.includes(tx.type) ? '' : '−';
+                    return (
+                      <button key={tx.id} type="button" className="ie-row" onClick={() => handleEdit(tx)}>
+                        <span className="ie-row-text">
+                          <strong>{describe(tx)}</strong>
+                          <span>{[formatDate(tx.transaction_date), where(tx), tx.type === 'Debit' || tx.type === 'Credit' ? null : TYPE_LABELS[tx.type], tx.notes && tx.notes !== describe(tx) ? tx.notes : null].filter(Boolean).join(' · ')}</span>
+                        </span>
+                        <span className="ie-row-amount">
+                          <strong className={sign === '+' ? 'tl-in' : undefined}>{sign}{formatINR(tx.amount)}</strong>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          })}
+          {filtered.length > shown && (
+            <button type="button" className="settings-btn" style={{ alignSelf: 'center' }} onClick={() => setShown((n) => n + 60)}>
+              Show more ({filtered.length - shown} older)
+            </button>
           )}
         </div>
       )}
 
-      {/* Double-Entry Transaction Form Modal */}
       {modalOpen && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(15,23,42,0.85)', backdropFilter: 'blur(8px)',
-          display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000
-        }}>
-          <div
-            className="glass-panel"
-            style={{ width: '100%', maxWidth: '480px', padding: '28px', border: '1px solid var(--border-glass)', position: 'relative' }}
-            ref={modalRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="txn-modal-title"
-            tabIndex={-1}
-          >
-            <button
-              onClick={() => setModalOpen(false)}
-              aria-label="Close"
-              style={{ position: 'absolute', top: '16px', right: '16px', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
-            >
-              <X size={18} />
-            </button>
+        <div className="db-modal" onMouseDown={(e) => { if (e.target === e.currentTarget) setModalOpen(false); }}>
+          <div ref={modalRef} role="dialog" aria-modal="true" aria-label={editingId ? 'Edit transaction' : 'Log a transaction'} tabIndex={-1} className="db-modal-body" style={{ maxWidth: '560px' }}>
+            <form className="glass-panel df-form" onSubmit={handleSubmit}>
+              <div className="df-head"><h3>{editingId ? 'Edit transaction' : 'Log a transaction'}</h3></div>
+              <div className="df-body">
+                <div className="df-grid">
+                  <div className="df-field df-wide">
+                    <label htmlFor="tx-type" className="df-label">What happened</label>
+                    <select id="tx-type" className="form-control" value={type} onChange={(e) => { setType(e.target.value); setCounterpartId(''); setSpendCategoryId(''); }}>
+                      {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                    </select>
+                  </div>
 
-            <h3 id="txn-modal-title" style={{ fontSize: '18px', fontWeight: 600, marginBottom: '20px', color: '#f1f5f9' }}>
-              {editingId ? 'Edit Transaction' : 'Log New Transaction'}
-            </h3>
+                  {type !== 'Spend' && (
+                    <div className="df-field">
+                      <label htmlFor="tx-account" className="df-label">{type === 'Credit' || type === 'Redemption' ? 'Into account' : 'From account'}</label>
+                      <select id="tx-account" className="form-control" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+                        {data.accounts.map((acc) => <option key={acc.id} value={acc.id}>{acc.name} ({formatINR(acc.current_balance)})</option>)}
+                      </select>
+                    </div>
+                  )}
 
-            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              
-              <div className="form-group">
-                <label className="form-label">Transaction Type</label>
-                <select className="form-input" value={type} onChange={e => {
-                  setType(e.target.value);
-                  setCounterpartId('');
-                  setSpendCategoryId('');
-                }}>
-                  <option value="Debit">Debit (Expense Payment)</option>
-                  <option value="Credit">Credit (Income Deposit)</option>
-                  <option value="Transfer">Account Transfer</option>
-                  <option value="Investment">Asset Investment</option>
-                  <option value="Redemption">Asset Redemption</option>
-                  <option value="EMI">EMI Payment (Liability)</option>
-                  <option value="Prepayment">Prepayment (Liability)</option>
-                  <option value="Spend">Card Spend (New Charge)</option>
-                </select>
+                  {type === 'Transfer' && (
+                    <div className="df-field">
+                      <label htmlFor="tx-to" className="df-label">To account</label>
+                      <select id="tx-to" className="form-control" required value={counterpartId} onChange={(e) => setCounterpartId(e.target.value)}>
+                        {opt('Choose an account')}
+                        {targetAccountsList.map((acc) => <option key={acc.id} value={acc.id}>{acc.name} ({formatINR(acc.current_balance)})</option>)}
+                      </select>
+                    </div>
+                  )}
+
+                  {(type === 'Investment' || type === 'Redemption') && (
+                    <div className="df-field">
+                      <label htmlFor="tx-asset" className="df-label">Asset</label>
+                      <select id="tx-asset" className="form-control" required value={counterpartId} onChange={(e) => setCounterpartId(e.target.value)}>
+                        {opt('Choose an asset')}
+                        {data.assets.map((a) => <option key={a.id} value={a.id}>{a.name} ({formatINR(a.current_value)})</option>)}
+                      </select>
+                    </div>
+                  )}
+
+                  {(type === 'EMI' || type === 'Prepayment') && (
+                    <div className="df-field">
+                      <label htmlFor="tx-debt" className="df-label">Loan or card</label>
+                      <select id="tx-debt" className="form-control" required value={counterpartId} onChange={(e) => setCounterpartId(e.target.value)}>
+                        {opt('Choose one')}
+                        {data.liabilities.map((l) => <option key={l.id} value={l.id}>{l.name} ({formatINR(l.outstanding)} owed)</option>)}
+                      </select>
+                    </div>
+                  )}
+
+                  {type === 'Spend' && (
+                    <div className="df-field">
+                      <label htmlFor="tx-card" className="df-label">Card</label>
+                      <select id="tx-card" className="form-control" required value={counterpartId} onChange={(e) => setCounterpartId(e.target.value)}>
+                        {opt('Choose a card')}
+                        {cards.map((l) => <option key={l.id} value={l.id}>{l.name} ({formatINR(l.outstanding)} owed)</option>)}
+                      </select>
+                    </div>
+                  )}
+
+                  {(type === 'Debit' || type === 'Credit' || type === 'Spend') && (
+                    <div className="df-field">
+                      <label htmlFor="tx-cat" className="df-label">{type === 'Spend' ? 'Category' : 'Category (optional)'}</label>
+                      {/* Optional for money in/out: rows like opening-balance credits have no clean
+                          category. Required for card spend: the categories double as the reward
+                          engine's vocabulary, and an uncategorised charge can't match a reward rule. */}
+                      <select id="tx-cat" className="form-control" required={type === 'Spend'}
+                        value={type === 'Spend' ? spendCategoryId : counterpartId}
+                        onChange={(e) => (type === 'Spend' ? setSpendCategoryId(e.target.value) : setCounterpartId(e.target.value))}>
+                        {opt(type === 'Spend' ? 'Choose a category' : 'None')}
+                        {categoriesList.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+
+                  <div className="df-field">
+                    <label htmlFor="tx-amount" className="df-label">Amount</label>
+                    <AmountInput id="tx-amount" label="Amount" prefix="₹" value={Number(amount) || 0} onChange={(v) => setAmount(String(v))} />
+                  </div>
+                  <div className="df-field">
+                    <label htmlFor="tx-date" className="df-label">Date</label>
+                    <input id="tx-date" type="date" className="form-control" required value={date} onChange={(e) => setDate(e.target.value)} />
+                  </div>
+                  <div className="df-field df-wide">
+                    <label htmlFor="tx-notes" className="df-label">Notes</label>
+                    <input id="tx-notes" className="form-control" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="What it was for" />
+                  </div>
+                </div>
               </div>
-
-              {type !== 'Spend' && (
-                <div className="form-group">
-                  <label className="form-label">Primary Account</label>
-                  <select className="form-input" value={accountId} onChange={e => setAccountId(e.target.value)}>
-                    {data.accounts.map(acc => (
-                      <option key={acc.id} value={acc.id}>{acc.name} (Bal: {formatCurrency(acc.current_balance)})</option>
-                    ))}
-                  </select>
+              <div className="df-foot">
+                <div>{editingId !== null && <ConfirmAction label="Delete" confirmLabel="Delete" danger question="Delete this transaction? Balances will be recalculated." onConfirm={() => handleDelete(editingId)} />}</div>
+                <div className="df-actions">
+                  <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)}>Cancel</button>
+                  <button type="submit" className="btn btn-primary">{editingId ? 'Save changes' : 'Save'}</button>
                 </div>
-              )}
-
-              {/* Dynamic counterpart target list */}
-              {type === 'Transfer' && (
-                <div className="form-group">
-                  <label className="form-label">Destination Account</label>
-                  <select className="form-input" required value={counterpartId} onChange={e => setCounterpartId(e.target.value)}>
-                    <option value="">-- Select Target Account --</option>
-                    {targetAccountsList.map(acc => (
-                      <option key={acc.id} value={acc.id}>{acc.name} (Bal: {formatCurrency(acc.current_balance)})</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {(type === 'Investment' || type === 'Redemption') && (
-                <div className="form-group">
-                  <label className="form-label">Target Asset Entity</label>
-                  <select className="form-input" required value={counterpartId} onChange={e => setCounterpartId(e.target.value)}>
-                    <option value="">-- Select Asset --</option>
-                    {targetAssetsList.map(a => (
-                      <option key={a.id} value={a.id}>{a.name} (Val: {formatCurrency(a.current_value)})</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {(type === 'EMI' || type === 'Prepayment') && (
-                <div className="form-group">
-                  <label className="form-label">Target Debt / Liability</label>
-                  <select className="form-input" required value={counterpartId} onChange={e => setCounterpartId(e.target.value)}>
-                    <option value="">-- Select Liability --</option>
-                    {targetLiabilitiesList.map(l => (
-                      <option key={l.id} value={l.id}>{l.name} (O/S: {formatCurrency(l.outstanding)})</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {type === 'Spend' && (
-                <div className="form-group">
-                  <label className="form-label">Card Charged</label>
-                  <select className="form-input" required value={counterpartId} onChange={e => setCounterpartId(e.target.value)}>
-                    <option value="">-- Select Credit Card --</option>
-                    {targetCreditCardsList.map(l => (
-                      <option key={l.id} value={l.id}>{l.name} (O/S: {formatCurrency(l.outstanding)})</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {(type === 'Debit' || type === 'Credit' || type === 'Spend') && (
-                <div className="form-group">
-                  <label className="form-label">{type === 'Spend' ? 'Category' : 'Budget Category (optional)'}</label>
-                  {/* Not required for Debit/Credit: rows like opening-balance credits
-                      legitimately have no clean category, so a mandatory select would
-                      make them uneditable. Required for Spend, since these categories
-                      double as the reward engine's category vocabulary and an
-                      uncategorized card charge can't be matched to a reward rule. */}
-                  <select
-                    className="form-input"
-                    required={type === 'Spend'}
-                    value={type === 'Spend' ? spendCategoryId : counterpartId}
-                    onChange={e => type === 'Spend' ? setSpendCategoryId(e.target.value) : setCounterpartId(e.target.value)}
-                  >
-                    <option value="">{type === 'Spend' ? '-- Select Category --' : 'None (Uncategorized)'}</option>
-                    {categoriesList.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              <div className="form-group">
-                <label className="form-label">Amount (₹)</label>
-                <input 
-                  type="number" 
-                  step="0.01" 
-                  className="form-input" 
-                  required 
-                  value={amount} 
-                  onChange={e => setAmount(e.target.value)} 
-                  placeholder="e.g. 15000"
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Transaction Date</label>
-                <input 
-                  type="date" 
-                  className="form-input" 
-                  required 
-                  value={date} 
-                  onChange={e => setDate(e.target.value)} 
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Notes</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  value={notes} 
-                  onChange={e => setNotes(e.target.value)} 
-                  placeholder="Additional context..."
-                />
-              </div>
-
-              <div style={{ display: 'flex', gap: '12px', marginTop: '12px' }}>
-                <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setModalOpen(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                  <Save size={14} /> Save Posting
-                </button>
               </div>
             </form>
           </div>
