@@ -20,6 +20,7 @@ from typing import Dict, List, Optional
 from backend.tax.engine import MONTHS_PER_YEAR, TaxInputError
 from backend.formatting import indian_digits as _inr
 from backend.tax.epf import fy_months
+from backend.risk import EQUITY_ORIENTED_FUND_TYPES, fund_type, metadata as risk_metadata
 
 # income/expense frequency is free text in the generic entity form; these are the values
 # the rest of the app uses (main.py's INCOME_FREQUENCY_PER_YEAR, Dashboard.tsx).
@@ -289,21 +290,38 @@ def _rental_ledger_items(cur, person_id, start, end) -> List[dict]:
 
 
 def _gains_items(cur, person_id, financial_year) -> List[dict]:
-    cur.execute("""SELECT asset_category, gain_type, COALESCE(SUM(gain_amount), 0) AS gain, COUNT(*) AS n
-                   FROM capital_gains_realizations WHERE owner_id = ? AND financial_year = ?
-                   GROUP BY asset_category, gain_type""", (person_id, financial_year))
+    """Realised gains this year, by the section they're taxed under. A mutual fund's fund
+    type decides: debt, liquid and other funds are taxed at slab rates however long they
+    were held (bought after 1 April 2023); funds without a type count as equity, with a note."""
+    cur.execute("""SELECT cgr.asset_category, cgr.gain_type, cgr.gain_amount, a.metadata_json
+                   FROM capital_gains_realizations cgr LEFT JOIN assets a ON a.id = cgr.asset_id
+                   WHERE cgr.owner_id = ? AND cgr.financial_year = ?""", (person_id, financial_year))
+    groups: Dict[tuple, dict] = {}
+    for r in cur.fetchall():
+        kind = fund_type(risk_metadata(r["metadata_json"])) if r["asset_category"] == "Mutual Fund" else None
+        if r["asset_category"] == "Mutual Fund" and kind and kind not in EQUITY_ORIENTED_FUND_TYPES:
+            key = ("slab_fund", "STCG", "Debt/liquid fund gains")
+        else:
+            equity = r["asset_category"] in ("Stock", "Mutual Fund")
+            key = ("equity" if equity else "other", r["gain_type"], f"{r['asset_category']} {r['gain_type']}")
+        g = groups.setdefault(key, {"gain": 0.0, "n": 0, "untyped_fund": False, "category": r["asset_category"]})
+        g["gain"] += float(r["gain_amount"] or 0.0)
+        g["n"] += 1
+        g["untyped_fund"] |= r["asset_category"] == "Mutual Fund" and not kind
+    targets = {("equity", "STCG"): "capital_gains.stcg_111a", ("equity", "LTCG"): "capital_gains.ltcg_112a",
+               ("other", "LTCG"): "capital_gains.ltcg_112", ("other", "STCG"): "capital_gains.stcg_slab",
+               ("slab_fund", "STCG"): "capital_gains.stcg_slab"}
     items = []
-    for g in cur.fetchall():
+    for (kind, gain_type, label), g in groups.items():
         if g["gain"] <= 0:
             continue
-        equity = g["asset_category"] in ("Stock", "Mutual Fund")
-        target = {(True, "STCG"): "capital_gains.stcg_111a", (True, "LTCG"): "capital_gains.ltcg_112a",
-                  (False, "LTCG"): "capital_gains.ltcg_112", (False, "STCG"): "capital_gains.stcg_slab"}[(equity, g["gain_type"])]
-        note = ("Assumes equity-oriented funds; gains on debt funds are taxed at slab rates."
-                if g["asset_category"] == "Mutual Fund" else None)
-        items.append(_item(target, g["gain"], f"{g['asset_category']} {g['gain_type']}", "recorded",
+        note = ("Taxed at your slab rate, whatever the holding period (debt-type funds bought after 1 April 2023)."
+                if kind == "slab_fund" else
+                "Funds without a fund type are treated as equity; set it under Assets if any are debt or liquid funds."
+                if g["untyped_fund"] else None)
+        items.append(_item(targets[(kind, gain_type)], g["gain"], label, "recorded",
                            f"{g['n']} sale(s) logged as realised gains this year",
-                           {"type": "capital_gains", "category": g["asset_category"]}, note=note))
+                           {"type": "capital_gains", "category": g["category"]}, note=note))
     return items
 
 

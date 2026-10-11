@@ -39,10 +39,14 @@ def _lots(conn, asset_id: int) -> List[dict]:
 
 def _realised(conn, person_id: int, financial_year: str) -> Dict[str, float]:
     out = {"equity_ltcg": 0.0, "equity_stcg": 0.0, "other_ltcg": 0.0, "other_stcg": 0.0}
-    for r in conn.execute("""SELECT asset_category, gain_type, COALESCE(SUM(gain_amount), 0) AS g FROM capital_gains_realizations
-                             WHERE owner_id = ? AND financial_year = ? GROUP BY asset_category, gain_type""", (person_id, financial_year)):
-        key = f"{'equity' if r['asset_category'] in EQUITY else 'other'}_{r['gain_type'].lower()}"
-        out[key] += float(r["g"])
+    for r in conn.execute("""SELECT cgr.asset_category, cgr.gain_type, cgr.gain_amount AS g, a.metadata_json
+                             FROM capital_gains_realizations cgr LEFT JOIN assets a ON a.id = cgr.asset_id
+                             WHERE cgr.owner_id = ? AND cgr.financial_year = ?""", (person_id, financial_year)):
+        # A debt or liquid fund's gains aren't equity gains, so they don't use the allowance.
+        kind = fund_type(metadata(r["metadata_json"])) if r["asset_category"] == "Mutual Fund" else None
+        equity = r["asset_category"] in EQUITY and not (kind and kind not in EQUITY_ORIENTED_FUND_TYPES)
+        key = f"{'equity' if equity else 'other'}_{r['gain_type'].lower()}"
+        out[key] += float(r["g"] or 0.0)
     return out
 
 

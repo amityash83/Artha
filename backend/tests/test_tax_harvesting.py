@@ -113,3 +113,30 @@ def test_debt_and_liquid_funds_are_left_out_by_fund_type(conn):
     assert [s["asset"] for s in out["gain_harvest"]] == ["Index fund"]
     assert any("Liquid fund (liquid)" in n for n in out["notes"])
     assert not any("without a fund type" in n for n in out["notes"])
+
+
+def _realised(conn, name, fund, gain, gain_type="LTCG"):
+    import json
+    aid = holding(conn, name, "Mutual Fund", 100000, [])
+    conn.execute("UPDATE assets SET metadata_json = ? WHERE id = ?", (json.dumps({"fund_type": fund}), aid))
+    conn.execute("""INSERT INTO capital_gains_realizations (asset_id, owner_id, asset_category, sale_date, financial_year,
+                    quantity_sold, sale_value, cost_basis, gain_amount, gain_type)
+                    VALUES (?, 1, 'Mutual Fund', '2026-06-01', ?, 10, ?, 0, ?, ?)""", (aid, FY, gain, gain, gain_type))
+
+
+def test_a_liquid_funds_realised_gain_does_not_use_the_allowance(conn):
+    _realised(conn, "Liquid fund", "Liquid", 60000)
+    _realised(conn, "Index fund", "Equity", 40000)
+    conn.commit()
+    out = harvest_plan(conn, 1, FY, RULES, today=TODAY)
+    assert out["exemption_used"] == 40000  # only the equity fund's gain
+
+
+def test_prefill_puts_a_liquid_funds_gain_at_slab_rate(conn):
+    from backend.tax.prefill import _gains_items
+    _realised(conn, "Liquid fund", "Liquid", 60000)
+    _realised(conn, "Index fund", "Equity", 40000)
+    conn.commit()
+    items = {i["target"]: i for i in _gains_items(conn.cursor(), 1, FY)}
+    assert items["capital_gains.stcg_slab"]["amount"] == 60000 and "slab rate" in items["capital_gains.stcg_slab"]["note"]
+    assert items["capital_gains.ltcg_112a"]["amount"] == 40000

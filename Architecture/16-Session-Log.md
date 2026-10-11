@@ -187,5 +187,6 @@ and emphatically, applies to every commit going forward, no exceptions.
   Simulations "payoff planner" was dropped in favour of the Loan planner.)
 - The payslip view could show the employer's EPF/EPS split; tax doesn't
   need it.
-- Mutual fund gains realised through the ledger are still classified by
-  asset category, not fund type.
+- (Done: realised mutual fund gains are classified by fund type at read
+  time, in the tax prefill and harvesting, so a liquid fund's sale goes to
+  slab rate and doesn't use the 112A allowance.)
