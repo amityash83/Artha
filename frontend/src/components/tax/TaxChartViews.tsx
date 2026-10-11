@@ -43,8 +43,11 @@ export const RegimeTaxChart: React.FC<{ result: TaxComputeResult; waterfalls: Pa
 };
 
 /** Chart B: what the salary is made of, and where it goes in each regime. */
-export const SalaryBreakdownChart: React.FC<{ inputs: TaxPlannerInputs; result: TaxComputeResult }> = ({ inputs, result }) => {
-  const s = inputs.salary;
+export const SalaryBreakdownChart: React.FC<{ inputs: TaxPlannerInputs; result: TaxComputeResult }> = ({ result }) => {
+  // The year as computed: with month-by-month entry the plan's yearly fields are stale and
+  // the months' totals are what's taxed.
+  const year = result.inputs;
+  const s = year.salary;
   const known = new Set(['basic', 'hra', 'special_allowance', 'bonus', 'incentives']);
   const other = Object.entries(s).filter(([k]) => !known.has(k)).reduce((t, [, v]) => t + (v || 0), 0);
   const parts: [string, number][] = [
@@ -55,7 +58,7 @@ export const SalaryBreakdownChart: React.FC<{ inputs: TaxPlannerInputs; result: 
     labels: ['Cash salary'],
     datasets: parts.map(([label, v], i) => barDataset(label, [v], SERIES[i], true)),
   };
-  const nps = inputs.employer_contributions.nps || 0;
+  const nps = year.employer_contributions.nps || 0;
   const destinations: [string, (k: TaxRegimeKey) => number][] = [
     ['Net cash received', (k) => result.regimes[k].in_hand_salary_annual],
     ['Income tax', (k) => result.regimes[k].total_tax],

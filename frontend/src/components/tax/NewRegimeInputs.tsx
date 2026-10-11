@@ -25,6 +25,7 @@ export const NewRegimeInputs: React.FC<PlannerChildProps & { part: 'allowances' 
   const rules = useRuleSetContent(result?.rule_set.rule_set_id, result?.rule_set.version);
   if (!result) return <EmptyState>Computing…</EmptyState>;
   const regime = result.regimes.new;
+  const year = result.inputs; // the year as computed (month totals with month-by-month entry)
   const sd = regimeItem(rules, 'new', 'standard_deduction');
   const nps = regimeItem(rules, 'new', 'employer_nps');
   const npsPct = (nps?.value as { pct_of_basic_da?: Record<string, number> })?.pct_of_basic_da?.[inputs.profile.employer_type];
@@ -53,8 +54,8 @@ export const NewRegimeInputs: React.FC<PlannerChildProps & { part: 'allowances' 
         <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <Row ok label={`Standard deduction: ${formatINR(regime.standard_deduction)}`}
             detail={<>{sectionLabel(sd)} <VerificationBadge level={sd?.verification} /></>} />
-          <Row ok={(inputs.employer_contributions.nps || 0) > 0}
-            label={`Employer NPS: ${formatINR(regime.deductions.employer_nps || 0)} deducted (of ${formatINR(inputs.employer_contributions.nps || 0)} paid in)`}
+          <Row ok={(year.employer_contributions.nps || 0) > 0}
+            label={`Employer NPS: ${formatINR(regime.deductions.employer_nps || 0)} deducted (of ${formatINR(year.employer_contributions.nps || 0)} paid in)`}
             detail={<>{npsPct !== undefined && `limit ${npsPct}% of basic + DA`} {sectionLabel(nps)} <VerificationBadge level={nps?.verification} /></>} />
           <Row ok={false} label="HRA exemption: not available" detail={<>{sectionLabel(hra)} <VerificationBadge level={hra?.verification} /></>} />
           <Row ok={false} label="Professional tax deduction: not available" detail={<>{sectionLabel(pt)} <VerificationBadge level={pt?.verification} /></>} />

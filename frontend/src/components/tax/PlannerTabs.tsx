@@ -97,9 +97,13 @@ export const TaxSummary: React.FC<PlannerChildProps & {
   if (next && next.still_to_pay > 0) {
     todo.push({ text: <>Pay <strong>{formatINR(next.still_to_pay)}</strong> advance tax by {formatDate(next.due_date)} ({next.cumulative_pct}% of the year's tax is due by then).</>, tab: 'pay' });
   }
-  if (payslip && payslip.difference.annual_tax_saved > 0 && (inputs.employer_contributions.nps || 0) < payslip.after.employer_nps_annual) {
-    todo.push({ text: <>Employer NPS of {formatINR(payslip.after.employer_nps_monthly)} a month would cut tax by <strong>{formatINR(payslip.difference.annual_tax_saved)}</strong> a year
-      (take-home {payslip.difference.monthly_cash_change >= 0 ? 'up' : 'down'} {formatINR(Math.abs(payslip.difference.monthly_cash_change))} a month), if your employer offers it.</>, tab: 'save' });
+  // Compared with the employer NPS already in the plan (the payslip's "before" reads it from the
+  // month grid too). The cash effect is left to Ways to save: in a month-by-month plan the
+  // remaining payslips also absorb the year's whole tax saving, which isn't the lasting change.
+  if (payslip && payslip.difference.annual_tax_saved > 0 && payslip.before.employer_nps_monthly < payslip.after.employer_nps_monthly - 1) {
+    const now = payslip.before.employer_nps_monthly;
+    todo.push({ text: <>{now > 0 ? `Raising employer NPS from ${formatINR(now)} to ${formatINR(payslip.after.employer_nps_monthly)} a month` : `Employer NPS of ${formatINR(payslip.after.employer_nps_monthly)} a month`} would
+      cut tax by <strong>{formatINR(payslip.difference.annual_tax_saved)}</strong> a year, if your employer offers it. Ways to save shows what it does to your take-home.</>, tab: 'save' });
   }
   if (harvest && !harvest.year_over && harvest.gain_harvest_total > 0) {
     todo.push({ text: <>Sell and buy back equity to take <strong>{formatINR(harvest.gain_harvest_total)}</strong> of gains tax-free before {formatDate(harvest.deadline)} (about {formatINR(harvest.future_tax_avoided)} less tax later).</>, tab: 'save' });

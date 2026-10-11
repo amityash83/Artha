@@ -47,6 +47,8 @@ export const OldRegimeInputs: React.FC<PlannerChildProps> = ({ inputs, result, u
   const deductionsItem = regimeItem(rules, 'old', 'deductions');
   const allowed = new Set(((deductionsItem?.value as { allowed?: string[] })?.allowed) ?? []);
   const p = inputs.profile;
+  // The year as computed: with month-by-month entry the months' totals, not the plan's yearly fields.
+  const year = result?.inputs ?? inputs;
 
   const groups = metadata.deduction_fields.reduce<Record<string, TaxDeductionField[]>>((acc, f) => {
     if (f.rule_key === 'other_new') return acc;
@@ -86,7 +88,7 @@ export const OldRegimeInputs: React.FC<PlannerChildProps> = ({ inputs, result, u
             help={hraRules?.metro_cities ? `Metro in this rule set: ${hraRules.metro_cities.join(', ')}.` : undefined} />
         </div>
         <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-          HRA received ({formatINR(inputs.salary.hra || 0)}) and basic + DA come from your salary under Income.
+          HRA received ({formatINR(year.salary.hra || 0)}) and basic + DA come from your salary under Income.
         </div>
         {old?.hra?.computed_monthly && old.hra.per_month && (
           <div style={{ overflowX: 'auto' }}>
@@ -127,7 +129,7 @@ export const OldRegimeInputs: React.FC<PlannerChildProps> = ({ inputs, result, u
             <div className="glass-card" style={{ padding: '12px' }}>
               <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>HRA exemption</div>
               <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>{formatINR(old.hra.exemption)}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Taxable HRA: {formatINR(Math.max((inputs.salary.hra || 0) - old.hra.exemption, 0))}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Taxable HRA: {formatINR(Math.max((year.salary.hra || 0) - old.hra.exemption, 0))}</div>
             </div>
           </div>
         )}
@@ -167,7 +169,7 @@ export const OldRegimeInputs: React.FC<PlannerChildProps> = ({ inputs, result, u
             </div>
             {group === '80C' && (
               <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
-                Payroll EPF ({formatINR(inputs.payroll_deductions.employee_epf || 0)}) and VPF ({formatINR(inputs.payroll_deductions.vpf || 0)}) are included automatically.
+                Payroll EPF ({formatINR(year.payroll_deductions.employee_epf || 0)}) and VPF ({formatINR(year.payroll_deductions.vpf || 0)}) are included automatically.
               </div>
             )}
             {group === 'Home loan' && old && (
