@@ -30,6 +30,9 @@ REQUIRED_TOP_LEVEL_ITEMS = (
     "age_bands", "rounding", "cess", "employer_retirement_aggregate_cap",
     "house_property", "special_rates",
 )
+# Optional: rule sets made before these existed (including users' copies) stay valid; the
+# features that use them say so when they're missing.
+OPTIONAL_TOP_LEVEL_ITEMS = ("advance_tax", "return_due_date")
 REQUIRED_REGIME_ITEMS = (
     "slabs", "standard_deduction", "rebate", "surcharge", "professional_tax", "hra",
     "allowance_exemptions", "house_property_loss_setoff_cap", "employer_nps", "deductions",
@@ -113,6 +116,12 @@ def validate_rule_set(rules: dict) -> None:
     for key in REQUIRED_TOP_LEVEL_ITEMS:
         _check_item(rules[key], key)
     source_ids = {s.get("id") for s in rules["sources"]}
+    for key in OPTIONAL_TOP_LEVEL_ITEMS:
+        if key in rules:
+            _check_item(rules[key], key)
+            src = rules[key].get("source")
+            if src is not None and src not in source_ids:
+                raise RuleSetError(f"{key}: unknown source id '{src}'")
     for regime in REGIMES:
         if regime not in rules["regimes"]:
             raise RuleSetError(f"missing regime '{regime}'")

@@ -17,7 +17,8 @@
     {"id": "bt-80c-123", "title": "Business Today: Section 80C becomes Section 123 from April 1, 2026", "url": "https://www.businesstoday.in/personal-finance/tax/story/income-tax-act-2025-section-80c-becomes-section-123-from-april-1-2026-heres-what-taxpayers-must-know-522120-2026-03-24", "accessed": "2026-10-10", "official": false},
     {"id": "cleartax-act-2025", "title": "ClearTax: Income Tax Act 2025 key changes and section mapping", "url": "https://cleartax.in/s/income-tax-act-2025", "accessed": "2026-10-10", "official": false},
     {"id": "nps-124", "title": "Employer NPS deduction under Section 124 (Income-tax Act, 2025)", "url": "https://finlecture.in/indian-tax-system/nps-tax-benefit-fy-2026-27/", "accessed": "2026-10-10", "official": false},
-    {"id": "caalley-pf-2026", "title": "caalley: Budget 2026 PF rule clean-up keeps limits intact", "url": "https://caalley.com/news-updates/budget-2026/budget-2026-pf-rule-clean-up-simplifies-tax-treatment-keeps-limits-intact", "accessed": "2026-10-10", "official": false}
+    {"id": "caalley-pf-2026", "title": "caalley: Budget 2026 PF rule clean-up keeps limits intact", "url": "https://caalley.com/news-updates/budget-2026/budget-2026-pf-rule-clean-up-simplifies-tax-treatment-keeps-limits-intact", "accessed": "2026-10-10", "official": false},
+    {"id": "taxguru-advance-tax-2025", "title": "TaxGuru: Advance Tax under Income-tax Act, 2025 - liability, due dates and interest (ss. 403-408, 424, 425; replacing ss. 207-211, 234B, 234C)", "url": "https://taxguru.in/income-tax/advance-tax-income-tax-act-2025-liability-due-dates-interest.html", "accessed": "2026-10-11", "official": false}
   ],
 
   "age_bands": {
@@ -53,6 +54,33 @@
     "verification": "secondary_source", "legacy_section": "111A / 112A / 112", "source": "taxguru-ty2026-rates"
   },
 
+  "advance_tax": {
+    "value": {
+      "liability_threshold": 10000,
+      "senior_resident_without_business_income_exempt": true,
+      "instalments": [
+        {"due": "06-15", "cumulative_pct": 15, "safe_harbour_pct": 12, "interest_months": 3},
+        {"due": "09-15", "cumulative_pct": 45, "safe_harbour_pct": 36, "interest_months": 3},
+        {"due": "12-15", "cumulative_pct": 75, "safe_harbour_pct": 75, "interest_months": 3},
+        {"due": "03-15", "cumulative_pct": 100, "safe_harbour_pct": 100, "interest_months": 1}
+      ],
+      "deferment_interest_pct_per_month": 1,
+      "shortfall_interest_pct_per_month": 1,
+      "shortfall_if_paid_below_pct": 90,
+      "interest_rounding_unit": 100
+    },
+    "verification": "secondary_source",
+    "source": "taxguru-advance-tax-2025",
+    "legacy_section": "207-211 (advance tax), 234B, 234C (interest)",
+    "act_2025_section": "403-408 (advance tax), 424, 425 (interest)",
+    "note": "Advance tax is due when tax payable after TDS is at least the threshold. Cumulative % of that tax is due by each date; deferment interest per month runs on the shortfall for the stated months, except that paying the safe-harbour % by the first two dates avoids it. Paying less than the year-end % attracts interest from 1 April of the assessment year until paid. The shortfall is rounded down to the rounding unit before interest (Rule 119A practice; an assumption under the 2025 Act). Tax on capital gains or dividends arising after an instalment date may be paid in the remaining instalments without deferment interest (not modelled)."
+  },
+  "return_due_date": {
+    "value": {"due": "07-31", "of": "assessment_year"},
+    "verification": "unverified",
+    "legacy_section": "139(1)",
+    "note": "Usual due date for individuals not liable to audit; extended in some years. Check the year's notifications."
+  },
   "regimes": {
     "new": {
       "label": "New Tax Regime",

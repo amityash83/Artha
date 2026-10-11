@@ -24,6 +24,10 @@ Use this to model a Budget proposal early, or to correct a figure before an offi
 5. **Run the tests**: `pytest backend/tests/test_tax_rules.py` validates every rule file (required items, ascending slabs, known source ids) and that no thresholds crept into code. Add hand-computed expectations for the new year to `test_tax_engine.py` (at least: a rebate edge, a surcharge threshold with marginal relief, an old-regime case).
 6. **Packaging**: nothing to do. `backend/tax/rules/` is already bundled by the `build:backend*` scripts (`--add-data`); the app lists the new year automatically.
 
+## Optional items
+
+`advance_tax` (threshold, instalment dates and cumulative %, safe harbours, interest rates and rounding) and `return_due_date` are optional, so older rule sets and users' copies stay valid; the Advance Tax tab says when a year's set lacks them. Check both each year: return due dates are often extended.
+
 ## What the engine reads
 
 See the item list in `backend/tax/rules_loader.py` (`REQUIRED_TOP_LEVEL`, `REQUIRED_REGIME_ITEMS`) and how each is used in `backend/tax/engine.py`. If a new kind of rule is needed (a new deduction, a new cap), add the item to the rule files and the logic to the engine together, with tests; the generic rule editor in the app will show the new item without UI changes.

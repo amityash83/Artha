@@ -6,7 +6,7 @@ import { API_BASE_URL } from '../config';
 interface CalendarEvent {
   title: string;
   amount: number;
-  type: 'EMI' | 'SIP' | 'Insurance' | 'Credit Card';
+  type: 'EMI' | 'SIP' | 'Insurance' | 'Credit Card' | 'Tax';
   date: string;
   details: string;
 }
@@ -65,7 +65,7 @@ export const FinancialCalendar: React.FC = () => {
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1 className="page-title">Financial Calendar</h1>
-          <p className="page-subtitle">Chronological ledger of cash outlays (EMIs, SIPs, Premium renewals) for the next 12 months.</p>
+          <p className="page-subtitle">Chronological ledger of cash outlays (EMIs, SIPs, premium renewals, card dues and advance tax from your Tax Planner plans) for the next 12 months.</p>
         </div>
         <button 
           onClick={fetchEvents}
@@ -96,14 +96,14 @@ export const FinancialCalendar: React.FC = () => {
           <div style={{ flexGrow: 1 }}>
             <label className="form-label" style={{ fontSize: '11px', marginBottom: '4px' }}>Filter Event Category</label>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {['all', 'emi', 'sip', 'insurance', 'credit card'].map(type => (
+              {['all', 'emi', 'sip', 'insurance', 'credit card', 'tax'].map(type => (
                 <button
                   key={type}
                   className={`btn ${filterType === type ? 'btn-primary' : 'btn-secondary'}`}
                   style={{ padding: '6px 12px', fontSize: '12px', textTransform: 'capitalize' }}
                   onClick={() => setFilterType(type)}
                 >
-                  {type === 'all' ? 'All Events' : type === 'emi' ? 'EMIs' : type === 'sip' ? 'SIPs' : type === 'insurance' ? 'Insurance' : 'Credit Cards'}
+                  {type === 'all' ? 'All Events' : type === 'emi' ? 'EMIs' : type === 'sip' ? 'SIPs' : type === 'insurance' ? 'Insurance' : type === 'tax' ? 'Tax' : 'Credit Cards'}
                 </button>
               ))}
             </div>
@@ -166,8 +166,8 @@ export const FinancialCalendar: React.FC = () => {
                           padding: '3px 8px', 
                           borderRadius: '20px', 
                           fontWeight: 600,
-                          background: e.type === 'EMI' ? 'rgba(239, 68, 68, 0.1)' : e.type === 'SIP' ? 'rgba(16, 185, 129, 0.1)' : e.type === 'Insurance' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(245, 158, 11, 0.1)',
-                          color: e.type === 'EMI' ? 'var(--danger)' : e.type === 'SIP' ? 'var(--success)' : e.type === 'Insurance' ? 'var(--info)' : 'var(--warning)'
+                          background: e.type === 'EMI' ? 'rgba(239, 68, 68, 0.1)' : e.type === 'SIP' ? 'rgba(16, 185, 129, 0.1)' : e.type === 'Insurance' ? 'rgba(59, 130, 246, 0.1)' : e.type === 'Tax' ? 'rgba(167, 139, 250, 0.12)' : 'rgba(245, 158, 11, 0.1)',
+                          color: e.type === 'EMI' ? 'var(--danger)' : e.type === 'SIP' ? 'var(--success)' : e.type === 'Insurance' ? 'var(--info)' : e.type === 'Tax' ? 'var(--accent-light)' : 'var(--warning)'
                         }}>
                           {e.type}
                         </span>

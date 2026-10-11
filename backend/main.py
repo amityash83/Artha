@@ -27,6 +27,7 @@ import backend.tax.sensitivity as tax_sensitivity_mod
 import backend.tax.epf as tax_epf
 import backend.tax.prefill as tax_prefill_mod
 import backend.tax.payslip_pdf as tax_payslip_pdf_mod
+import backend.tax.advance_tax as tax_advance_mod
 from backend.decision_engine import generate_recommendations, generate_credit_card_annual_reviews
 
 # Shared-secret auth for the Docker/web deployment path only. Empty/unset (the
@@ -2033,6 +2034,67 @@ def tax_prefill(financial_year: Optional[str] = None, person_id: Optional[int] =
     """Proposed planner figures from Artha's own records; the UI applies only what the user ticks."""
     return _tax_store_call(lambda conn: tax_prefill_mod.prefill(conn, financial_year or _default_financial_year(), person_id))
 
+class TaxAdvanceRequest(TaxComputeRequest):
+    expected_tds: Optional[float] = None  # default: the tax on salary alone (what an employer deducts)
+    regime: Optional[str] = None  # default: the profile's TDS regime, else the cheaper one
+
+@app.post("/api/tax/advance-tax")
+def tax_advance(req: TaxAdvanceRequest):
+    def run(conn):
+        rules, _meta = _resolve_for(conn, req.financial_year, req.rule_set_id, req.rule_set_version)
+        return tax_advance_mod.advance_tax_schedule(req.inputs, rules, expected_tds=req.expected_tds, regime=req.regime)
+    return _tax_store_call(run)
+
+PLANNER_SLOT_PATTERN = re.compile(r"^p(\d+)-(\d{4}-\d{2})$")
+
+def _tax_calendar_events(today, horizon) -> list:
+    """Advance-tax instalments and the return due date from each person's saved Tax Planner
+    plans (tax_planner_drafts slots p<person>-<FY>), between today and the horizon."""
+    events = []
+    conn = get_db_connection()
+    try:
+        people = {r["id"]: r["name"] for r in conn.execute("SELECT id, name FROM people")}
+        for row in conn.execute("SELECT slot, content_json FROM tax_planner_drafts").fetchall():
+            m = PLANNER_SLOT_PATTERN.match(row["slot"])
+            if not m:
+                continue
+            person, fy = people.get(int(m.group(1)), "Household"), m.group(2)
+            try:
+                content = json.loads(row["content_json"])
+                rules, _meta = tax_store.resolve(conn, fy, None, None)
+                sched = tax_advance_mod.advance_tax_schedule(content.get("inputs") or {}, rules, today=today)
+            except Exception as e:  # a plan that no longer computes shouldn't break the calendar
+                print(f"[Calendar] Skipped tax plan {row['slot']}: {e}")
+                continue
+            for inst in sched.get("instalments", []):
+                due = date.fromisoformat(inst["due_date"])
+                if inst["status"] == "upcoming" and inst["still_to_pay"] > 0 and today <= due <= horizon:
+                    events.append({
+                        "title": f"Advance tax ({person}): {inst['cumulative_pct']}% of the year's tax by this date",
+                        "amount": inst["still_to_pay"],
+                        "type": "Tax",
+                        "date": due.isoformat(),
+                        "details": f"{person} · FY {fy}, {sched['regime']} regime · from the Tax Planner",
+                    })
+            filing = sched.get("return_due_date")
+            if filing and today <= date.fromisoformat(filing) <= horizon:
+                # When advance tax applies, the instalments above already carry the unpaid tax;
+                # only below the threshold (or for exempt seniors) is it paid at filing.
+                unpaid = max(sched.get("advance_tax_liability", 0.0) - sched.get("paid_total", 0.0), 0.0) if sched.get("available") else 0.0
+                at_filing = 0.0 if sched.get("required") else unpaid
+                events.append({
+                    "title": f"Income tax return due ({person}, FY {fy})",
+                    "amount": at_filing,
+                    "type": "Tax",
+                    "date": filing,
+                    "details": (f"{person} · self-assessment tax to pay before filing" if at_filing
+                                else f"{person} · tax not covered by TDS is in the advance-tax instalments" if sched.get("required")
+                                else f"{person} · from the Tax Planner"),
+                })
+    finally:
+        conn.close()
+    return events
+
 PAYSLIP_PDF_MAX_FILES = 24
 PAYSLIP_PDF_MAX_BYTES = 10 * 1024 * 1024
 
@@ -3795,6 +3857,11 @@ def get_financial_calendar():
                     "details": f"Issuer: {cc['issuer']} | Unbilled Current Balance"
                 })
                 
+    try:
+        horizon = date(today.year + 1, today.month, 1)
+        events.extend(_tax_calendar_events(today, horizon))
+    except Exception as e:
+        print("[Calendar] Tax events unavailable:", e)
     events.sort(key=lambda x: x["date"])
     return events
 

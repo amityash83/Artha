@@ -541,6 +541,43 @@ export interface TaxPlannerInputs {
   capital_gains: Record<string, number>;
   deductions: { '80C': Record<string, number> } & Record<string, number | boolean | Record<string, number>>;
   prepaid: { tds: number; advance_tax: number };
+  // Dated advance-tax payments; when any are entered, their total is prepaid.advance_tax.
+  advance_tax_payments?: TaxAdvancePayment[] | null;
+}
+
+export interface TaxAdvancePayment { date: string; amount: number }
+
+export interface TaxAdvanceInstalment {
+  due_date: string;
+  cumulative_pct: number;
+  cumulative_due: number;
+  paid_by_due_date: number;
+  still_to_pay: number;
+  status: 'met' | 'safe_harbour' | 'short' | 'upcoming' | 'not_required';
+  deferment_interest: number;
+  interest_if_unpaid: number;
+}
+
+export interface TaxAdvanceSchedule {
+  financial_year: string;
+  regime: TaxRegimeKey;
+  total_tax: number;
+  return_due_date: string | null;
+  available: boolean;
+  required: boolean;
+  reason: string;
+  expected_tds?: number;
+  tds_basis?: 'salary_only' | 'entered';
+  advance_tax_liability?: number;
+  threshold?: number;
+  payments?: TaxAdvancePayment[];
+  paid_total?: number;
+  instalments?: TaxAdvanceInstalment[];
+  deferment_interest_total?: number;
+  year_end_shortfall?: { unpaid: number; interest_per_month: number; from: string; final: boolean; explanation: string } | null;
+  next_due?: TaxAdvanceInstalment | null;
+  rule?: { verification: TaxVerification; legacy_section?: string; act_2025_section?: string; note?: string };
+  notes?: string[];
 }
 
 // One payslip month (April..March) in month-by-month mode.

@@ -17,9 +17,10 @@ import { PayslipSimulator } from './PayslipSimulator';
 import { TaxChartsTab } from './TaxChartsTab';
 import { SensitivityPanel } from './SensitivityPanel';
 import { ReportsPanel } from './ReportsPanel';
+import { AdvanceTaxPanel } from './AdvanceTaxPanel';
 import { useTaxPost } from './useTaxPost';
 
-type PlannerTab = 'overview' | 'salary' | 'old' | 'new' | 'comparison' | 'nps' | 'payslip' | 'charts' | 'sensitivity' | 'computation' | 'scenarios' | 'reports';
+type PlannerTab = 'overview' | 'salary' | 'old' | 'new' | 'comparison' | 'nps' | 'payslip' | 'advance' | 'charts' | 'sensitivity' | 'computation' | 'scenarios' | 'reports';
 
 const TABS: { key: PlannerTab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
@@ -29,6 +30,7 @@ const TABS: { key: PlannerTab; label: string }[] = [
   { key: 'comparison', label: 'Old vs New' },
   { key: 'nps', label: 'NPS Optimizer' },
   { key: 'payslip', label: 'Payslip' },
+  { key: 'advance', label: 'Advance Tax' },
   { key: 'charts', label: 'Charts' },
   { key: 'sensitivity', label: 'Sensitivity' },
   { key: 'computation', label: 'Computation & Audit' },
@@ -279,6 +281,7 @@ export const TaxPlanner: React.FC<TaxPlannerProps> = ({ people = [], showToast, 
       {tab === 'comparison' && <RegimeComparison {...childProps} />}
       {tab === 'nps' && <NpsOptimizer {...optProps} />}
       {tab === 'payslip' && <PayslipSimulator {...optProps} />}
+      {tab === 'advance' && <AdvanceTaxPanel {...childProps} />}
       {tab === 'charts' && <TaxChartsTab {...optProps} result={result} />}
       {tab === 'sensitivity' && <SensitivityPanel {...optProps} />}
       {tab === 'reports' && <ReportsPanel {...optProps} result={result} />}

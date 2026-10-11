@@ -19,6 +19,7 @@ engine cannot check), so the UI, reports and audit panel all explain the same nu
 """
 import copy
 import math
+from datetime import date
 from typing import Dict, List, Optional
 
 from backend.tax.hra import calculate_hra_exemption, calculate_hra_exemption_monthly, is_metro_city
@@ -54,6 +55,9 @@ DEFAULT_INPUTS = {
     # {"label", "status": "actual"|"projected", "salary": {}, "payroll_deductions": {},
     #  "employer_contributions": {}, "tds": number|null, "rent_paid": number, "metro": bool|null}
     "monthly": None,
+    # Dated advance-tax payments [{date: "YYYY-MM-DD", amount}]; when given, their total is
+    # prepaid.advance_tax (see advance_tax.py for the instalment schedule).
+    "advance_tax_payments": None,
     "employer_contributions": {"pf": 0.0, "nps": 0.0, "superannuation": 0.0},
     "payroll_deductions": {
         "employee_epf": 0.0, "vpf": 0.0, "employee_esic": 0.0, "professional_tax": 0.0, "other": 0.0,
@@ -190,6 +194,7 @@ def normalize_inputs(raw: Optional[dict]) -> dict:
             raise TaxInputError("salary_monthly must be an object")
         inp["salary_monthly"] = {k: _as_money(v, f"salary_monthly.{k}") for k, v in inp["salary_monthly"].items()}
     _normalize_monthly(inp)
+    _normalize_advance_tax_payments(inp)
     return inp
 
 
@@ -237,6 +242,27 @@ def _normalize_monthly(inp: dict) -> None:
     inp["monthly"] = {"enabled": enabled, "months": months}
     if enabled:
         apply_monthly_totals(inp)
+
+
+def _normalize_advance_tax_payments(inp: dict) -> None:
+    raw = inp.get("advance_tax_payments")
+    if not raw:
+        inp["advance_tax_payments"] = []
+        return
+    if not isinstance(raw, list):
+        raise TaxInputError("advance_tax_payments must be a list of {date, amount}")
+    payments = []
+    for i, p in enumerate(raw):
+        where = f"advance_tax_payments[{i}]"
+        if not isinstance(p, dict):
+            raise TaxInputError(f"{where} must be an object")
+        try:
+            day = date.fromisoformat(str(p.get("date")))
+        except ValueError:
+            raise TaxInputError(f"{where}.date must be a YYYY-MM-DD date")
+        payments.append({"date": day.isoformat(), "amount": _as_money(p.get("amount"), f"{where}.amount")})
+    inp["advance_tax_payments"] = sorted(payments, key=lambda p: p["date"])
+    inp["prepaid"]["advance_tax"] = sum(p["amount"] for p in payments)
 
 
 def apply_monthly_totals(inp: dict) -> None:

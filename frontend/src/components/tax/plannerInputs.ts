@@ -33,6 +33,7 @@ export const DEFAULT_PLANNER_INPUTS: TaxPlannerInputs = {
     other_new: 0,
   },
   prepaid: { tds: 0, advance_tax: 0 },
+  advance_tax_payments: [],
 };
 
 export const MONTHS = 12;

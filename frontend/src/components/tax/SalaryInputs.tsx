@@ -252,7 +252,16 @@ export const SalaryInputs: React.FC<PlannerChildProps> = ({ inputs, update, meta
               </div>
             )
             : <NumberField id="tp-tds" label="TDS deducted this year" value={inputs.prepaid.tds} onChange={(v) => update('prepaid.tds', v)} />}
-          <NumberField id="tp-advance" label="Advance tax paid" value={inputs.prepaid.advance_tax} onChange={(v) => update('prepaid.advance_tax', v)} />
+          {inputs.advance_tax_payments?.length
+            ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                <span className="form-label" style={{ fontSize: '12px' }}>Advance tax paid</span>
+                <strong style={{ fontSize: '14px', color: 'var(--text-primary)', padding: '8px 0' }}>{formatINR(inputs.advance_tax_payments.reduce((t, p) => t + (p.amount || 0), 0))}</strong>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Total of the dated payments on the Advance Tax tab.</span>
+              </div>
+            )
+            : <NumberField id="tp-advance" label="Advance tax paid" value={inputs.prepaid.advance_tax} onChange={(v) => update('prepaid.advance_tax', v)}
+                help="Or enter each payment with its date on the Advance Tax tab." />}
         </div>
       </Section>
     </div>
