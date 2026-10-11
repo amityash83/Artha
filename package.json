@@ -15,6 +15,7 @@
     "dev:web": "concurrently --kill-others --names backend,frontend \"npm run dev:backend\" \"npm run dev:frontend\"",
     "start": "concurrently --kill-others --names backend,frontend,electron \"npm run dev:backend\" \"npm run dev:frontend\" \"npm run dev:electron\"",
     "build:frontend": "npm run build -w frontend",
+    "test:e2e": "playwright test",
     "build:backend": "venv\\Scripts\\pyinstaller --noconfirm --onedir --console --name \"main\" --clean --distpath backend/dist --workpath backend/build --paths . --add-data \"backend/tax/rules:backend/tax/rules\" --add-data \"backend/tax/metadata:backend/tax/metadata\" backend/run.py",
     "build:backend:posix": "venv/bin/pyinstaller --noconfirm --onedir --console --name \"main\" --clean --distpath backend/dist --workpath backend/build --paths . --add-data \"backend/tax/rules:backend/tax/rules\" --add-data \"backend/tax/metadata:backend/tax/metadata\" backend/run.py",
     "package:portable": "npm run build:frontend && npm run build:backend && npm run package:win -w electron",
@@ -23,6 +24,7 @@
     "build:exe": "powershell -ExecutionPolicy Bypass -File ./build_release.ps1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.0",
     "concurrently": "^10.0.6"
   }
 }
