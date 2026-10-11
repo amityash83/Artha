@@ -45,6 +45,7 @@ const monthYear = (iso: string) => {
   const m = /^(\d{4})-(\d{2})/.exec(iso || '');
   return m ? new Date(Number(m[1]), Number(m[2]) - 1, 1).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }) : '';
 };
+const ordinal = (n: number) => `${n}${n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th'}`;
 const yearsLeft = (months: number) => (months < 12 ? `${Math.ceil(months)} months left` : `${(months / 12).toFixed(months < 120 ? 1 : 0)} years left`);
 
 /** The figure each kind of record is listed and totalled by. */
@@ -85,7 +86,8 @@ const metaOf = (kind: Kind, e: any, showOwner: boolean): string => {
       parts.push(e.lender_name, e.loan_use === 'repair' ? 'for repairs' : e.loan_use === 'other' ? 'not for the house' : null,
         num(e.house_share_pct) > 0 && num(e.house_share_pct) < 100 ? `${num(e.house_share_pct)}% for the house` : null,
         num(e.interest_rate) > 0 ? `${num(e.interest_rate)}%` : null,
-        num(e.emi) > 0 ? `EMI ${formatINR(e.emi)}` : null, num(e.remaining_tenure) > 0 ? yearsLeft(num(e.remaining_tenure)) : null);
+        num(e.emi) > 0 ? `EMI ${formatINR(e.emi)}${num(e.emi_day) > 0 ? ` on the ${ordinal(num(e.emi_day))}` : ''}` : null,
+        num(e.remaining_tenure) > 0 ? yearsLeft(num(e.remaining_tenure)) : null);
     }
   } else if (kind === 'goals') {
     parts.push(e.priority ? `${e.priority} priority` : null, e.low_risk_only ? 'low-risk only' : null, num(e.monthly_contribution) > 0 ? `${formatINR(e.monthly_contribution)}/mo` : null,

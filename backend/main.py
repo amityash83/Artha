@@ -3757,7 +3757,16 @@ def get_financial_calendar():
     for r in loans_raw:
         d = dict(r)
         meta = json.loads(d["metadata_json"]) if d.get("metadata_json") else {}
-        d["start_date"] = meta.get("start_date", date.today().strftime("%Y-%m-%d"))
+        # The EMI's debit day: the loan form's "EMI debit day", else the day of a legacy
+        # start_date. With neither, the day is unknown (it used to fall back to today's
+        # date, so every EMI moved day to day).
+        day = meta.get("emi_day")
+        if not day and meta.get("start_date"):
+            try:
+                day = datetime.strptime(meta["start_date"], "%Y-%m-%d").day
+            except ValueError:
+                day = None
+        d["emi_day"] = int(day) if day and 1 <= int(day) <= 31 else None
         loans.append(d)
         
     # Fetch insurance policies (assets where category is 'Insurance')
@@ -3836,20 +3845,23 @@ def get_financial_calendar():
         
         # A. Loan EMIs
         for l in loans:
-            try:
-                start_d = datetime.strptime(l["start_date"], "%Y-%m-%d").date()
-                due_day = min(start_d.day, calendar.monthrange(target_year, target_month)[1])
-            except:
-                due_day = 5
-                
-            due_date = date(target_year, target_month, due_day)
+            if l["emi_day"]:
+                due_date = date(target_year, target_month, min(l["emi_day"], calendar.monthrange(target_year, target_month)[1]))
+                details = "Monthly EMI"
+            else:
+                # Unknown day: shown at the start of its month, saying so, rather than on a
+                # made-up date. This month's stays listed (it may not have been debited yet).
+                due_date = date(target_year, target_month, 1)
+                details = "EMI day not set: add the EMI debit day on the loan"
+                if m_offset == 0:
+                    due_date = today
             if due_date >= today:
                 events.append({
                     "title": f"{l['name']} EMI",
                     "amount": l["emi"],
                     "type": "EMI",
                     "date": due_date.isoformat(),
-                    "details": "Monthly Loan Instalment"
+                    "details": details,
                 })
                 
         # B. Goals Savings contributions (1st of month)

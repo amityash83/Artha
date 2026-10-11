@@ -166,6 +166,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         standardFields['outstanding'] = 'number';
         standardFields['interest_rate'] = 'number';
         standardFields['emi'] = 'number';
+        standardFields['emi_day'] = 'number'; // debit day, for the Financial Calendar
         standardFields['tenure_months'] = 'number';
         standardFields['status'] = 'select_status';
         standardFields['owner_id'] = 'person_select';
@@ -399,6 +400,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       outstanding: isCreditCard ? 'Balance now' : 'Still owed',
       interest_rate: 'Interest rate',
       emi: 'Monthly EMI',
+      emi_day: 'EMI debit day',
       tenure_months: 'Original tenure',
       premium: 'Premium',
       frequency: entityType === 'assets' ? 'Paid' : 'How often',
@@ -440,6 +442,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
     opening_balance: 'What the account held when you started tracking it. Later changes come from transactions.',
     statement_balance: 'The amount on your most recent statement.',
     tenure_months: 'The full term when the loan began.',
+    emi_day: 'The day the EMI leaves your account (ECS/NACH). The Financial Calendar uses it.',
     goal_mapping: 'Counts this asset towards one of your goals.',
     linked_asset_id: 'A property can carry more than one loan, such as a home loan and a top-up.',
     surrender_value: 'What the insurer would pay if you surrendered the policy today.',
@@ -456,7 +459,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
     'target_amount', 'current_amount', 'monthly_contribution', 'amount', 'employee_share', 'employer_share', 'pension_share',
   ]);
   const SUFFIX: Record<string, string> = { interest_rate: '%', tenure_months: 'months' };
-  const DAY_OF_MONTH = new Set(['statement_date', 'due_date']);
+  const DAY_OF_MONTH = new Set(['statement_date', 'due_date', 'emi_day']);
 
   // Two sections: who/what the record is, then its figures and dates. Category-defined
   // custom fields follow the same rule by type.
