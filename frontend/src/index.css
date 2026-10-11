@@ -1185,3 +1185,27 @@ h1, h2, h3, h4, h5 {
 .rm-warn { color: var(--warning); font-size: 12px; }
 .rm-amount { color: var(--text-primary); font: 500 13px var(--font-sans); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .rm-foot { display: flex; justify-content: space-between; padding: 9px 14px 4px; border-top: 1px solid var(--border-glass); }
+
+/* Bank statement import (components/StatementImport.tsx) */
+.tl-head-actions { display: flex; align-items: center; gap: 10px; }
+.si-back { display: inline-flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.si-pick { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; padding: 16px; }
+.si-pick .df-field { min-width: 220px; }
+.si-disabled { opacity: 0.5; pointer-events: none; }
+.si-error { color: #fca5a5; font-size: 12.5px; margin: 0; width: 100%; }
+.si-note { color: var(--text-secondary); font-size: 12.5px; margin: 0 0 12px; }
+.si-past { cursor: default; }
+.si-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.si-summary > div { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: var(--radius-md); background: var(--bg-glass); border: 1px solid var(--border-glass); }
+.si-table { overflow-x: auto; }
+.si-row { display: grid; grid-template-columns: 28px 96px minmax(180px, 1fr) minmax(180px, 240px) 110px; gap: 10px; align-items: center; padding: 8px 14px; border-top: 1px solid var(--border-glass); min-width: 640px; }
+.si-row--head { border-top: none; color: var(--text-muted); font-size: 12px; }
+.si-row--off { opacity: 0.55; }
+.si-date { color: var(--text-secondary); font-size: 12.5px; white-space: nowrap; }
+.si-desc { display: flex; flex-direction: column; min-width: 0; font-size: 13px; }
+.si-desc > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.si-hint { color: var(--accent-light); font-size: 11.5px; }
+.si-dup { color: var(--text-muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.si-goes { font-size: 12.5px; padding: 5px 8px; }
+.si-amt { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.si-actions { margin-top: 14px; }

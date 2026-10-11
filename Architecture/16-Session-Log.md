@@ -224,3 +224,25 @@ and emphatically, applies to every commit going forward, no exceptions.
   today for this month), which would nag daily.
 - Go-to search now ranks matches at the start of a word first: "EMI" was finding
   "R*emi*nders" ahead of the Loan planner.
+
+### Bank statement import (2026-10-11)
+
+- Most entries a user would type come from their bank statement, so the
+  Ledger can now read the bank's own CSV/.xlsx (`backend/statements.py`;
+  the details are in `Architecture/Domains/Banking.md`).
+- **Columns found by name, not per-bank templates.** Indian banks share a
+  small vocabulary (Narration/Particulars, Withdrawal/Debit/DR,
+  Deposit/Credit/CR, Closing Balance), so one ranked list covers HDFC,
+  SBI, ICICI, Axis and Kotak without any per-bank code to maintain.
+- **Duplicates are the main risk.** Auto-posted EMIs, salary entered by
+  hand, and transfers already logged from the other account's side are
+  all matched by direction and amount: same day means "already in Artha";
+  within 3 days means "probably". Each existing entry pairs with at most
+  one line, and matches start unticked.
+- **Everything is an ordinary ledger entry**, tied to its import, so a
+  wrong import can be undone whole. The balance check uses Artha's
+  balance *on the statement's last day*, not today's, so later entries
+  don't cause a false mismatch.
+- **Not done:** PDF statements (layouts vary too much to read reliably)
+  and old .xls (it would need xlrd). Both are refused with a message
+  saying what to download instead.

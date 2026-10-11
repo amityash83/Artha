@@ -1245,6 +1245,10 @@ def delete_entity(entity_type: str, id: int, with_entries: bool = False):
 
         if entity_type in ("accounts", "assets", "liabilities"):
             _delete_entity_entries(cursor, entity_type, id, with_entries)
+        if entity_type == "accounts":
+            # Its statement imports: their entries went with it, so there's nothing left to undo.
+            cursor.execute("DELETE FROM statement_import_entries WHERE import_id IN (SELECT id FROM statement_imports WHERE account_id = ?)", (id,))
+            cursor.execute("DELETE FROM statement_imports WHERE account_id = ?", (id,))
         if entity_type == "assets":
             cursor.execute("DELETE FROM goal_holdings WHERE asset_id = ?", (id,))
             # Its own satellite rows (foreign keys aren't enforced, so nothing cascades).
@@ -3936,6 +3940,149 @@ async def import_mmex_csv(file: UploadFile = File(...)):
         return {"status": "success", "imported": imported_count}
     except Exception as e:
         raise HTTPException(status_code=400, detail="Parsing error: " + str(e))
+
+# --- Bank statement import (parsing and matching in backend/statements.py) ---
+def _statement_account(cursor, account_id: int):
+    row = cursor.execute("SELECT id, name FROM accounts WHERE id = ?", (account_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return row
+
+def _account_balance_now(cursor, account_id: int, on: Optional[str] = None) -> float:
+    """The account's derived balance, or as at the end of a day."""
+    return float(cursor.execute("""
+        SELECT COALESCE(SUM(CASE WHEN dest_ref_type = 'Account' AND dest_ref_id = :id THEN amount ELSE 0 END), 0)
+             - COALESCE(SUM(CASE WHEN source_ref_type = 'Account' AND source_ref_id = :id THEN amount ELSE 0 END), 0)
+        FROM transactions WHERE (:on IS NULL OR substr(transaction_date, 1, 10) <= :on)""", {"id": account_id, "on": on}).fetchone()[0] or 0.0)
+
+@app.post("/api/statements/preview")
+async def preview_statement(file: UploadFile = File(...), account_id: int = Form(...)):
+    """Reads a statement and says, line by line, what's new, what Artha already has, and
+    where each new line probably goes. Writes nothing."""
+    from backend import statements
+    data = await file.read()
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        account = _statement_account(cursor, account_id)
+        parsed = statements.parse_statement(file.filename or "", data)
+        lines = statements.analyse(conn, account_id, parsed["lines"])
+        # The statement's own closing balance (the last line by date that shows one), to
+        # compare with Artha's once the new lines are in.
+        with_balance = [l for l in lines if l["balance"] is not None]
+        closing = with_balance[-1] if with_balance and with_balance[-1]["date"] >= with_balance[0]["date"] else (with_balance[0] if with_balance else None)
+        return {**parsed, "lines": lines, "account": {"id": account["id"], "name": account["name"], "balance": _account_balance_now(cursor, account_id)},
+                "statement_closing": {"date": closing["date"], "balance": closing["balance"],
+                                      "artha_balance_then": _account_balance_now(cursor, account_id, closing["date"])} if closing else None,
+                "counts": {s: sum(1 for l in lines if l["status"] == s) for s in ("new", "duplicate", "probable_duplicate")}}
+    except statements.StatementError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    finally:
+        conn.close()
+
+class StatementCounterpart(BaseModel):
+    type: str
+    id: int
+
+class StatementLine(BaseModel):
+    date: str
+    amount: float
+    direction: str
+    description: str = ""
+    reference: Optional[str] = None
+    category_id: Optional[int] = None
+    counterpart: Optional[StatementCounterpart] = None
+
+class StatementImportRequest(BaseModel):
+    account_id: int
+    file_name: str = ""
+    lines: List[StatementLine]
+
+@app.post("/api/statements/import")
+def import_statement(req: StatementImportRequest):
+    """Posts the chosen lines as ordinary ledger entries (Debit/Credit, or a transfer, EMI,
+    card payment or investment when a line has a counterpart), recorded as one import."""
+    from backend import statements
+    if not req.lines:
+        raise HTTPException(status_code=400, detail="No lines to import")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        _statement_account(cursor, req.account_id)
+        cursor.execute("INSERT INTO statement_imports (account_id, file_name, imported_at, line_count, first_date, last_date) VALUES (?, ?, ?, ?, ?, ?)",
+                       (req.account_id, req.file_name[:200], datetime.now().isoformat(timespec="seconds"), len(req.lines),
+                        min(l.date for l in req.lines), max(l.date for l in req.lines)))
+        import_id = cursor.lastrowid
+        for line in req.lines:
+            try:
+                date.fromisoformat(line.date)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Bad date: {line.date}")
+            if line.direction not in ("in", "out") or not line.amount > 0:
+                raise HTTPException(status_code=400, detail="Each line needs an amount and a direction (in or out)")
+            cp = line.counterpart.model_dump() if line.counterpart else None
+            category = None
+            if cp:
+                table = {"Account": "accounts", "Liability": "liabilities", "Asset": "assets"}.get(cp["type"])
+                if not table or not cursor.execute(f"SELECT 1 FROM {table} WHERE id = ?", (cp["id"],)).fetchone():
+                    raise HTTPException(status_code=400, detail=f"{cp['type']} {cp['id']} not found")
+                if cp["type"] == "Liability":
+                    category = cursor.execute("SELECT c.name FROM liabilities l LEFT JOIN categories c ON c.id = l.category_id WHERE l.id = ?", (cp["id"],)).fetchone()[0]
+            t_type, src_t, src_id, dst_t, dst_id = statements.entry_shape(line.direction, req.account_id, cp, category)
+            notes = line.description.strip()[:500] + (f" · ref {line.reference}" if line.reference else "")
+            cursor.execute("""INSERT INTO transactions (source_ref_type, source_ref_id, dest_ref_type, dest_ref_id, type, amount, transaction_date, notes, category_id)
+                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                           (src_t, src_id, dst_t, dst_id, t_type, round(line.amount, 2), line.date, notes or None, line.category_id if not cp else None))
+            cursor.execute("INSERT INTO statement_import_entries (import_id, transaction_id) VALUES (?, ?)", (import_id, cursor.lastrowid))
+            adjust_double_entry_balances(cursor, t_type, round(line.amount, 2), src_t, src_id, dst_t, dst_id, "add")
+        conn.commit()
+        return {"status": "success", "import_id": import_id, "posted": len(req.lines), "balance": _account_balance_now(cursor, req.account_id)}
+    except statements.StatementError as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+@app.get("/api/statements/imports")
+def list_statement_imports(account_id: Optional[int] = None):
+    conn = get_db_connection()
+    try:
+        rows = conn.execute("""
+            SELECT si.*, a.name AS account_name,
+                   (SELECT COUNT(*) FROM statement_import_entries e JOIN transactions t ON t.id = e.transaction_id WHERE e.import_id = si.id) AS entries_left
+            FROM statement_imports si LEFT JOIN accounts a ON a.id = si.account_id
+            WHERE (:a IS NULL OR si.account_id = :a) ORDER BY si.id DESC LIMIT 50""", {"a": account_id}).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+@app.delete("/api/statements/imports/{import_id}")
+def undo_statement_import(import_id: int):
+    """Removes what an import posted (entries since deleted by hand are skipped), reverting
+    each one's effect on loans, cards and assets."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        if not cursor.execute("SELECT 1 FROM statement_imports WHERE id = ?", (import_id,)).fetchone():
+            raise HTTPException(status_code=404, detail="Import not found")
+        rows = cursor.execute("""SELECT t.* FROM statement_import_entries e JOIN transactions t ON t.id = e.transaction_id
+                                 WHERE e.import_id = ?""", (import_id,)).fetchall()
+        for r in rows:
+            adjust_double_entry_balances(cursor, r["type"], float(r["amount"]), r["source_ref_type"], r["source_ref_id"],
+                                         r["dest_ref_type"], r["dest_ref_id"], "revert", bool(r["is_balance_exempt"]))
+            cursor.execute("DELETE FROM transactions WHERE id = ?", (r["id"],))
+        cursor.execute("DELETE FROM statement_import_entries WHERE import_id = ?", (import_id,))
+        cursor.execute("DELETE FROM statement_imports WHERE id = ?", (import_id,))
+        conn.commit()
+        return {"status": "success", "removed": len(rows)}
+    except HTTPException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 # --- Database Backup & Restore (logic in backend/backups.py) ---
 def _backup_call(fn, *args):

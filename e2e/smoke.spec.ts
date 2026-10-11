@@ -173,3 +173,28 @@ test('a payment due soon shows under the bell, with a short account', async ({ p
   await expect(page.getByRole('heading', { name: 'Reminders' }).first()).toBeVisible();
   await expect(page.getByText('Loan EMIs')).toBeVisible();
 });
+
+test('importing a bank statement, then undoing it', async ({ page }) => {
+  const csv = [
+    'Date,Narration,Chq./Ref.No.,Value Dt,Withdrawal Amt.,Deposit Amt.,Closing Balance',
+    '02/10/26,UPI-ZOMATO-zomato@hdfc-Dinner,1,02/10/26,640.00,,1000.00',
+    '03/10/26,NEFT CR-ACME CORP-SALARY,2,03/10/26,,"1,20,000.00",121000.00',
+    '04/10/26,CC AUTOPAY REWARDS CARD,3,04/10/26,"5,000.00",,116000.00',
+  ].join('\n');
+  await open(page);
+  await go(page, 'Transactions Ledger');
+  await page.getByRole('button', { name: 'Import statement' }).click();
+  await page.getByLabel('Account').selectOption({ label: 'Savings' });
+  await page.locator('#si-file').setInputFiles({ name: 'hdfc-oct.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
+  await expect(page.getByText('3 lines for Savings')).toBeVisible();
+  await expect(page.locator('.si-row', { hasText: 'AUTOPAY' }).locator('select')).toHaveValue(/^Liability:/);
+  await page.getByLabel('Line 2 goes to').selectOption({ label: 'Salary' });
+  await page.getByRole('button', { name: 'Import 3 lines' }).click();
+  await expect(page.getByText(/Imported 3 lines/)).toBeVisible();
+  const past = page.locator('.si-past', { hasText: 'hdfc-oct.csv' });
+  await expect(past).toContainText('3 lines');
+  await past.getByRole('button', { name: 'Undo' }).click();
+  await past.getByRole('button', { name: 'Remove them' }).click();
+  await expect(page.getByText(/Removed 3 entries/)).toBeVisible();
+  await expect(past).toHaveCount(0);
+});

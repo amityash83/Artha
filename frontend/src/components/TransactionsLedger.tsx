@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { formatDate } from '../format';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, Upload } from 'lucide-react';
 import { formatINR } from '../format';
 import { AmountInput, ConfirmAction } from './settings/ui';
 import { InitData } from '../types';
 import { API_BASE_URL } from '../config';
 import { useModalA11y } from '../hooks/useModalA11y';
+import { StatementImport } from './StatementImport';
 
 interface TransactionsLedgerProps {
   data: InitData;
@@ -32,6 +33,7 @@ interface Transaction {
 export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, onRefresh, showToast, addRequest }) => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [importing, setImporting] = useState(false);
   const [modalOpen, setModalOpen] = useState<boolean>(false);
   const modalRef = useModalA11y(modalOpen, () => setModalOpen(false));
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -377,6 +379,11 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
   const cards = data.liabilities.filter((l: any) => l.category_name === 'Credit Card');
   const opt = (label: string) => <option value="">{label}</option>;
 
+  if (importing) {
+    return <StatementImport data={data} showToast={showToast} onClose={() => setImporting(false)}
+      onImported={() => { void fetchTransactions(); onRefresh(); }} />;
+  }
+
   return (
     <div className="db-page">
       <div className="eg-head">
@@ -384,7 +391,10 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
           <h1 className="page-title">Transactions Ledger</h1>
           <p className="page-subtitle">Every payment, transfer and purchase. Account balances are worked out from these entries.</p>
         </div>
-        <button className="btn btn-primary eg-add" onClick={openNew}><Plus size={15} /> Log a transaction</button>
+        <div className="tl-head-actions">
+          <button type="button" className="settings-btn" onClick={() => setImporting(true)}><Upload size={13} /> Import statement</button>
+          <button className="btn btn-primary eg-add" onClick={openNew}><Plus size={15} /> Log a transaction</button>
+        </div>
       </div>
 
       <div className="tl-filters">

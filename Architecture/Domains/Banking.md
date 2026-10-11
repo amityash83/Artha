@@ -16,10 +16,9 @@ Banking is the "cash layer" of Artha's Financial Intelligence Layer: it tracks l
 ## Out of Scope
 
 - No live bank API / account-aggregator integration (no Plaid/Yodlee/AA-framework equivalent) — everything is manual entry or CSV import.
-- No automatic transaction categorization or bank-statement PDF/OFX parsing — only a name/balance-matching MMex CSV importer.
+- No PDF/OFX statement parsing: statement import reads CSV and Excel .xlsx only (see Statement import below). Old .xls files are refused with a "save as .xlsx or CSV" message, since that would need the extra xlrd dependency.
 - No multi-currency conversion logic — `accounts.currency` is stored (default `INR`) but there is no FX rate engine; cross-currency accounts are not converted for net worth aggregation.
-- No recurring/scheduled transaction automation (e.g. auto-post a salary credit every month) — every transaction is entered manually.
-- No bank statement reconciliation workflow (matching imported lines against existing ledger entries beyond the simple MMex balance sync).
+- Recurring posting exists only for loan EMIs (auto EMI, see Loans.md); salary and other credits are entered by hand or imported from a statement.
 - No account-level access control/multi-user permissions — `people`/`owner_id` model ownership for reporting purposes only, not auth.
 
 ## Business Objectives
@@ -83,6 +82,40 @@ Supporting tables: `institutions` (id, name, type), `people` (id, name, role CHE
 
 None exist yet. There is no AI/LLM integration anywhere in the Banking domain today — no natural-language transaction entry, no anomaly detection on the ledger, no auto-categorization of imported transactions. Artha.md describes a future "AI Copilot" vision, but nothing has been built for Banking specifically.
 
+## Statement import
+
+Parsing and matching live in `backend/statements.py`; the routes in `main.py` are:
+- `POST /api/statements/preview` (multipart `file` + `account_id`): writes nothing.
+- `POST /api/statements/import`: posts the chosen lines.
+- `GET /api/statements/imports`: lists past imports.
+- `DELETE /api/statements/imports/{id}`: undoes an import.
+
+The screen is `frontend/src/components/StatementImport.tsx`, opened from the Transactions Ledger.
+
+- **Reading the file:**
+  - CSV (delimiter sniffed; utf-8 / cp1252) or .xlsx (openpyxl, first sheet). The file is capped at 5 MB and 5,000 lines.
+  - The header row is found by column names, not by bank. It needs a date, a description, and either withdrawal and deposit columns or an amount column (with a Dr/Cr column, a sign, or a Cr/Dr suffix). Covers the HDFC, SBI, ICICI, Axis and Kotak layouts.
+  - Rows without a date and an amount (titles, opening balance, footers) are skipped and counted.
+  - Dates are read day first, unless the file's numeric dates can only be month first.
+- **Matching:** each line is checked against the account's existing entries, by the same direction and amount.
+  - Same day: "already in Artha".
+  - Within 3 days: "probably already in Artha", e.g. an EMI posted automatically on its due day and debited the next.
+  - Exact matches are paired first, and each entry matches at most one line.
+  - Matched lines start unticked.
+- **Suggestions:**
+  - An outgoing amount within ₹1 of a loan's EMI goes to that loan.
+  - A card-bill narration ("CC … AUTOPAY", "credit card") goes to the card it names, or to the only card.
+  - Otherwise, the category last used on this account for the same payee. The payee is the first meaningful word of the narration, after dropping UPI/NEFT/IMPS-style noise.
+- **Posting:** lines become ordinary ledger entries, shaped by `statements.entry_shape`:
+  - Debit or Credit (with an optional category);
+  - Transfer to or from another account;
+  - EMI to a loan, or Prepayment to a card (which pays it down);
+  - Investment or Redemption with an asset;
+  - a loan paying out into the account (source Liability).
+  - The narration (and reference) become the notes. `adjust_double_entry_balances` runs per line, so loans, cards and assets move as usual.
+- **Undo:** `statement_imports` holds one row per import; `statement_import_entries` links it to the transactions it posted. Undo reverts and deletes the entries that still exist; entries already deleted by hand are skipped.
+- **Balance check:** the preview returns the bank's closing balance (from the last dated line with a balance) and Artha's balance on that same day (`artha_balance_then`). The screen compares them, counting the ticked lines up to that date, and says by how much they differ.
+
 ## Reports
 
 - Reports.tsx "Data" tab exposes a "Download Accounts CSV Export" button (client-side CSV generation from already-loaded `/api/init` data, not a dedicated backend endpoint).
@@ -93,7 +126,7 @@ None exist yet. There is no AI/LLM integration anywhere in the Banking domain to
 
 NOT YET BUILT — reasonable next steps:
 - Live bank/account-aggregator integration (Account Aggregator framework in India, or Plaid-style feeds) to remove manual entry entirely.
-- Bank statement (PDF/OFX/CSV) auto-import with transaction-level categorization, beyond the current balance-only MMex sync.
+- PDF/OFX statements, and remembering a per-bank column mapping when detection fails.
 - Recurring/scheduled transaction templates (e.g. auto-post monthly salary credit).
 - Multi-currency support with live FX conversion for net worth aggregation.
 - Reconciling `EntityGrid`'s `owner` column and `Snapshot.tsx`'s balance-PUT against the current schema (either add the column back or update the frontend) to remove the current silent-no-op behavior.

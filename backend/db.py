@@ -426,8 +426,29 @@ def init_db():
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_loan_rate_changes_liability ON loan_rate_changes(liability_id)")
 
+    # Bank statement imports (backend/statements.py): one row per import, and the ledger
+    # entries it posted, so a whole import can be undone.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS statement_imports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        file_name TEXT,
+        imported_at TEXT NOT NULL,
+        line_count INTEGER NOT NULL DEFAULT 0,
+        first_date TEXT,
+        last_date TEXT
+    )
+    """)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS statement_import_entries (
+        import_id INTEGER NOT NULL REFERENCES statement_imports(id) ON DELETE CASCADE,
+        transaction_id INTEGER NOT NULL,
+        PRIMARY KEY (import_id, transaction_id)
+    )
+    """)
+
     # Due-date reminders (backend/reminders.py): which ones were marked done or already raised
-    # as a notification. key = "<type>|<title>|<due date>", so a moved date is a new reminder.
+    # as a notification. key = "<type>[:<loan id>]|<title>|<due date>", so a moved date is a new reminder.
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS reminder_state (
         key TEXT PRIMARY KEY,

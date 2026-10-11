@@ -281,6 +281,9 @@ export const ImportSection: React.FC<SectionProps> = ({ onRefresh }) => {
   return (
     <>
       <SectionHeader title="Import" intro="Bring data in from other apps. Payslips are imported from the Tax Planner (Salary & CTC, month by month)." />
+      <Group title="Bank statements">
+        <Row label="Statement lines (CSV or Excel)" description="In Transactions Ledger, choose Import statement: pick the account and the file your bank's website gives you. Lines Artha already has are left out, and each import can be undone." />
+      </Group>
       <Group title="Money Manager Ex">
         <Row label="Accounts list (CSV)" description="Export the accounts list from MMEX as CSV. Accounts are matched by name and their balances updated.">
           <input id="mmex-file" type="file" accept=".csv" style={{ display: 'none' }}
