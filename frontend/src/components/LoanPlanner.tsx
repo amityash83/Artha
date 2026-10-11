@@ -27,7 +27,7 @@ export const LoanPlanner: React.FC<{
           <button key={v.id} type="button" role="tab" aria-selected={view === v.id} className="cc-view" onClick={() => setView(v.id)}>{v.label}</button>
         ))}
       </div>
-      {view === 'emi' ? <EmiCalculator showToast={showToast} embedded /> : <LoanOptimizer data={data} embedded />}
+      {view === 'emi' ? <EmiCalculator showToast={showToast} embedded loans={data.liabilities.filter((l: any) => l.category_name !== 'Credit Card' && (l.outstanding || 0) > 0)} /> : <LoanOptimizer data={data} embedded />}
     </div>
   );
 };

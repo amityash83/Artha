@@ -1,9 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { formatDate } from '../format';
-import { 
-  Calculator, Calendar, Plus, Trash2, Edit2,
-  TrendingDown, List, ChevronDown, ChevronUp
-} from 'lucide-react';
+import { AmountInput, ConfirmAction, Group, Row } from './settings/ui';
 import { API_BASE_URL } from '../config';
 interface Prepayment {
   date: string;
@@ -33,9 +30,11 @@ interface EmiCalculatorProps {
   showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
   /** Shown inside the Loan planner, which supplies the page title. */
   embedded?: boolean;
+  /** The user's own loans, offered as a starting point. */
+  loans?: any[];
 }
 
-export const EmiCalculator: React.FC<EmiCalculatorProps> = ({ showToast, embedded }) => {
+export const EmiCalculator: React.FC<EmiCalculatorProps> = ({ showToast, embedded, loans = [] }) => {
   // Inputs state
   const [loanAmount, setLoanAmount] = useState<number>(5000000); // 50 Lakhs default
   const [roi, setRoi] = useState<number>(8.5); // 8.5% default
@@ -56,7 +55,6 @@ export const EmiCalculator: React.FC<EmiCalculatorProps> = ({ showToast, embedde
   const [savedProfiles, setSavedProfiles] = useState<any[]>([]);
   const [profileName, setProfileName] = useState<string>('');
   const [activeProfileId, setActiveProfileId] = useState<number | null>(null);
-  const [isConfirmingDelete, setIsConfirmingDelete] = useState<boolean>(false);
 
   // Load profiles on mount
   useEffect(() => {
@@ -138,6 +136,20 @@ export const EmiCalculator: React.FC<EmiCalculatorProps> = ({ showToast, embedde
     }
   };
 
+  /** Fill the calculator from one of the user's loans: what's owed now, its rate, the months left. */
+  const startFromLoan = (id: number) => {
+    const loan = loans.find((l) => l.id === id);
+    if (!loan) return;
+    const left = loan.remaining_tenure > 0 ? Math.round(loan.remaining_tenure) : loan.tenure_months || 120;
+    setLoanAmount(Math.round(loan.outstanding));
+    setRoi(loan.interest_rate || 0);
+    if (left % 12 === 0) { setTenureUnit('years'); setTenureValue(left / 12); } else { setTenureUnit('months'); setTenureValue(left); }
+    setStartDate(new Date().toISOString().split('T')[0]);
+    setPrepayments([]);
+    setActiveProfileId(null);
+    setProfileName(loan.name);
+  };
+
   const handleDeleteProfile = async () => {
     if (!activeProfileId) return;
 
@@ -148,7 +160,6 @@ export const EmiCalculator: React.FC<EmiCalculatorProps> = ({ showToast, embedde
       if (res.ok) {
         setActiveProfileId(null);
         setProfileName('');
-        setIsConfirmingDelete(false);
         fetchProfiles();
         if (showToast) showToast("Profile deleted successfully!", "success");
       } else {
@@ -379,7 +390,7 @@ export const EmiCalculator: React.FC<EmiCalculatorProps> = ({ showToast, embedde
     const html = `
       <html>
         <head>
-          <title>FinanceOS - Amortization Report</title>
+          <title>Artha - Loan repayment schedule</title>
           <style>
             body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; margin: 40px; }
             h1 { color: #8B5CF6; margin-bottom: 5px; }
@@ -392,8 +403,8 @@ export const EmiCalculator: React.FC<EmiCalculatorProps> = ({ showToast, embedde
           </style>
         </head>
         <body>
-          <h1>FinanceOS Loan Amortization Report</h1>
-          <p style="color: #666; margin-top: 0;">Generated on ${new Date().toLocaleDateString()}</p>
+          <h1>Loan repayment schedule</h1>
+          <p style="color: #666; margin-top: 0;">From Artha, ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
           
           <div class="meta-container">
             <div class="meta-col">
@@ -451,8 +462,12 @@ export const EmiCalculator: React.FC<EmiCalculatorProps> = ({ showToast, embedde
     printWindow.document.close();
   };
 
+  const tenureMonths = tenureUnit === 'years' ? tenureValue * 12 : tenureValue;
+  const rows = optimized?.schedule ?? [];
+  const shown = showFullSchedule ? rows : rows.slice(0, 12);
+
   return (
-    <div style={{ paddingBottom: '40px' }}>
+    <div className="lp-page" style={embedded ? undefined : { paddingBottom: '40px' }}>
       {!embedded && (
         <div className="page-header">
           <h1 className="page-title">EMI Tool</h1>
@@ -460,506 +475,126 @@ export const EmiCalculator: React.FC<EmiCalculatorProps> = ({ showToast, embedde
         </div>
       )}
 
-      {/* Profiles Selection & Saving Bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: '24px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Load Profile:</span>
-          <select 
-            className="form-input" 
-            style={{ padding: '6px 12px', fontSize: '13px', minWidth: '200px' }}
-            value={activeProfileId || ''}
-            onChange={e => handleLoadProfile(Number(e.target.value))}
-          >
-            <option value="">-- Select Saved Profile --</option>
-            {savedProfiles.map(p => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
+      <div className="lp-bar">
+        {loans.length > 0 && (
+          <label className="lp-bar-field">
+            <span>Start from</span>
+            <select className="form-control" value="" onChange={(e) => startFromLoan(Number(e.target.value))}>
+              <option value="">One of my loans…</option>
+              {loans.map((l) => <option key={l.id} value={l.id}>{l.name} ({formatCurrency(l.outstanding)})</option>)}
+            </select>
+          </label>
+        )}
+        <label className="lp-bar-field">
+          <span>Saved</span>
+          <select className="form-control" value={activeProfileId || ''} onChange={(e) => handleLoadProfile(Number(e.target.value))}>
+            <option value="">{savedProfiles.length ? 'Open a saved calculation…' : 'None saved yet'}</option>
+            {savedProfiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
-          {activeProfileId && (
-            isConfirmingDelete ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '8px', padding: '2px 8px' }}>
-                <span style={{ color: 'var(--danger-light)', fontSize: '12px', fontWeight: 500 }}>Delete?</span>
-                <button 
-                  type="button" 
-                  className="btn btn-secondary" 
-                  style={{ padding: '3px 8px', fontSize: '11px', color: '#ef4444', border: 'none', background: 'transparent', minWidth: 'auto' }}
-                  onClick={handleDeleteProfile}
-                >
-                  Yes
-                </button>
-                <button 
-                  type="button" 
-                  className="btn btn-secondary" 
-                  style={{ padding: '3px 8px', fontSize: '11px', border: 'none', background: 'transparent', minWidth: 'auto' }}
-                  onClick={() => setIsConfirmingDelete(false)}
-                >
-                  No
-                </button>
-              </div>
-            ) : (
-              <button className="btn btn-secondary" style={{ color: 'var(--danger)', padding: '6px 12px', fontSize: '12px' }} onClick={() => setIsConfirmingDelete(true)}>
-                Delete Profile
-              </button>
-            )
-          )}
-        </div>
-
-        <form onSubmit={handleSaveProfile} style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <input 
-            type="text" 
-            className="form-input" 
-            placeholder="Profile Name..." 
-            style={{ padding: '6px 12px', fontSize: '13px', width: '200px' }}
-            value={profileName}
-            onChange={e => setProfileName(e.target.value)}
-            required
-          />
-          <button type="submit" className="btn btn-primary" style={{ padding: '6px 16px', fontSize: '12px' }}>
-            Save Profile
-          </button>
+        </label>
+        {activeProfileId && <ConfirmAction label="Delete" confirmLabel="Delete" danger question={`Delete "${profileName}"?`} onConfirm={handleDeleteProfile} />}
+        <form onSubmit={handleSaveProfile} className="lp-bar-save">
+          <input type="text" className="form-control" placeholder="Name this calculation" aria-label="Calculation name" value={profileName} onChange={(e) => setProfileName(e.target.value)} required />
+          <button type="submit" className="settings-btn">Save</button>
         </form>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
-        
-        {/* Left Side: Inputs Panel */}
-        <div className="glass-panel" style={{ padding: '24px' }}>
-          <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Calculator size={18} style={{ color: 'var(--accent-light)' }} />
-            Loan Parameters
-          </h3>
+      <div className="lp-grid">
+        <Group title="The loan">
+          <Row label="Amount" htmlFor="emi-amount">
+            <AmountInput id="emi-amount" label="Loan amount" prefix="₹" width={130} value={loanAmount} onChange={setLoanAmount} />
+          </Row>
+          <Row label="Interest rate" description="A year, as the lender quotes it." htmlFor="emi-rate">
+            <AmountInput id="emi-rate" label="Interest rate" suffix="%" width={80} value={roi} onChange={setRoi} />
+          </Row>
+          <Row label="Tenure" htmlFor="emi-tenure">
+            <span className="lp-inline">
+              <AmountInput id="emi-tenure" label="Tenure" width={60} value={tenureValue} onChange={(v) => setTenureValue(Math.max(Math.round(v), 1))} />
+              <span className="lp-toggle" role="group" aria-label="Tenure unit">
+                <button type="button" aria-pressed={tenureUnit === 'years'} onClick={() => { if (tenureUnit !== 'years') { setTenureUnit('years'); setTenureValue(Math.max(Math.round(tenureValue / 12), 1)); } }}>years</button>
+                <button type="button" aria-pressed={tenureUnit === 'months'} onClick={() => { if (tenureUnit !== 'months') { setTenureUnit('months'); setTenureValue(tenureValue * 12); } }}>months</button>
+              </span>
+            </span>
+          </Row>
+          <Row label="First EMI" htmlFor="emi-start">
+            <input id="emi-start" type="date" className="form-control" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+          </Row>
+        </Group>
 
-          {/* Loan Amount Input + Slider */}
-          <div className="form-group" style={{ marginBottom: '24px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <label className="form-label" style={{ margin: 0 }}>Loan Amount (Principal)</label>
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <span style={{ position: 'absolute', left: '10px', color: 'var(--text-muted)', fontSize: '14px' }}>₹</span>
-                <input 
-                  type="number" 
-                  className="form-input" 
-                  value={loanAmount} 
-                  onChange={e => setLoanAmount(Math.max(Number(e.target.value), 0))}
-                  style={{ width: '150px', padding: '6px 12px 6px 24px', fontSize: '14px', textAlign: 'right' }}
-                />
-              </div>
+        <section className="glass-panel db-card">
+          <div className="db-card-head"><h3>What it costs</h3>{loading && <span className="cc-note">Working it out…</span>}</div>
+          <strong className="eg-figure">{optimized ? formatCurrency(optimized.monthly_emi) : '—'} <span>a month</span></strong>
+          {baseline && optimized && (
+            <ul className="db-facts">
+              <li>Over {formatTenure(tenureMonths).toLowerCase()} you'd pay <strong>{formatCurrency(baseline.total_interest)}</strong> in interest on {formatCurrency(loanAmount)} borrowed.</li>
+              {prepayments.length > 0 && (
+                <li>With {prepayments.length === 1 ? 'the prepayment' : `${prepayments.length} prepayments`} ({formatCurrency(optimized.total_prepayments)}), interest drops to <strong>{formatCurrency(optimized.total_interest)}</strong> and the loan closes in {formatTenure(optimized.tenure_months).toLowerCase()}.</li>
+              )}
+            </ul>
+          )}
+          {interestSaved > 0 && (
+            <div className="lp-saved">
+              <strong>{formatCurrency(interestSaved)}</strong> less interest, debt-free <strong>{formatTenure(tenureSavedMonths).toLowerCase()}</strong> sooner.
             </div>
-            <input 
-              type="range" 
-              min={100000} 
-              max={20000000} 
-              step={50000}
-              value={loanAmount} 
-              onChange={e => setLoanAmount(Number(e.target.value))}
-              style={{ width: '100%', accentColor: 'var(--accent)' }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-              <span>₹1 Lakh</span>
-              <span>₹1 Crore</span>
-              <span>₹2 Crore</span>
-            </div>
-          </div>
-
-          {/* ROI Input + Slider */}
-          <div className="form-group" style={{ marginBottom: '24px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <label className="form-label" style={{ margin: 0 }}>Interest Rate (ROI)</label>
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <input 
-                  type="number" 
-                  step="0.05"
-                  className="form-input" 
-                  value={roi} 
-                  onChange={e => setRoi(Math.max(Number(e.target.value), 0))}
-                  style={{ width: '100px', padding: '6px 24px 6px 12px', fontSize: '14px', textAlign: 'right' }}
-                />
-                <span style={{ position: 'absolute', right: '10px', color: 'var(--text-muted)', fontSize: '14px' }}>%</span>
-              </div>
-            </div>
-            <input 
-              type="range" 
-              min={1.0} 
-              max={20.0} 
-              step={0.05}
-              value={roi} 
-              onChange={e => setRoi(Number(e.target.value))}
-              style={{ width: '100%', accentColor: 'var(--accent)' }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-              <span>1%</span>
-              <span>10%</span>
-              <span>20%</span>
-            </div>
-          </div>
-
-          {/* Tenure Input + Slider */}
-          <div className="form-group" style={{ marginBottom: '24px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <label className="form-label" style={{ margin: 0 }}>Loan Tenure</label>
-                <div style={{ display: 'inline-flex', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-sm)', padding: '2px' }}>
-                  <button 
-                    type="button"
-                    style={{
-                      border: 'none',
-                      background: tenureUnit === 'years' ? 'var(--accent)' : 'transparent',
-                      color: tenureUnit === 'years' ? '#fff' : 'var(--text-secondary)',
-                      fontSize: '11px',
-                      fontWeight: 600,
-                      padding: '2px 8px',
-                      borderRadius: 'var(--radius-sm)',
-                      cursor: 'pointer'
-                    }}
-                    onClick={() => {
-                      if (tenureUnit !== 'years') {
-                        setTenureUnit('years');
-                        setTenureValue(Math.max(Math.round(tenureValue / 12), 1));
-                      }
-                    }}
-                  >
-                    Years
-                  </button>
-                  <button 
-                    type="button"
-                    style={{
-                      border: 'none',
-                      background: tenureUnit === 'months' ? 'var(--accent)' : 'transparent',
-                      color: tenureUnit === 'months' ? '#fff' : 'var(--text-secondary)',
-                      fontSize: '11px',
-                      fontWeight: 600,
-                      padding: '2px 8px',
-                      borderRadius: 'var(--radius-sm)',
-                      cursor: 'pointer'
-                    }}
-                    onClick={() => {
-                      if (tenureUnit !== 'months') {
-                        setTenureUnit('months');
-                        setTenureValue(tenureValue * 12);
-                      }
-                    }}
-                  >
-                    Months
-                  </button>
-                </div>
-              </div>
-
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <input 
-                  type="number" 
-                  className="form-input" 
-                  value={tenureValue} 
-                  onChange={e => setTenureValue(Math.max(Number(e.target.value), 1))}
-                  style={{ width: '100px', padding: '6px 36px 6px 12px', fontSize: '14px', textAlign: 'right' }}
-                />
-                <span style={{ position: 'absolute', right: '10px', color: 'var(--text-muted)', fontSize: '12px', pointerEvents: 'none' }}>
-                  {tenureUnit === 'years' ? 'Yrs' : 'Mos'}
-                </span>
-              </div>
-            </div>
-            <input 
-              type="range" 
-              min={tenureUnit === 'years' ? 1 : 12} 
-              max={tenureUnit === 'years' ? 30 : 360} 
-              step={1}
-              value={tenureValue} 
-              onChange={e => setTenureValue(Number(e.target.value))}
-              style={{ width: '100%', accentColor: 'var(--accent)' }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-              <span>{tenureUnit === 'years' ? '1 Year' : '12 Months'}</span>
-              <span>{tenureUnit === 'years' ? '15 Years' : '180 Months'}</span>
-              <span>{tenureUnit === 'years' ? '30 Years' : '360 Months'}</span>
-            </div>
-          </div>
-
-          {/* Start Date */}
-          <div className="form-group" style={{ marginBottom: '0px' }}>
-            <label className="form-label">Loan Start Date (EMI Disbursal)</label>
-            <input 
-              type="date" 
-              className="form-input" 
-              value={startDate} 
-              onChange={e => setStartDate(e.target.value)}
-            />
-          </div>
-
-        </div>
-
-        {/* Right Side: Key Metrics Output */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          
-          {/* Main Results Card */}
-          <div className="glass-panel" style={{ padding: '24px', flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-            <div>
-              <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <TrendingDown size={18} style={{ color: 'var(--success)' }} />
-                Loan Payoff Summary {loading && <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 'normal', marginLeft: '8px' }}>(Calculating...)</span>}
-              </h3>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
-                <div style={{ background: 'rgba(255,255,255,0.02)', padding: '12px 16px', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-sm)' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Monthly EMI</span>
-                  <strong style={{ fontSize: '20px', color: 'var(--text-primary)', display: 'block', marginTop: '4px' }}>
-                    {optimized ? formatCurrency(optimized.monthly_emi) : '—'}
-                  </strong>
-                </div>
-                <div style={{ background: 'rgba(255,255,255,0.02)', padding: '12px 16px', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-sm)' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px' }}>New Tenure</span>
-                  <strong style={{ fontSize: '20px', color: 'var(--text-primary)', display: 'block', marginTop: '4px' }}>
-                    {optimized ? formatTenure(optimized.tenure_months) : '—'}
-                  </strong>
-                </div>
-              </div>
-
-              {/* Baseline vs Optimized breakdowns */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '13px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '10px', borderBottom: '1px solid var(--border-glass)' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Original Interest Payable</span>
-                  <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
-                    {baseline ? formatCurrency(baseline.total_interest) : '—'}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '10px', borderBottom: '1px solid var(--border-glass)' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Optimized Interest Payable</span>
-                  <span style={{ color: 'var(--accent-light)', fontWeight: 600 }}>
-                    {optimized ? formatCurrency(optimized.total_interest) : '—'}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '10px', borderBottom: '1px solid var(--border-glass)' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Total Lump-Sum Prepayments</span>
-                  <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
-                    {optimized ? formatCurrency(optimized.total_prepayments) : '—'}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Total Payment (Principal + Interest)</span>
-                  <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
-                    {optimized ? formatCurrency(optimized.total_payment) : '—'}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Savings Callout */}
-            {interestSaved > 0 && (
-              <div style={{ marginTop: '24px', padding: '16px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: 'var(--radius-sm)', display: 'flex', gap: '16px', alignItems: 'center' }}>
-                <div style={{ background: 'rgba(16, 185, 129, 0.1)', padding: '10px', borderRadius: '50px', color: 'var(--success)' }}>
-                  <TrendingDown size={20} />
-                </div>
-                <div>
-                  <span style={{ fontSize: '11px', color: 'var(--success)', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Total Savings Accrued</span>
-                  <strong style={{ fontSize: '16px', color: '#fff', display: 'block', marginTop: '2px' }}>
-                    Saved {formatCurrency(interestSaved)} &amp; debt-free {formatTenure(tenureSavedMonths)} early!
-                  </strong>
-                </div>
-              </div>
-            )}
-
-          </div>
-
-        </div>
-
+          )}
+        </section>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: '24px', marginBottom: '24px' }}>
-        
-        {/* Prepayments Scheduler Panel */}
-        <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', height: 'fit-content' }}>
-          <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Calendar size={18} style={{ color: 'var(--accent-light)' }} />
-            Schedule Prepayments
-          </h3>
-          <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '20px', lineHeight: '1.4' }}>
-            Simulate a lump-sum principal reduction at any date. The pro-rata daily interest is adjusted instantly.
-          </p>
-
-          {/* Add Prepayment Form */}
-          <form onSubmit={handleAddPrepayment} style={{ display: 'flex', flexDirection: 'column', gap: '14px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', padding: '16px', borderRadius: 'var(--radius-sm)', marginBottom: '20px' }}>
-            <div className="form-group" style={{ margin: 0 }}>
-              <label className="form-label" style={{ fontSize: '11px' }}>Prepayment Date</label>
-              <input 
-                type="date" 
-                className="form-input"
-                style={{ padding: '8px 12px', fontSize: '13px' }}
-                value={newPrepayDate}
-                onChange={e => setNewPrepayDate(e.target.value)}
-                required
-              />
-            </div>
-            <div className="form-group" style={{ margin: 0 }}>
-              <label className="form-label" style={{ fontSize: '11px' }}>Amount (Principal Reduction)</label>
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <span style={{ position: 'absolute', left: '10px', color: 'var(--text-muted)', fontSize: '13px' }}>₹</span>
-                <input 
-                  type="number" 
-                  className="form-input" 
-                  style={{ padding: '8px 12px 8px 24px', fontSize: '13px', width: '100%' }}
-                  value={newPrepayAmount}
-                  onChange={e => setNewPrepayAmount(Math.max(Number(e.target.value), 0))}
-                  required
-                />
-              </div>
-            </div>
-            {editingIdx !== null ? (
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button type="submit" className="btn btn-primary" style={{ flex: 1, padding: '8px', fontSize: '13px' }}>
-                  Update Payment
-                </button>
-                <button type="button" className="btn btn-secondary" style={{ flex: 1, padding: '8px', fontSize: '13px' }} onClick={handleCancelEdit}>
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <button type="submit" className="btn btn-primary" style={{ padding: '8px', fontSize: '13px', width: '100%' }}>
-                <Plus size={14} /> Add Payment
-              </button>
-            )}
-          </form>
-
-          {/* Active Prepayments List */}
-          <div>
-            <h4 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '10px' }}>Scheduled Payments ({prepayments.length})</h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', overflowY: 'auto' }}>
-              {prepayments.length > 0 ? (
-                prepayments.map((p, idx) => (
-                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-sm)', fontSize: '13px' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <strong style={{ color: 'var(--text-primary)' }}>{formatCurrency(p.amount)}</strong>
-                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{formatDate(p.date)}</span>
-                    </div>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <button 
-                        type="button"
-                        className="btn btn-secondary" 
-                        style={{ padding: '6px', color: 'var(--accent-light)' }} 
-                        onClick={() => handleEditPrepayment(idx)}
-                        title="Edit payment"
-                      >
-                        <Edit2 size={13} />
-                      </button>
-                      <button 
-                        type="button"
-                        className="btn btn-secondary" 
-                        style={{ padding: '6px', color: 'var(--danger)' }} 
-                        onClick={() => handleRemovePrepayment(idx)}
-                        title="Delete payment"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div style={{ border: '1px dashed var(--border-glass)', borderRadius: 'var(--radius-sm)', padding: '16px', textAlign: 'center', fontSize: '12px', color: 'var(--text-muted)' }}>
-                  No prepayments scheduled yet.
-                </div>
-              )}
-            </div>
+      <Group title="Prepayments" description="Lump sums paid off the principal on a date. They shorten the loan; the EMI stays the same.">
+        {prepayments.map((p, idx) => (
+          <Row key={`${p.date}-${idx}`} label={formatCurrency(p.amount)} description={`on ${formatDate(p.date)}`}>
+            <button type="button" className="settings-link" onClick={() => handleEditPrepayment(idx)}>Edit</button>
+            <button type="button" className="settings-link settings-link--danger" onClick={() => handleRemovePrepayment(idx)}>Remove</button>
+          </Row>
+        ))}
+        <form onSubmit={handleAddPrepayment} className="settings-row lp-prepay-add">
+          <div className="settings-row-text"><div className="settings-row-label">{editingIdx !== null ? 'Change this prepayment' : 'Add a prepayment'}</div></div>
+          <div className="settings-row-control">
+            <input type="date" className="form-control" aria-label="Prepayment date" value={newPrepayDate} onChange={(e) => setNewPrepayDate(e.target.value)} required />
+            <AmountInput label="Prepayment amount" prefix="₹" width={110} value={newPrepayAmount} onChange={setNewPrepayAmount} />
+            <button type="submit" className="settings-btn settings-btn--primary">{editingIdx !== null ? 'Update' : 'Add'}</button>
+            {editingIdx !== null && <button type="button" className="settings-link" onClick={handleCancelEdit}>Cancel</button>}
           </div>
+        </form>
+      </Group>
 
+      <section className="glass-panel db-card">
+        <div className="db-card-head">
+          <h3>Repayment schedule</h3>
+          {optimized && (
+            <span className="db-head-actions">
+              <button type="button" className="settings-link" onClick={handleExportCSV}>CSV</button>
+              <button type="button" className="settings-link" onClick={handleExportExcel}>Excel</button>
+              <button type="button" className="settings-link" onClick={handleExportPDF}>Print</button>
+            </span>
+          )}
         </div>
-
-        {/* Amortization Schedule Table */}
-        <div className="glass-panel" style={{ padding: '24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <List size={18} style={{ color: 'var(--accent-light)' }} />
-              Amortization Schedule
-            </h3>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              {optimized && (
-                <>
-                  <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={handleExportCSV}>
-                    Export CSV
-                  </button>
-                  <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={handleExportExcel}>
-                    Export Excel
-                  </button>
-                  <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={handleExportPDF}>
-                    Print PDF
-                  </button>
-                </>
-              )}
-              {optimized && optimized.schedule.length > 0 && (
-                <button 
-                  className="btn btn-secondary" 
-                  style={{ padding: '4px 10px', fontSize: '12px' }}
-                  onClick={() => setShowFullSchedule(!showFullSchedule)}
-                >
-                  {showFullSchedule ? (
-                    <>Show Less <ChevronUp size={12} /></>
-                  ) : (
-                    <>Show All {optimized.schedule.length} Months <ChevronDown size={12} /></>
-                  )}
-                </button>
-              )}
-            </div>
-          </div>
-
+        {rows.length === 0 ? <p className="cc-note">Enter a loan above to see each month's payment.</p> : (
           <div style={{ overflowX: 'auto' }}>
-            <table className="custom-table">
-              <thead>
-                <tr>
-                  <th style={{ padding: '10px 12px', fontSize: '11px' }}>Month</th>
-                  <th style={{ padding: '10px 12px', fontSize: '11px' }}>Date</th>
-                  <th style={{ padding: '10px 12px', fontSize: '11px', textAlign: 'right' }}>Beginning Balance</th>
-                  <th style={{ padding: '10px 12px', fontSize: '11px', textAlign: 'right' }}>EMI Paid</th>
-                  <th style={{ padding: '10px 12px', fontSize: '11px', textAlign: 'right' }}>Interest</th>
-                  <th style={{ padding: '10px 12px', fontSize: '11px', textAlign: 'right' }}>Principal</th>
-                  <th style={{ padding: '10px 12px', fontSize: '11px', textAlign: 'right', color: 'var(--success)' }}>Prepayments</th>
-                  <th style={{ padding: '10px 12px', fontSize: '11px', textAlign: 'right' }}>Ending Balance</th>
-                </tr>
-              </thead>
+            <table className="cf-compare lp-schedule">
+              <thead><tr><th>#</th><th>Date</th><th>Owed at start</th><th>Interest</th><th>Principal</th><th>Prepaid</th><th>Owed after</th></tr></thead>
               <tbody>
-                {optimized && optimized.schedule.length > 0 ? (
-                  optimized.schedule
-                    .slice(0, showFullSchedule ? optimized.schedule.length : 12)
-                    .map((row) => (
-                      <tr key={row.month}>
-                        <td style={{ padding: '10px 12px', fontSize: '12px' }}>{row.month}</td>
-                        <td style={{ padding: '10px 12px', fontSize: '12px', whiteSpace: 'nowrap' }}>{formatDate(row.date)}</td>
-                        <td style={{ padding: '10px 12px', fontSize: '12px', textAlign: 'right', fontFamily: 'monospace' }}>
-                          {formatCurrency(row.beginning_balance)}
-                        </td>
-                        <td style={{ padding: '10px 12px', fontSize: '12px', textAlign: 'right', fontFamily: 'monospace' }}>
-                          {formatCurrency(row.emi)}
-                        </td>
-                        <td style={{ padding: '10px 12px', fontSize: '12px', textAlign: 'right', fontFamily: 'monospace', color: 'rgba(239, 68, 68, 0.7)' }}>
-                          {formatCurrency(row.interest)}
-                        </td>
-                        <td style={{ padding: '10px 12px', fontSize: '12px', textAlign: 'right', fontFamily: 'monospace', color: 'rgba(139, 92, 246, 0.8)' }}>
-                          {formatCurrency(row.principal)}
-                        </td>
-                        <td style={{ padding: '10px 12px', fontSize: '12px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--success)', fontWeight: row.prepayments > 0 ? '600' : 'normal' }}>
-                          {row.prepayments > 0 ? formatCurrency(row.prepayments) : '—'}
-                        </td>
-                        <td style={{ padding: '10px 12px', fontSize: '12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: '500', color: '#fff' }}>
-                          {formatCurrency(row.ending_balance)}
-                        </td>
-                      </tr>
-                    ))
-                ) : (
-                  <tr>
-                    <td colSpan={8} style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>
-                      No calculation schedule generated.
-                    </td>
+                {shown.map((r) => (
+                  <tr key={r.month} className={r.prepayments > 0 ? 'lp-prepaid' : undefined}>
+                    <th scope="row">{r.month}</th>
+                    <td>{formatDate(r.date)}</td>
+                    <td>{formatCurrency(r.beginning_balance)}</td>
+                    <td>{formatCurrency(r.interest)}</td>
+                    <td>{formatCurrency(r.principal)}</td>
+                    <td>{r.prepayments > 0 ? formatCurrency(r.prepayments) : '—'}</td>
+                    <td>{formatCurrency(r.ending_balance)}</td>
                   </tr>
-                )}
-                {!showFullSchedule && optimized && optimized.schedule.length > 12 && (
-                  <tr>
-                    <td colSpan={8} style={{ textAlign: 'center', padding: '12px', color: 'var(--text-muted)', fontSize: '12px', background: 'rgba(255,255,255,0.01)' }}>
-                      Showing first 12 months. Click <strong>"Show All"</strong> above to inspect the entire payoff timeline.
-                    </td>
-                  </tr>
-                )}
+                ))}
               </tbody>
             </table>
           </div>
-
-        </div>
-
-      </div>
-
+        )}
+        {rows.length > 12 && (
+          <button type="button" className="settings-link" style={{ alignSelf: 'flex-start', paddingLeft: 0 }} onClick={() => setShowFullSchedule((v) => !v)}>
+            {showFullSchedule ? 'Show the first year only' : `Show all ${rows.length} months`}
+          </button>
+        )}
+      </section>
     </div>
   );
 };
