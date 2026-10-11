@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { formatDate } from '../format';
 import { 
   Plus, Edit2, Trash2, ArrowUpRight, ArrowDownRight, 
   ArrowRightLeft, Save, Info, RefreshCw, X
@@ -429,7 +430,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1 className="page-title">Transactions Ledger</h1>
-          <p className="page-subtitle">Track historical flows. All transaction postings automatically trigger double-entry adjustments.</p>
+          <p className="page-subtitle">Every payment, transfer and purchase. Account balances are worked out from these entries.</p>
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
           <button className="btn btn-secondary" onClick={fetchTransactions} title="Refresh list">
@@ -568,7 +569,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
             <tbody>
               {paginatedTransactions.map(tx => (
                 <tr key={tx.id} style={{ borderBottom: '1px solid var(--border-glass)' }}>
-                  <td style={{ padding: '14px 20px', fontSize: '13px' }}>{tx.transaction_date}</td>
+                  <td style={{ padding: '14px 20px', fontSize: '13px', whiteSpace: 'nowrap' }}>{formatDate(tx.transaction_date)}</td>
                   <td style={{ padding: '14px 20px', fontSize: '13px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       {getTypeIcon(tx.type)}

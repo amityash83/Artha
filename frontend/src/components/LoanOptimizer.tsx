@@ -170,8 +170,8 @@ export const LoanOptimizer: React.FC<LoanOptimizerProps> = ({ data }) => {
   return (
     <div style={{ paddingBottom: '40px' }}>
       <div className="page-header">
-        <h1 className="page-title">Multi-Loan Payoff Optimizer</h1>
-        <p className="page-subtitle">Simulate and compare the Snowball vs. Avalanche strategies to close all active loans optimally.</p>
+        <h1 className="page-title">Loan Optimizer</h1>
+        <p className="page-subtitle">Compare paying the smallest loan off first (snowball) with the highest-interest loan first (avalanche).</p>
       </div>
 
       {activeLoans.length === 0 ? (

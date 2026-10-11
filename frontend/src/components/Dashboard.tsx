@@ -267,8 +267,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
     <div>
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '12px' }}>
         <div>
-          <h1 className="page-title">Artha</h1>
-          <p className="page-subtitle">Dashboard &amp; Actionable Decision Support</p>
+          <h1 className="page-title">Dashboard</h1>
+          <p className="page-subtitle">Your net worth, your safety margins, and what to do next.</p>
         </div>
         {people.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -305,7 +305,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
                 </div>
               )}
             </div>
-            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 700, margin: '12px 0 6px 0', background: 'var(--accent-gradient)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 700, margin: '12px 0 6px 0', color: 'var(--text-primary)' }}>
               {formatCurrency(summary.net_worth)}
             </h2>
           </div>

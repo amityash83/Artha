@@ -32,10 +32,15 @@ export const NAV_GROUPS: NavItem[][] = [
     { id: 'taxation', label: 'Taxation', icon: <Percent size={16} />, keywords: 'income tax planner regime nps payslip' },
     { id: 'ask-artha', label: 'Ask Artha', icon: <Sparkles size={16} style={{ color: 'var(--accent-light)' }} />, keywords: 'ai assistant' },
     { id: 'reports', label: 'Reports', icon: <FileText size={16} /> },
+  ],
+  [
     { id: 'settings', label: 'Settings', icon: <Sliders size={16} />, keywords: 'preferences options backup database' },
     { id: 'help', label: 'Help', icon: <HelpCircle size={16} /> },
   ],
 ];
+
+/** Sidebar group headings, one per NAV_GROUPS entry. */
+export const NAV_GROUP_LABELS = ['Day to day', 'What you own & owe', 'Planning', 'App'];
 
 export const NAV_ITEMS = NAV_GROUPS.flat();
 

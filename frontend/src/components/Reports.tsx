@@ -123,13 +123,13 @@ export const Reports: React.FC<ReportsProps> = ({ data }) => {
     <div style={{ paddingBottom: '40px' }}>
       <div className="page-header">
         <h1 className="page-title">Reports</h1>
-        <p className="page-subtitle">Export your plans and asset portfolios into standard formats for backup, offline storage, or further processing.</p>
+        <p className="page-subtitle">Download your data as a planning report or spreadsheets.</p>
       </div>
 
       <div className="glass-panel" style={{ padding: '24px', maxWidth: '480px' }}>
         <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <FileText size={16} style={{ color: 'var(--accent-light)' }} />
-          Report Export Center
+          Downloads
         </h3>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>

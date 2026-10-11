@@ -270,8 +270,8 @@ export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefr
     <div style={{ paddingBottom: '40px' }}>
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <h1 className="page-title">Income &amp; Cash Flow Planning</h1>
-          <p className="page-subtitle">Analyze monthly income streams, allocations, savings ratios, and sandbox projections.</p>
+          <h1 className="page-title">Cash Flow Planning</h1>
+          <p className="page-subtitle">What actually came in and went out each month, your savings rate, and what-if changes.</p>
         </div>
         <button className="btn btn-primary" onClick={() => {
           setEditingId(null);

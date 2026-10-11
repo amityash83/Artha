@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { formatDate } from '../format';
 import { Plus, Trash2, AlertTriangle } from 'lucide-react';
 import { InitData, TaxProfile, TaxDeduction, CapitalGainsRealization, TaxEstimate } from '../types';
 import { API_BASE_URL } from '../config';
@@ -208,7 +209,7 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <h1 className="page-title">Taxation</h1>
-          <p className="page-subtitle">Salary tax planner, old vs new regime comparison, deductions, capital gains, and the tax rules behind them.</p>
+          <p className="page-subtitle">Plan your income tax: old vs new regime, deductions, NPS, advance tax and capital gains.</p>
         </div>
         {profileTab && people.length > 0 && <div style={{ display: 'flex', gap: '8px' }}>
           <select
@@ -469,7 +470,7 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
                       {realizations.map((r) => (
                         <tr key={r.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
                           <td style={{ padding: '8px', color: '#e2e8f0' }}>{r.asset_name || r.asset_id}</td>
-                          <td style={{ padding: '8px', color: 'var(--text-secondary)' }}>{r.sale_date}</td>
+                          <td style={{ padding: '8px', color: 'var(--text-secondary)' }}>{formatDate(r.sale_date)}</td>
                           <td style={{ padding: '8px', textAlign: 'right', color: '#e2e8f0' }}>{formatCurrency(r.sale_value)}</td>
                           <td style={{ padding: '8px', textAlign: 'right', color: '#e2e8f0' }}>{formatCurrency(r.cost_basis)}</td>
                           <td style={{ padding: '8px', textAlign: 'right', color: r.gain_amount >= 0 ? '#10b981' : '#ef4444' }}>{formatCurrency(r.gain_amount)}</td>

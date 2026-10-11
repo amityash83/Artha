@@ -182,8 +182,8 @@ export const Simulations: React.FC<SimulationsProps> = ({ data, initialParams })
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">Simulations Sandbox</h1>
-        <p className="page-subtitle">Model strategic "what-if" decisions and review recommendations</p>
+        <h1 className="page-title">Simulations</h1>
+        <p className="page-subtitle">Try a big decision, like closing a loan or a large purchase, and see its effect before you make it.</p>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 2fr', gap: '32px' }}>

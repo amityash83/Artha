@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { formatDate } from '../format';
 import { 
   Calculator, Calendar, Plus, Trash2, Edit2,
   TrendingDown, List, ChevronDown, ChevronUp
@@ -451,8 +452,8 @@ export const EmiCalculator: React.FC<EmiCalculatorProps> = ({ showToast }) => {
   return (
     <div style={{ paddingBottom: '40px' }}>
       <div className="page-header">
-        <h1 className="page-title">Advanced EMI &amp; Prepayment Calculator</h1>
-        <p className="page-subtitle">Simulate mid-month principal prepayments and calculate interest savings dynamically.</p>
+        <h1 className="page-title">EMI Tool</h1>
+        <p className="page-subtitle">Work out a loan's EMI, and how much interest prepayments save.</p>
       </div>
 
       {/* Profiles Selection & Saving Bar */}
@@ -820,7 +821,7 @@ export const EmiCalculator: React.FC<EmiCalculatorProps> = ({ showToast }) => {
                   <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-sm)', fontSize: '13px' }}>
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
                       <strong style={{ color: 'var(--text-primary)' }}>{formatCurrency(p.amount)}</strong>
-                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{p.date}</span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{formatDate(p.date)}</span>
                     </div>
                     <div style={{ display: 'flex', gap: '6px' }}>
                       <button 
@@ -912,7 +913,7 @@ export const EmiCalculator: React.FC<EmiCalculatorProps> = ({ showToast }) => {
                     .map((row) => (
                       <tr key={row.month}>
                         <td style={{ padding: '10px 12px', fontSize: '12px' }}>{row.month}</td>
-                        <td style={{ padding: '10px 12px', fontSize: '12px' }}>{row.date}</td>
+                        <td style={{ padding: '10px 12px', fontSize: '12px', whiteSpace: 'nowrap' }}>{formatDate(row.date)}</td>
                         <td style={{ padding: '10px 12px', fontSize: '12px', textAlign: 'right', fontFamily: 'monospace' }}>
                           {formatCurrency(row.beginning_balance)}
                         </td>

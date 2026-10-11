@@ -22,7 +22,7 @@ import { ArthaMark } from './components/branding/ArthaMark';
 import { useBranding } from './components/branding/useBranding';
 import { API_BASE_URL } from './config';
 import { TopBar, CommandPalette, NavigateOptions } from './components/TopBar';
-import { AppCommand, NAV_GROUPS, NEW_ITEMS } from './navigation';
+import { AppCommand, NAV_GROUPS, NAV_GROUP_LABELS, NEW_ITEMS } from './navigation';
 import { isDesktop, onMenuCommand, selectDatabaseFile } from './platform';
 
 const App: React.FC = () => {
@@ -250,7 +250,7 @@ const App: React.FC = () => {
           <ul className="sidebar-menu">
             {NAV_GROUPS.map((group, gi) => (
               <React.Fragment key={gi}>
-                {gi > 0 && <li aria-hidden style={{ height: '1px', background: 'var(--border-glass)', margin: '12px 8px', listStyle: 'none' }} />}
+                <li className="sidebar-heading" aria-hidden>{NAV_GROUP_LABELS[gi]}</li>
                 {group.map((item) => (
                   <li key={item.id}>
                     <div
@@ -270,7 +270,7 @@ const App: React.FC = () => {
           <div style={{ padding: '8px', borderTop: '1px solid var(--border-glass)', marginTop: 'auto' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--text-muted)' }}>
                <Database size={10} />
-               <span>v2.0.0 (Metadata Driven OS)</span>
+               <span>Artha v2.0.0</span>
             </div>
           </div>
         </nav>

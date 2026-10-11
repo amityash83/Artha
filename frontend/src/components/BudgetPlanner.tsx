@@ -131,8 +131,8 @@ export const BudgetPlanner: React.FC<BudgetPlannerProps> = ({ data, onRefresh, s
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <h1 className="page-title">Interactive Budget Planner</h1>
-          <p className="page-subtitle">Configure spending guidelines and monitor actual debit postings in real-time</p>
+          <h1 className="page-title">Budget Planner</h1>
+          <p className="page-subtitle">A monthly limit for each spending category, against what you've actually spent.</p>
         </div>
         <div>
           <select 

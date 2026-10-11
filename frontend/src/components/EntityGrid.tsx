@@ -29,6 +29,16 @@ interface Column {
   suffix?: string;
 }
 
+// Page wording for each kind of record this grid shows.
+const PAGE_TEXT: Record<EntityGridProps['entityType'], { title: string; intro: string; add: string; empty: string }> = {
+  accounts: { title: 'Accounts', intro: 'Bank accounts and wallets. Balances are worked out from your transactions.', add: 'Add account', empty: 'No accounts yet. Add your bank accounts to start tracking balances.' },
+  assets: { title: 'Assets', intro: 'What you own: investments, property, insurance, gold and more.', add: 'Add asset', empty: 'No assets yet. Add investments, property or insurance policies.' },
+  liabilities: { title: 'Liabilities', intro: 'What you owe: home, car and personal loans, and credit cards.', add: 'Add loan', empty: 'No loans yet.' },
+  income: { title: 'Income', intro: 'Regular income.', add: 'Add income', empty: 'No income entries yet.' },
+  expenses: { title: 'Expenses', intro: 'Regular expenses.', add: 'Add expense', empty: 'No expense entries yet.' },
+  goals: { title: 'Goals', intro: "What you're saving for, and how far along you are.", add: 'Add goal', empty: 'No goals yet. Add one, for example an emergency fund or a child\'s education.' },
+};
+
 const COMMON_COLUMNS: Record<string, Column[]> = {
   accounts: [
     { label: 'Name', key: 'name' },
@@ -422,13 +432,9 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
 
       {/* Upper Control Bar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <h2 style={{ fontSize: '20px', fontWeight: 600, color: '#f8fafc', textTransform: 'capitalize' }}>
-            {entityType}
-          </h2>
-          <span style={{ fontSize: '12px', background: 'rgba(139, 92, 246, 0.15)', color: '#a78bfa', padding: '4px 10px', borderRadius: '20px', fontWeight: 500 }}>
-            {filteredEntities.length} Total
-          </span>
+        <div>
+          <h1 className="page-title">{PAGE_TEXT[entityType].title}</h1>
+          <p className="page-subtitle">{PAGE_TEXT[entityType].intro}</p>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -453,7 +459,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
               setIsAdding(true);
             }}
           >
-            <Plus size={16} /> Add Entity
+            <Plus size={16} /> {PAGE_TEXT[entityType].add}
           </button>
         </div>
       </div>
@@ -661,7 +667,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
             {sortedEntities.length === 0 ? (
               <tr>
                 <td colSpan={columns.length + 1} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
-                  No entities found matching active filters.
+                  {entities.length === 0 ? PAGE_TEXT[entityType].empty : 'Nothing matches your search or the selected category.'}
                 </td>
               </tr>
             ) : (

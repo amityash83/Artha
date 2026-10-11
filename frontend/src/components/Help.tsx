@@ -488,8 +488,8 @@ export const Help: React.FC = () => {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">Help &amp; Tutorials</h1>
-        <p className="page-subtitle">How to use Artha — adding and correcting data, and how each screen actually works under the hood.</p>
+        <h1 className="page-title">Help</h1>
+        <p className="page-subtitle">How to use Artha: adding and correcting data, and how each screen works.</p>
       </div>
 
       <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start' }}>

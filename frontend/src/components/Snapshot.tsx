@@ -107,7 +107,7 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh, showToast }
     <div style={{ maxWidth: '800px', margin: '0 auto', fontFamily: 'Inter, sans-serif' }}>
       <div className="page-header">
         <h1 className="page-title">Monthly Snapshot</h1>
-        <p className="page-subtitle">Freeze monthly balances to archive historical progress</p>
+        <p className="page-subtitle">Record this month's balances so the Dashboard can show your progress over time.</p>
       </div>
 
       <div className="glass-panel" style={{ padding: '32px' }}>

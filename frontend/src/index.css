@@ -133,7 +133,7 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 36px;
+  margin-bottom: 18px;
   padding-left: 8px;
 }
 
@@ -151,7 +151,7 @@ body {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 1px;
   flex-grow: 1;
   /* The menu outgrew short windows (19+ items): scroll the list itself so items
      below the fold stay reachable, keeping the logo and version footer pinned.
@@ -163,13 +163,13 @@ body {
 .sidebar-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
+  gap: 11px;
+  padding: 7px 12px;
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   text-decoration: none;
   font-weight: 500;
-  font-size: 14px;
+  font-size: 13.5px;
   cursor: pointer;
   transition: var(--transition-fast);
 }
@@ -180,11 +180,21 @@ body {
 }
 
 .sidebar-item.active {
-  background: var(--accent-gradient);
+  background: rgba(139, 92, 246, 0.16);
   color: var(--text-primary);
   font-weight: 600;
-  box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);
 }
+.sidebar-item.active svg { color: var(--accent-light); }
+
+.sidebar-heading {
+  padding: 14px 12px 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.sidebar-heading:first-child { padding-top: 0; }
 
 /* Main Content Area */
 .main-content {
@@ -364,14 +374,12 @@ h1, h2, h3, h4, h5 {
 }
 
 .btn-primary {
-  background: var(--accent-gradient);
+  background: var(--accent);
   color: #fff;
-  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.2);
 }
 
 .btn-primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(139, 92, 246, 0.35);
+  background: var(--accent-dark);
 }
 
 .btn-secondary {

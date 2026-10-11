@@ -65,7 +65,7 @@ export const FinancialCalendar: React.FC = () => {
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1 className="page-title">Financial Calendar</h1>
-          <p className="page-subtitle">Chronological ledger of cash outlays (EMIs, SIPs, premium renewals, card dues and advance tax from your Tax Planner plans) for the next 12 months.</p>
+          <p className="page-subtitle">Payments coming up in the next 12 months: EMIs, SIPs, premiums, card bills and advance tax.</p>
         </div>
         <button 
           onClick={fetchEvents}
@@ -74,7 +74,7 @@ export const FinancialCalendar: React.FC = () => {
           disabled={loading}
         >
           <RefreshCw size={14} className={loading ? 'spin-anim' : ''} />
-          Reload Calendar
+          Refresh
         </button>
       </div>
 

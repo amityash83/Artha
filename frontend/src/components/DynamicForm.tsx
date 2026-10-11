@@ -368,35 +368,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
   return (
     <form onSubmit={handleSubmit} className="glass-panel" style={{ padding: '24px', borderRadius: '12px', border: '1px solid var(--border-glass)' }}>
       <h3 style={{ fontSize: '18px', fontWeight: 600, color: '#f8fafc', marginBottom: '20px' }}>
-        {initialData ? 'Modify' : 'Add New'} {currentCategory ? currentCategory.name : getLabel(entityType)}
+        {initialData ? 'Edit' : 'Add'} {currentCategory ? currentCategory.name : getLabel(entityType)}
       </h3>
 
-      {currentCategory && currentCategory.fields_definition && (
-        <div style={{
-          background: 'rgba(167, 139, 250, 0.05)',
-          border: '1px solid rgba(167, 139, 250, 0.15)',
-          borderRadius: '8px',
-          padding: '12px',
-          marginBottom: '20px',
-          fontSize: '11px',
-          color: 'var(--text-muted)'
-        }}>
-          <strong>Category Specifications:</strong> Opens additional custom fields: {' '}
-          <span style={{ color: 'var(--accent-light)' }}>
-            {(() => {
-              try {
-                const parsed = typeof currentCategory.fields_definition === 'string'
-                  ? JSON.parse(currentCategory.fields_definition)
-                  : currentCategory.fields_definition;
-                if (Array.isArray(parsed)) {
-                  return parsed.map((f: any) => `${f.label || f.name} (${f.type})`).join(', ');
-                }
-              } catch(e) {}
-              return 'None';
-            })()}
-          </span>
-        </div>
-      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
         {Object.keys(fields).map((k) => {
@@ -688,7 +662,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           Cancel
         </button>
         <button type="submit" className="btn btn-primary">
-          Save Entity
+          Save
         </button>
       </div>
     </form>
