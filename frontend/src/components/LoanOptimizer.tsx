@@ -177,8 +177,13 @@ export const LoanOptimizer: React.FC<LoanOptimizerProps> = ({ data }) => {
       {activeLoans.length === 0 ? (
         <div className="glass-panel" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
           <ShieldCheck size={48} style={{ color: 'var(--success)', margin: '0 auto 16px auto', opacity: 0.5 }} />
-          <h3>No Outstanding Loans</h3>
-          <p>Your portfolio is currently debt-free! The optimizer is active when you have active loans.</p>
+          <h3>No loans to plan</h3>
+          {(() => {
+            const cardDebt = data.liabilities.filter((l: any) => l.category_name === 'Credit Card').reduce((t: number, l: any) => t + (l.outstanding || 0), 0);
+            return cardDebt > 0
+              ? <p>You have no EMI loans. Credit card balances ({new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(cardDebt)}) aren't planned here: paying them in full each month avoids interest.</p>
+              : <p>You have no outstanding loans. Add a loan under Liabilities to compare ways of paying it off.</p>;
+          })()}
         </div>
       ) : (
         <div>

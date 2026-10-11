@@ -230,3 +230,21 @@ def test_emi_profiles_save_update_list_delete(test_db_path):
         assert p["roi"] == 8.0 and p["prepayments"][0]["amount"] == 200000
         assert client.delete(f"/api/settings/emi-profiles/{p['id']}").status_code == 200
         assert client.get("/api/settings/emi-profiles").json() == []
+
+
+def test_messages_use_indian_digit_grouping(conn):
+    liquid(conn, 5 * L)
+    (r,) = by_category(generate_recommendations(conn), "Emergency Fund")
+    assert "₹15,00,000" in r["message"] and "₹10,00,000" in r["message"] and "1,500,000" not in r["message"]
+
+
+def test_calendar_lists_each_card_once(conn):
+    from backend.main import app
+    lid = card(conn, "Infinia", annual_fee=12500, statement_date=18, due_date=4, statement_balance=50000)
+    conn.execute("UPDATE liabilities SET outstanding = 730000 WHERE id = ?", (lid,))
+    conn.commit()
+    with TestClient(app) as client:
+        events = [e for e in client.get("/api/calendar").json() if e["type"] == "Credit Card"]
+    assert [e["amount"] for e in events] == [50000, 680000]  # billed, then the next bill (estimate)
+    assert events[0]["title"].endswith("bill due") and "estimate" in events[1]["title"]
+    assert events[0]["date"] <= events[1]["date"]  # equal when the next statement comes before the next due date

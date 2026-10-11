@@ -1,5 +1,7 @@
 from datetime import datetime, date
 
+from backend.formatting import inr
+
 def get_rules(cursor):
     cursor.execute("SELECT rule_key, value, is_enabled FROM financial_rules")
     return {row["rule_key"]: {"value": row["value"], "enabled": bool(row["is_enabled"])} for row in cursor.fetchall()}
@@ -81,7 +83,7 @@ def generate_recommendations(conn) -> list:
         recs.append({
             "category": "Emergency Fund",
             "title": "Emergency Fund Deficit",
-            "message": f"Emergency Fund is below rule limit of ₹{min_emergency_target:,.0f} by ₹{gap:,.0f}. Stop equity investing and redirect savings here.",
+            "message": f"Emergency Fund is below rule limit of {inr(min_emergency_target)} by {inr(gap)}. Stop equity investing and redirect savings here.",
             "status": "danger",
             "action_type": "save",
             "suggested_amount": gap,
@@ -92,7 +94,7 @@ def generate_recommendations(conn) -> list:
         recs.append({
             "category": "Emergency Fund",
             "title": "Emergency Fund Building",
-            "message": f"Emergency Fund is currently ₹{curr_emergency:,.0f}. You are ₹{gap:,.0f} away from your target of ₹{targ_emergency:,.0f}.",
+            "message": f"Emergency Fund is currently {inr(curr_emergency)}. You are {inr(gap)} away from your target of {inr(targ_emergency)}.",
             "status": "warning",
             "action_type": "save",
             "suggested_amount": gap,
@@ -102,7 +104,7 @@ def generate_recommendations(conn) -> list:
         recs.append({
             "category": "Emergency Fund",
             "title": "Emergency Fund Healthy",
-            "message": f"Emergency Fund is fully funded at ₹{curr_emergency:,.0f}.",
+            "message": f"Emergency Fund is fully funded at {inr(curr_emergency)}.",
             "status": "success",
             "action_type": "info",
             "suggested_amount": 0.0,
@@ -123,7 +125,7 @@ def generate_recommendations(conn) -> list:
         recs.append({
             "category": "Insurance",
             "title": "Insurance Reserve Low",
-            "message": f"Insurance reserve is at ₹{curr_ins:,.0f}, below your rule target of ₹{ins_reserve_target:,.0f}. Top up by ₹{gap:,.0f}.",
+            "message": f"Insurance reserve is at {inr(curr_ins)}, below your rule target of {inr(ins_reserve_target)}. Top up by {inr(gap)}.",
             "status": "danger",
             "action_type": "save",
             "suggested_amount": gap,
@@ -150,7 +152,7 @@ def generate_recommendations(conn) -> list:
                 recs.append({
                     "category": "Loans",
                     "title": f"Prepayment Recommended: {loan['name']}",
-                    "message": f"Your {loan['name']} loan (Lender: {loan['lender'] or 'N/A'}) has an ROI of {loan['roi']}%. Since you have surplus liquidity of ₹{free_liquid:,.0f}, prepaying ₹{prepay_val:,.0f} is highly recommended.",
+                    "message": f"Your {loan['name']} loan (Lender: {loan['lender'] or 'N/A'}) has an ROI of {loan['roi']}%. Since you have surplus liquidity of {inr(free_liquid)}, prepaying {inr(prepay_val)} is highly recommended.",
                     "status": "warning",
                     "action_type": "prepay",
                     "suggested_amount": prepay_val,
@@ -174,7 +176,7 @@ def generate_recommendations(conn) -> list:
             recs.append({
                 "category": "Liquidity",
                 "title": "Build Post-Debt Liquidity",
-                "message": f"You are debt-free! The rule recommends maintaining ₹{debt_free_liquidity_target:,.0f} liquidity. You need ₹{gap:,.0f} more.",
+                "message": f"You are debt-free! The rule recommends maintaining {inr(debt_free_liquidity_target)} liquidity. You need {inr(gap)} more.",
                 "status": "warning",
                 "action_type": "save",
                 "suggested_amount": gap,
@@ -184,7 +186,7 @@ def generate_recommendations(conn) -> list:
             recs.append({
                 "category": "Liquidity",
                 "title": "Optimal Liquidity Achieved",
-                "message": f"Debt-free and holding ₹{total_liquid:,.0f} in liquid funds. You are in a premium financial position.",
+                "message": f"Debt-free and holding {inr(total_liquid)} in liquid funds. You are in a premium financial position.",
                 "status": "success",
                 "action_type": "info",
                 "suggested_amount": 0.0,
@@ -199,7 +201,7 @@ def generate_recommendations(conn) -> list:
             recs.append({
                 "category": "Villa Fund",
                 "title": "Villa Fund Shortfall",
-                "message": f"Villa fund is short by ₹{gap:,.0f}. Expected completion: {villa_goal['expected_completion'] or 'N/A'}.",
+                "message": f"Villa fund is short by {inr(gap)}. Expected completion: {villa_goal['expected_completion'] or 'N/A'}.",
                 "status": "warning",
                 "action_type": "save",
                 "suggested_amount": gap,
@@ -251,7 +253,7 @@ def generate_recommendations(conn) -> list:
                     recs.append({
                         "category": "Insurance Renewal",
                         "title": f"Premium Due: {policy['company'] or 'Insurance'}",
-                        "message": f"Premium of ₹{premium:,.0f} is due in {days_left} days ({ren_date_str}).",
+                        "message": f"Premium of {inr(premium)} is due in {days_left} days ({ren_date_str}).",
                         "status": "danger",
                         "action_type": "info",
                         "suggested_amount": premium,
@@ -329,16 +331,16 @@ def generate_credit_card_annual_reviews(conn, liability_id: int = None) -> list:
             reason = "No annual fee — no cost to retain regardless of usage."
         elif net_value >= 0:
             verdict = "Keep"
-            reason = f"Reward value (₹{reward_val:,.0f}) covers the ₹{fee:,.0f} annual fee."
+            reason = f"Reward value ({inr(reward_val)}) covers the {inr(fee)} annual fee."
         elif on_pace is False and target > 0:
             verdict = "Downgrade"
-            reason = f"Not on pace to hit the ₹{target:,.0f} fee-waiver milestone before renewal, and reward value doesn't cover the fee on its own."
+            reason = f"Not on pace to hit the {inr(target)} fee-waiver milestone before renewal, and reward value doesn't cover the fee on its own."
         elif lounge_utilization is not None and lounge_utilization < 0.25 and fee > 3000:
             verdict = "Downgrade"
             reason = "High annual fee with low lounge utilization and reward value not covering the fee."
         else:
             verdict = "Close"
-            reason = f"Reward value (₹{reward_val:,.0f}) is below the ₹{fee:,.0f} annual fee with no offsetting milestone pace or benefit usage."
+            reason = f"Reward value ({inr(reward_val)}) is below the {inr(fee)} annual fee with no offsetting milestone pace or benefit usage."
 
         if verdict == "Keep" and fee > 0 and net_value > fee * 2:
             verdict = "Upgrade-Candidate"

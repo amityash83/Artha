@@ -3740,7 +3740,7 @@ def get_financial_calendar():
 
     # Fetch credit cards (liabilities where category is 'Credit Card')
     cursor.execute("""
-        SELECT l.name, l.outstanding, ccd.statement_balance, ccd.due_date, inst.name as issuer
+        SELECT l.name, l.outstanding, ccd.statement_balance, ccd.due_date, ccd.statement_date, inst.name as issuer
         FROM liabilities l
         LEFT JOIN institutions inst ON l.lender_institution_id = inst.id
         LEFT JOIN credit_card_details ccd ON ccd.liability_id = l.id
@@ -3755,6 +3755,7 @@ def get_financial_calendar():
             "outstanding": d["outstanding"],
             "statement_balance": float(d["statement_balance"] or 0.0),
             "due_date": int(d["due_date"] or 15),
+            "statement_date": int(d["statement_date"] or 1),
             "issuer": d["issuer"] or "Issuer"
         })
         
@@ -3833,39 +3834,39 @@ def get_financial_calendar():
             except Exception as e:
                 print("Error computing insurance calendar date:", e)
 
-        # D. Credit Cards
-        for cc in credit_cards:
-            cc_due_dates = []
-            try:
-                due_day = min(cc["due_date"], calendar.monthrange(target_year, target_month)[1])
-                due_date = date(target_year, target_month, due_day)
-                if due_date >= today:
-                    cc_due_dates.append(due_date)
-            except Exception as e:
-                print("Error calculating CC date:", e)
-            
-            cc_due_dates.sort()
-            stmt_bal = cc["statement_balance"]
-            unbilled = max(cc["outstanding"] - stmt_bal, 0.0)
-            
-            if len(cc_due_dates) >= 1 and stmt_bal > 0:
-                events.append({
-                    "title": f"{cc['name']} Payment Due (Billed)",
-                    "amount": stmt_bal,
-                    "type": "Credit Card",
-                    "date": cc_due_dates[0].isoformat(),
-                    "details": f"Issuer: {cc['issuer']} | Billed Statement Balance"
-                })
-                
-            if len(cc_due_dates) >= 1 and unbilled > 0:
-                events.append({
-                    "title": f"{cc['name']} Payment Due (Unbilled)",
-                    "amount": unbilled,
-                    "type": "Credit Card",
-                    "date": cc_due_dates[0].isoformat(),
-                    "details": f"Issuer: {cc['issuer']} | Unbilled Current Balance"
-                })
-                
+    # D. Credit cards: once each, not every month (the balance was being repeated for all 12
+    # months). What the last statement billed is due on the next due date; what's been spent
+    # since is billed on the next statement date and due on the due date after that.
+    def on_day_from(day, start):
+        for add in range(3):
+            y = start.year + (start.month - 1 + add) // 12
+            m = (start.month - 1 + add) % 12 + 1
+            d = date(y, m, min(day, calendar.monthrange(y, m)[1]))
+            if d >= start:
+                return d
+        return start
+
+    for cc in credit_cards:
+        billed = min(cc["statement_balance"], cc["outstanding"])
+        unbilled = max(cc["outstanding"] - billed, 0.0)
+        if billed > 0:
+            events.append({
+                "title": f"{cc['name']}: bill due",
+                "amount": billed,
+                "type": "Credit Card",
+                "date": on_day_from(cc["due_date"], today).isoformat(),
+                "details": f"{cc['issuer']} · last statement",
+            })
+        if unbilled > 0:
+            statement = on_day_from(cc["statement_date"], today)
+            events.append({
+                "title": f"{cc['name']}: next bill (estimate)",
+                "amount": unbilled,
+                "type": "Credit Card",
+                "date": on_day_from(cc["due_date"], date.fromordinal(statement.toordinal() + 1)).isoformat(),
+                "details": f"{cc['issuer']} · spent since the last statement, billed on {statement.strftime('%d %b')}",
+            })
+
     try:
         horizon = date(today.year + 1, today.month, 1)
         events.extend(_tax_calendar_events(today, horizon))

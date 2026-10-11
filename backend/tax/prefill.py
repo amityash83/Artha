@@ -17,6 +17,7 @@ from datetime import date
 from typing import Dict, List, Optional
 
 from backend.tax.engine import MONTHS_PER_YEAR, TaxInputError
+from backend.formatting import indian_digits as _inr
 from backend.tax.epf import fy_months
 
 # income/expense frequency is free text in the generic entity form; these are the values
@@ -55,17 +56,6 @@ def fy_bounds(financial_year: str):
     """[start, end): 1 April of the year to 1 April of the next."""
     start = fy_months(financial_year)[0]
     return start, start.replace(year=start.year + 1)
-
-
-def _inr(amount) -> str:
-    """Indian digit grouping, as the rest of the app shows money: 4900000 -> '49,00,000'."""
-    digits = f"{abs(float(amount)):.0f}"
-    head, tail = digits[:-3], digits[-3:]
-    groups = []
-    while len(head) > 2:
-        head, groups = head[:-2], [head[-2:]] + groups
-    out = ",".join(([head] if head else []) + groups + [tail])
-    return ("-" if float(amount) < 0 else "") + out
 
 
 def _per_year(frequency: Optional[str]):
