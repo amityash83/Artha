@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from backend.db import get_db_connection, init_db, get_db_path, get_db_dir
 import backend.calculations as calc
 from backend.formatting import inr
-from backend.risk import effective_risk
+from backend.risk import EQUITY_ORIENTED_FUND_TYPES, effective_risk, fund_type, metadata as risk_metadata
 import backend.backups as backups
 import backend.tax.engine as tax_engine
 import backend.tax.rules_loader as tax_rules
@@ -2547,7 +2547,7 @@ def get_capital_gains_realizations(id: int):
 # rest of the app uses (see Dashboard.tsx's FREQ_MULTIPLIER).
 INCOME_FREQUENCY_PER_YEAR = {"monthly": 12, "quarterly": 4, "half-yearly": 2, "yearly": 1, "annually": 1, "annual": 1}
 
-def _estimate_capital_gains(cursor, person_id: int) -> dict:
+def _estimate_capital_gains(cursor, person_id: int, notes: Optional[list] = None) -> dict:
     """
     Unrealized gains on this person's Stock/Mutual Fund/Property assets, treating
     current_value as a hypothetical sale price today (distinct from the realized
@@ -2557,10 +2557,11 @@ def _estimate_capital_gains(cursor, person_id: int) -> dict:
     gains = {"stcg_111a": 0.0, "ltcg_112a": 0.0, "ltcg_112": 0.0, "stcg_slab": 0.0}
     today_str = date.today().strftime("%Y-%m-%d")
     cursor.execute("""
-        SELECT a.id, a.current_value, a.cost_price, a.purchase_date, c.name as category_name
+        SELECT a.id, a.name, a.current_value, a.cost_price, a.purchase_date, a.metadata_json, c.name as category_name
         FROM assets a JOIN categories c ON a.category_id = c.id
         WHERE a.owner_id = ? AND c.name IN ('Stock', 'Mutual Fund', 'Property')
     """, (person_id,))
+    notes = notes if notes is not None else []
     for a in cursor.fetchall():
         if a["category_name"] == "Property":
             if not a["purchase_date"]:
@@ -2574,8 +2575,19 @@ def _estimate_capital_gains(cursor, person_id: int) -> dict:
         total_qty = sum(l["quantity"] for l in lots)
         if not lots or total_qty <= 0:
             continue
+        # No recorded cost (e.g. the auto-migrated 1-unit, ₹0 opening lot): the whole value
+        # would read as profit, so leave it out and say so.
+        if sum(l["quantity"] * l["price_per_unit"] for l in lots) <= 0:
+            notes.append(f"{a['name']} is left out of unrealised gains: its purchase lots have no cost recorded. Add them under Assets.")
+            continue
         cg = calc.calculate_capital_gains_for_lots(
             lots, total_qty, float(a["current_value"] or 0.0) / total_qty, today_str, a["category_name"])
+        kind = fund_type(risk_metadata(a["metadata_json"])) if a["category_name"] == "Mutual Fund" else None
+        if kind and kind not in EQUITY_ORIENTED_FUND_TYPES:
+            # Debt, liquid and other funds bought after 1 April 2023 are taxed at slab
+            # rates, short or long term (older units may still qualify for 112; not modelled).
+            gains["stcg_slab"] += max(cg["stcg_amount"], 0.0) + max(cg["ltcg_amount"], 0.0)
+            continue
         gains["stcg_111a"] += max(cg["stcg_amount"], 0.0)
         gains["ltcg_112a"] += max(cg["ltcg_amount"], 0.0)
     return gains
@@ -2642,7 +2654,7 @@ def _tax_profile_to_engine_inputs(cursor, profile: dict, rules: dict) -> tuple:
         "other_income": {"rental_gross": other["rental_gross"], "dividends": other["dividends"],
                          "interest_savings": savings_interest, "interest_deposits": other["interest"] - savings_interest,
                          "other": other["other"]},
-        "capital_gains": _estimate_capital_gains(cursor, profile["person_id"]),
+        "capital_gains": _estimate_capital_gains(cursor, profile["person_id"], notes),
         "deductions": {
             "80C": {"other": sections.get("80C", 0.0)},
             "employee_nps": sections.get("80CCD1B", 0.0),

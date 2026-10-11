@@ -414,6 +414,8 @@ export interface TaxEstimate {
   estimated_total_tax: number;
   prepaid_taxes: number;
   estimated_refund_or_due: number;
+  /** Engine warnings plus notes on how the profile was mapped (code "profile_mapping"). */
+  warnings?: { code: string; severity: string; message: string }[];
   disclaimer: string;
 }
 

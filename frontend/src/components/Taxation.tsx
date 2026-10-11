@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { formatDate } from '../format';
-import { Plus, Trash2, AlertTriangle } from 'lucide-react';
+import { formatINR } from '../format';
+import { AmountInput, ConfirmAction, Group, Row } from './settings/ui';
 import { InitData, TaxProfile, TaxDeduction, CapitalGainsRealization, TaxEstimate } from '../types';
 import { API_BASE_URL } from '../config';
 import { TaxDeductionsEditor } from './TaxDeductionsEditor';
@@ -42,8 +43,9 @@ const emptyProfile = (personId: number): TaxProfile => ({
 export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }) => {
   const { people = [], tax_profiles = [] } = data;
 
-  const [activeSubTab, setActiveSubTab] = useState<'planner' | 'profile' | 'estimate' | 'capital-gains' | 'rules'>('planner');
-  const profileTab = activeSubTab === 'profile' || activeSubTab === 'estimate' || activeSubTab === 'capital-gains';
+  const [activeSubTab, setActiveSubTab] = useState<'planner' | 'quick' | 'capital-gains' | 'rules'>('planner');
+  // Quick estimate and Capital gains work on one person's year (a saved tax profile).
+  const profileTab = activeSubTab === 'quick' || activeSubTab === 'capital-gains';
   const [selectedPersonId, setSelectedPersonId] = useState<number | null>((people.find((p) => p.role === 'Primary Owner') ?? people[0])?.id ?? null);
   const [selectedFY, setSelectedFY] = useState<string>(getCurrentFY());
 
@@ -76,10 +78,6 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
     setRealizations([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPersonId, selectedFY, tax_profiles.length]);
-
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value || 0);
-  };
 
   const handleSaveProfile = async () => {
     if (!selectedPersonId) return;
@@ -132,8 +130,9 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
         }
       }
 
-      showToast?.('Tax profile saved', 'success');
+      showToast?.('Saved', 'success');
       onRefresh();
+      if (profileId) void loadEstimate(profileId);
     } catch (err) {
       console.error(err);
       showToast?.('Failed to save tax profile', 'error');
@@ -146,7 +145,8 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
     if (!selectedProfile) return;
     try {
       await fetch(`${API_BASE_URL}/api/tax-profiles/${selectedProfile.id}`, { method: 'DELETE' });
-      showToast?.('Tax profile deleted', 'success');
+      showToast?.('Deleted', 'success');
+      setEstimate(null);
       onRefresh();
     } catch (err) {
       console.error(err);
@@ -154,11 +154,11 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
     }
   };
 
-  const loadEstimate = async () => {
-    if (!selectedProfile) return;
+  const loadEstimate = async (profileId = selectedProfile?.id) => {
+    if (!profileId) return;
     setLoadingEstimate(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/tax-profiles/${selectedProfile.id}/estimate`);
+      const res = await fetch(`${API_BASE_URL}/api/tax-profiles/${profileId}/estimate`);
       const json = await res.json();
       if (!res.ok) {
         // e.g. no tax rule set exists for the profile's financial year
@@ -189,7 +189,7 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
   };
 
   useEffect(() => {
-    if (activeSubTab === 'estimate') loadEstimate();
+    if (activeSubTab === 'quick') loadEstimate();
     if (activeSubTab === 'capital-gains') loadRealizations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSubTab, selectedProfile?.id]);
@@ -204,56 +204,42 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
     return options;
   })();
 
+  const money = (key: keyof TaxProfile, label: string, description?: string) => (
+    <Row label={label} description={description} htmlFor={`tax-${String(key)}`}>
+      <AmountInput id={`tax-${String(key)}`} label={label} prefix="₹" width={130} value={Number(formData[key]) || 0}
+        onChange={(v) => setFormData({ ...formData, [key]: v })} />
+    </Row>
+  );
+  const TABS: { id: typeof activeSubTab; label: string }[] = [
+    { id: 'planner', label: 'Planner' }, { id: 'quick', label: 'Quick estimate' },
+    { id: 'capital-gains', label: 'Capital gains' }, { id: 'rules', label: 'Tax rules' },
+  ];
+  const regimeRows: [string, keyof TaxEstimate['old_regime']][] = [
+    ['Tax on income', 'gross_tax'], ['Rebate (87A)', 'rebate_87a'], ['Surcharge', 'surcharge'], ['Health and education cess', 'cess'],
+  ];
+
   return (
-    <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+    <div className="db-page">
+      <div className="eg-head">
         <div>
           <h1 className="page-title">Taxation</h1>
           <p className="page-subtitle">Plan your income tax: old vs new regime, deductions, NPS, advance tax and capital gains.</p>
         </div>
-        {profileTab && people.length > 0 && <div style={{ display: 'flex', gap: '8px' }}>
-          <select
-            className="form-control"
-            style={{ padding: '6px 12px', fontSize: '12px', height: '32px' }}
-            value={selectedPersonId ?? ''}
-            onChange={(e) => setSelectedPersonId(e.target.value ? parseInt(e.target.value) : null)}
-          >
-            {people.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-          <select
-            className="form-control"
-            style={{ padding: '6px 12px', fontSize: '12px', height: '32px' }}
-            value={selectedFY}
-            onChange={(e) => setSelectedFY(e.target.value)}
-          >
-            {fyOptions.map((fy) => (
-              <option key={fy} value={fy}>FY {fy}</option>
-            ))}
-          </select>
-        </div>}
+        {profileTab && people.length > 0 && (
+          <span className="tx-pickers">
+            <select className="form-control" aria-label="Person" value={selectedPersonId ?? ''} onChange={(e) => setSelectedPersonId(e.target.value ? parseInt(e.target.value) : null)}>
+              {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <select className="form-control" aria-label="Financial year" value={selectedFY} onChange={(e) => setSelectedFY(e.target.value)}>
+              {fyOptions.map((fy) => <option key={fy} value={fy}>FY {fy}</option>)}
+            </select>
+          </span>
+        )}
       </div>
 
-      <div style={{
-        display: 'flex', alignItems: 'flex-start', gap: '8px', padding: '10px 14px', marginBottom: '20px',
-        background: 'rgba(245, 158, 11, 0.06)', border: '1px solid rgba(245, 158, 11, 0.2)', borderRadius: '10px',
-        fontSize: '11.5px', color: 'var(--text-secondary)', lineHeight: 1.5,
-      }}>
-        <AlertTriangle size={14} style={{ color: 'var(--warning)', flexShrink: 0, marginTop: '1px' }} />
-        <span>Estimates for decision support, not tax advice. Each result names the rule set it used and how far each rule is verified. Check against the current Act and Finance Act before filing.</span>
-      </div>
-
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border-glass)', marginBottom: '24px', gap: '8px', flexWrap: 'wrap' }}>
-        {(['planner', 'profile', 'estimate', 'capital-gains', 'rules'] as const).map((tab) => (
-          <button
-            key={tab}
-            className={`tab-btn ${activeSubTab === tab ? 'active' : ''}`}
-            onClick={() => setActiveSubTab(tab)}
-            style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === tab ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === tab ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
-          >
-            {{ planner: 'Tax Planner', profile: 'Profile & Deductions', estimate: 'Old vs New Estimate', 'capital-gains': 'Capital Gains', rules: 'Tax Rules' }[tab]}
-          </button>
+      <div role="tablist" aria-label="Tax views" className="cc-views">
+        {TABS.map((t) => (
+          <button key={t.id} type="button" role="tab" aria-selected={activeSubTab === t.id} className="cc-view" onClick={() => setActiveSubTab(t.id)}>{t.label}</button>
         ))}
       </div>
 
@@ -261,233 +247,122 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
       {activeSubTab === 'rules' && <TaxRulesManager showToast={showToast} />}
 
       {!profileTab ? null : people.length === 0 ? (
-        <div className="glass-panel" style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
-          Add a person in Settings before creating a tax profile.
+        <div className="settings-group"><div className="ie-empty"><p>Add a person in Settings › People first.</p></div></div>
+      ) : activeSubTab === 'quick' ? (
+        <div className="tx-quick">
+          <p className="cc-note" style={{ margin: 0 }}>
+            A fast old-vs-new check from a few yearly figures; income comes from this person's entries in Income &amp; Expenses.
+            For salary structure, NPS, payslips and month-by-month TDS, use the <button type="button" className="db-link" onClick={() => setActiveSubTab('planner')}>Planner</button>.
+          </p>
+          <div className="lp-grid">
+            <div className="tx-col">
+              <Group title="About you">
+                <Row label="Regime you're on" htmlFor="tax-regime">
+                  <select id="tax-regime" className="form-control" value={formData.regime} onChange={(e) => setFormData({ ...formData, regime: e.target.value as 'Old' | 'New' })}>
+                    <option value="New">New</option><option value="Old">Old</option>
+                  </select>
+                </Row>
+                <Row label="Age" htmlFor="tax-age-band">
+                  <select id="tax-age-band" className="form-control" value={formData.age_band} onChange={(e) => setFormData({ ...formData, age_band: e.target.value as TaxProfile['age_band'] })}>
+                    <option value="Below60">Below 60</option><option value="60to80">60 to 80</option><option value="Above80">80 or over</option>
+                  </select>
+                </Row>
+                <Row label="Live in a metro" description="Delhi, Mumbai, Kolkata, Chennai and others; affects HRA." htmlFor="tax-metro-city">
+                  <select id="tax-metro-city" className="form-control" value={formData.is_metro_city ? 'yes' : 'no'} onChange={(e) => setFormData({ ...formData, is_metro_city: e.target.value === 'yes' })}>
+                    <option value="no">No</option><option value="yes">Yes</option>
+                  </select>
+                </Row>
+              </Group>
+              <Group title="Rent (HRA)" description="Yearly figures, old regime only.">
+                {money('hra_basic_salary', 'Basic salary')}
+                {money('hra_received', 'HRA received')}
+                {money('hra_rent_paid', 'Rent paid')}
+              </Group>
+              <Group title="Other figures" description="For the whole year.">
+                {money('home_loan_interest_self_occupied', 'Home loan interest', 'Self-occupied home, old regime.')}
+                {money('other_income_reported', 'Other taxable income', 'Anything not in Income & Expenses.')}
+                {money('tds_deducted', 'TDS deducted')}
+                {money('advance_tax_paid', 'Advance tax paid')}
+              </Group>
+              <div className="tx-deductions"><TaxDeductionsEditor deductions={deductions} onChange={setDeductions} /></div>
+              <div className="tx-actions">
+                <button className="btn btn-primary" onClick={handleSaveProfile} disabled={saving}>{saving ? 'Working it out…' : 'Save and estimate'}</button>
+                {selectedProfile && <ConfirmAction label="Delete these figures" confirmLabel="Delete" danger question={`Delete ${selectedFY}'s figures?`} onConfirm={handleDeleteProfile} />}
+              </div>
+            </div>
+
+            <div className="tx-col">
+              {!selectedProfile && !estimate ? (
+                <div className="settings-group"><div className="ie-empty"><p>Fill in what applies and press "Save and estimate" to compare the two regimes.</p></div></div>
+              ) : loadingEstimate && !estimate ? <p className="cc-note">Working it out…</p>
+                : !estimate ? <div className="settings-group"><div className="ie-empty"><p>{estimateError ?? 'No estimate yet.'}</p></div></div> : (
+                <>
+                  <section className="glass-panel db-card">
+                    <div className="db-card-head">
+                      <h3>Better for you: {estimate.recommended_regime === 'Old' ? 'the old regime' : 'the new regime'} <InfoTooltip articles={data.knowledge_articles} slug="old-vs-new-tax-regime" /></h3>
+                      {loadingEstimate && <span className="cc-note">Updating…</span>}
+                    </div>
+                    <strong className="eg-figure">{formatINR(estimate.savings_with_recommended)} <span>less tax than the other</span></strong>
+                    <table className="cf-compare">
+                      <thead><tr><th /><th>Old regime</th><th>New regime</th></tr></thead>
+                      <tbody>
+                        <tr><th scope="row">Taxable income</th><td>{formatINR(estimate.taxable_income_old)}</td><td>{formatINR(estimate.taxable_income_new)}</td></tr>
+                        {regimeRows.map(([label, key]) => (
+                          <tr key={key}><th scope="row">{label}</th><td>{formatINR(Number(estimate.old_regime[key]))}</td><td>{formatINR(Number(estimate.new_regime[key]))}</td></tr>
+                        ))}
+                        <tr className="cf-compare-total"><th scope="row">Total tax</th>
+                          <td style={estimate.recommended_regime === 'Old' ? { color: 'var(--success)' } : undefined}>{formatINR(estimate.old_regime.total_tax)}</td>
+                          <td style={estimate.recommended_regime === 'New' ? { color: 'var(--success)' } : undefined}>{formatINR(estimate.new_regime.total_tax)}</td></tr>
+                      </tbody>
+                    </table>
+                  </section>
+                  <section className="glass-panel db-card">
+                    <div className="db-card-head"><h3>How it was worked out</h3></div>
+                    <ul className="db-facts">
+                      <li>Income {formatINR(estimate.gross_income)}; standard deduction {formatINR(estimate.standard_deduction)}.</li>
+                      <li>Old regime only: HRA {formatINR(estimate.hra_exemption)}, 80C {formatINR(estimate.total_80c_deductions)}, 80D {formatINR(estimate.total_80d_deductions)}, other {formatINR(estimate.other_deductions)} (all after limits).</li>
+                      {(estimate.capital_gains.stcg || estimate.capital_gains.ltcg) ? (
+                        <li>Unrealised gains if sold today: short-term {formatINR(estimate.capital_gains.stcg)}, long-term {formatINR(estimate.capital_gains.ltcg)}, tax about {formatINR(estimate.capital_gains.tax)} <InfoTooltip articles={data.knowledge_articles} slug="ltcg-vs-stcg" />.</li>
+                      ) : null}
+                      <li>With gains, about <strong>{formatINR(estimate.estimated_total_tax)}</strong> in all; {formatINR(estimate.prepaid_taxes)} already paid (TDS and advance tax), so{' '}
+                        <strong style={{ color: estimate.estimated_refund_or_due >= 0 ? 'var(--success)' : '#fca5a5' }}>
+                          {estimate.estimated_refund_or_due >= 0 ? `about ${formatINR(estimate.estimated_refund_or_due)} back` : `about ${formatINR(-estimate.estimated_refund_or_due)} still to pay`}
+                        </strong>.</li>
+                      {(estimate.warnings || []).filter((w) => w.code === 'profile_mapping').map((w) => (
+                        <li key={w.message} className="cc-note">{w.message}</li>
+                      ))}
+                    </ul>
+                  </section>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       ) : (
-        <>
-          {activeSubTab === 'profile' && (
-            <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label htmlFor="tax-regime" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Regime</label>
-                  <select id="tax-regime" className="form-control" value={formData.regime} onChange={(e) => setFormData({ ...formData, regime: e.target.value as 'Old' | 'New' })}>
-                    <option value="New">New</option>
-                    <option value="Old">Old</option>
-                  </select>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label htmlFor="tax-age-band" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Age Band</label>
-                  <select id="tax-age-band" className="form-control" value={formData.age_band} onChange={(e) => setFormData({ ...formData, age_band: e.target.value as TaxProfile['age_band'] })}>
-                    <option value="Below60">Below 60</option>
-                    <option value="60to80">60 to 80</option>
-                    <option value="Above80">Above 80</option>
-                  </select>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label htmlFor="tax-metro-city" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Metro City</label>
-                  <select id="tax-metro-city" className="form-control" value={formData.is_metro_city ? 'yes' : 'no'} onChange={(e) => setFormData({ ...formData, is_metro_city: e.target.value === 'yes' })}>
-                    <option value="no">No</option>
-                    <option value="yes">Yes</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc', marginBottom: '10px' }}>HRA Exemption Inputs</h4>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label htmlFor="tax-hra-basic-salary" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Annual Basic Salary</label>
-                    <input id="tax-hra-basic-salary" type="number" className="form-control" value={formData.hra_basic_salary} onChange={(e) => setFormData({ ...formData, hra_basic_salary: parseFloat(e.target.value) || 0 })} />
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label htmlFor="tax-hra-received" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Annual HRA Received</label>
-                    <input id="tax-hra-received" type="number" className="form-control" value={formData.hra_received} onChange={(e) => setFormData({ ...formData, hra_received: parseFloat(e.target.value) || 0 })} />
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label htmlFor="tax-hra-rent-paid" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Annual Rent Paid</label>
-                    <input id="tax-hra-rent-paid" type="number" className="form-control" value={formData.hra_rent_paid} onChange={(e) => setFormData({ ...formData, hra_rent_paid: parseFloat(e.target.value) || 0 })} />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc', marginBottom: '10px' }}>Other Inputs</h4>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label htmlFor="tax-home-loan-interest" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Home Loan Interest (Self-Occupied)</label>
-                    <input id="tax-home-loan-interest" type="number" className="form-control" value={formData.home_loan_interest_self_occupied} onChange={(e) => setFormData({ ...formData, home_loan_interest_self_occupied: parseFloat(e.target.value) || 0 })} />
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label htmlFor="tax-other-income" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Other Taxable Income</label>
-                    <input id="tax-other-income" type="number" className="form-control" value={formData.other_income_reported} onChange={(e) => setFormData({ ...formData, other_income_reported: parseFloat(e.target.value) || 0 })} />
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label htmlFor="tax-tds-deducted" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>TDS Deducted</label>
-                    <input id="tax-tds-deducted" type="number" className="form-control" value={formData.tds_deducted} onChange={(e) => setFormData({ ...formData, tds_deducted: parseFloat(e.target.value) || 0 })} />
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label htmlFor="tax-advance-tax-paid" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Advance Tax Paid</label>
-                    <input id="tax-advance-tax-paid" type="number" className="form-control" value={formData.advance_tax_paid} onChange={(e) => setFormData({ ...formData, advance_tax_paid: parseFloat(e.target.value) || 0 })} />
-                  </div>
-                </div>
-              </div>
-
-              <TaxDeductionsEditor deductions={deductions} onChange={setDeductions} />
-
-              <div style={{ display: 'flex', gap: '10px', borderTop: '1px solid var(--border-glass)', paddingTop: '16px' }}>
-                <button className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px' }} onClick={handleSaveProfile} disabled={saving}>
-                  <Plus size={14} /> {saving ? 'Saving...' : selectedProfile ? 'Update Profile' : 'Create Profile'}
-                </button>
-                {selectedProfile && (
-                  <button className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', color: '#ef4444' }} onClick={handleDeleteProfile}>
-                    <Trash2 size={14} /> Delete Profile
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {activeSubTab === 'estimate' && (
-            <div>
+        <div className="db-col">
+          <HarvestingPanel personId={selectedPersonId} financialYear={selectedFY} />
+          <section aria-label="Gains realised this year">
+            <div className="settings-group-head"><h3 className="settings-group-title">Gains realised in FY {selectedFY}</h3></div>
+            <div className="settings-group">
               {!selectedProfile ? (
-                <div className="glass-panel" style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                  Create a tax profile in the "Profile &amp; Deductions" tab first.
-                </div>
-              ) : loadingEstimate || !estimate ? (
-                <div className="glass-panel" style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                  {loadingEstimate ? 'Computing estimate...' : (estimateError ?? 'No estimate loaded yet.')}
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                  <div style={{
-                    padding: '16px 20px', borderRadius: '12px',
-                    background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)',
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px',
-                  }}>
-                    <div>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                        Recommended Regime
-                        <InfoTooltip articles={data.knowledge_articles} slug="old-vs-new-tax-regime" />
-                      </span>
-                      <h2 style={{ fontSize: '22px', fontWeight: 700, margin: '4px 0 0 0', color: '#10b981' }}>{estimate.recommended_regime} Regime</h2>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Savings vs. the other regime</span>
-                      <h3 style={{ fontSize: '18px', fontWeight: 700, margin: '4px 0 0 0', color: '#f8fafc' }}>{formatCurrency(estimate.savings_with_recommended)}</h3>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '20px' }}>
-                    {(['old_regime', 'new_regime'] as const).map((key) => {
-                      const r = estimate[key];
-                      const label = key === 'old_regime' ? 'Old Regime' : 'New Regime';
-                      const isRecommended = estimate.recommended_regime === (key === 'old_regime' ? 'Old' : 'New');
-                      return (
-                        <div key={key} className="glass-card" style={{ padding: '18px', border: isRecommended ? '1px solid rgba(16,185,129,0.4)' : undefined }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                            <span style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc' }}>{label}</span>
-                            {isRecommended && <span className="badge badge-green" style={{ fontSize: '10px' }}>Recommended</span>}
-                          </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                            <span>Gross Tax: <strong style={{ color: '#e2e8f0' }}>{formatCurrency(r.gross_tax)}</strong></span>
-                            <span>Section 87A Rebate: <strong style={{ color: '#e2e8f0' }}>{formatCurrency(r.rebate_87a)}</strong></span>
-                            <span>Surcharge: <strong style={{ color: '#e2e8f0' }}>{formatCurrency(r.surcharge)}</strong></span>
-                            <span>Health &amp; Education Cess: <strong style={{ color: '#e2e8f0' }}>{formatCurrency(r.cess)}</strong></span>
-                            <span style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '6px', marginTop: '2px' }}>
-                              Total Tax: <strong style={{ color: '#f8fafc', fontSize: '14px' }}>{formatCurrency(r.total_tax)}</strong>
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="glass-panel" style={{ padding: '20px' }}>
-                    <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '14px' }}>Computation Breakdown</h3>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                      <span>Gross Income: <strong style={{ color: '#e2e8f0' }}>{formatCurrency(estimate.gross_income)}</strong></span>
-                      <span>Standard Deduction: <strong style={{ color: '#e2e8f0' }}>{formatCurrency(estimate.standard_deduction)}</strong></span>
-                      <span>80C Deductions (capped): <strong style={{ color: '#e2e8f0' }}>{formatCurrency(estimate.total_80c_deductions)}</strong></span>
-                      <span>80D Deductions (capped): <strong style={{ color: '#e2e8f0' }}>{formatCurrency(estimate.total_80d_deductions)}</strong></span>
-                      <span>Other Deductions: <strong style={{ color: '#e2e8f0' }}>{formatCurrency(estimate.other_deductions)}</strong></span>
-                      <span>HRA Exemption: <strong style={{ color: '#e2e8f0' }}>{formatCurrency(estimate.hra_exemption)}</strong></span>
-                      <span>Taxable Income (Old): <strong style={{ color: '#e2e8f0' }}>{formatCurrency(estimate.taxable_income_old)}</strong></span>
-                      <span>Taxable Income (New): <strong style={{ color: '#e2e8f0' }}>{formatCurrency(estimate.taxable_income_new)}</strong></span>
-                    </div>
-                    <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc', margin: '18px 0 10px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      Capital Gains (Unrealized Estimate)
-                      <InfoTooltip articles={data.knowledge_articles} slug="ltcg-vs-stcg" />
-                    </h4>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                      <span>STCG: <strong style={{ color: '#e2e8f0' }}>{formatCurrency(estimate.capital_gains.stcg)}</strong></span>
-                      <span>LTCG: <strong style={{ color: '#e2e8f0' }}>{formatCurrency(estimate.capital_gains.ltcg)}</strong></span>
-                      <span>Capital Gains Tax: <strong style={{ color: '#e2e8f0' }}>{formatCurrency(estimate.capital_gains.tax)}</strong></span>
-                    </div>
-                    <div style={{ display: 'flex', gap: '24px', marginTop: '18px', paddingTop: '14px', borderTop: '1px solid var(--border-glass)', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: '13px' }}>Estimated Total Tax (incl. CG): <strong style={{ color: '#f8fafc' }}>{formatCurrency(estimate.estimated_total_tax)}</strong></span>
-                      <span style={{ fontSize: '13px' }}>Prepaid (TDS + Advance): <strong style={{ color: '#f8fafc' }}>{formatCurrency(estimate.prepaid_taxes)}</strong></span>
-                      <span style={{ fontSize: '13px' }}>
-                        {estimate.estimated_refund_or_due >= 0 ? 'Estimated Refund' : 'Estimated Amount Due'}:{' '}
-                        <strong style={{ color: estimate.estimated_refund_or_due >= 0 ? '#10b981' : '#ef4444' }}>
-                          {formatCurrency(Math.abs(estimate.estimated_refund_or_due))}
-                        </strong>
-                      </span>
-                    </div>
-                  </div>
-
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>{estimate.disclaimer}</div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {activeSubTab === 'capital-gains' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <HarvestingPanel personId={selectedPersonId} financialYear={selectedFY} />
-            <div className="glass-panel" style={{ padding: '20px' }}>
-              <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '14px' }}>Realized Capital Gains ({selectedFY})</h3>
-              {!selectedProfile ? (
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Create a tax profile first to view realized gains for this person/year.</div>
+                <div className="ie-empty"><p>Save figures for this person and year under Quick estimate to see realised gains here.</p></div>
               ) : realizations.length === 0 ? (
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  No realized sales recorded yet. A row appears here automatically when a "Sell" transaction is posted against a Stock, Mutual Fund, or Property asset owned by this person.
+                <div className="ie-empty"><p>No sales yet. A sale shows up here when you record a "Sell or redeem an asset" transaction for a stock, fund or property this person owns.</p></div>
+              ) : realizations.map((r) => (
+                <div key={r.id} className="ie-row fc-row">
+                  <span className="ie-row-text">
+                    <strong>{r.asset_name || `Asset ${r.asset_id}`}</strong>
+                    <span>{[formatDate(r.sale_date), `sold for ${formatINR(r.sale_value)}`, `cost ${formatINR(r.cost_basis)}`, r.gain_type === 'LTCG' ? 'long-term' : 'short-term'].join(' · ')}</span>
+                  </span>
+                  <span className="ie-row-amount"><strong style={{ color: r.gain_amount >= 0 ? 'var(--success)' : '#fca5a5' }}>{r.gain_amount >= 0 ? '+' : '−'}{formatINR(Math.abs(r.gain_amount))}</strong></span>
                 </div>
-              ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                    <thead>
-                      <tr style={{ textAlign: 'left', color: 'var(--text-muted)', borderBottom: '1px solid var(--border-glass)' }}>
-                        <th style={{ padding: '8px' }}>Asset</th>
-                        <th style={{ padding: '8px' }}>Sale Date</th>
-                        <th style={{ padding: '8px', textAlign: 'right' }}>Sale Value</th>
-                        <th style={{ padding: '8px', textAlign: 'right' }}>Cost Basis</th>
-                        <th style={{ padding: '8px', textAlign: 'right' }}>Gain</th>
-                        <th style={{ padding: '8px' }}>Type</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {realizations.map((r) => (
-                        <tr key={r.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
-                          <td style={{ padding: '8px', color: '#e2e8f0' }}>{r.asset_name || r.asset_id}</td>
-                          <td style={{ padding: '8px', color: 'var(--text-secondary)' }}>{formatDate(r.sale_date)}</td>
-                          <td style={{ padding: '8px', textAlign: 'right', color: '#e2e8f0' }}>{formatCurrency(r.sale_value)}</td>
-                          <td style={{ padding: '8px', textAlign: 'right', color: '#e2e8f0' }}>{formatCurrency(r.cost_basis)}</td>
-                          <td style={{ padding: '8px', textAlign: 'right', color: r.gain_amount >= 0 ? '#10b981' : '#ef4444' }}>{formatCurrency(r.gain_amount)}</td>
-                          <td style={{ padding: '8px' }}>
-                            <span className={`badge ${r.gain_type === 'LTCG' ? 'badge-green' : 'badge-yellow'}`} style={{ fontSize: '10px' }}>{r.gain_type}</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+              ))}
             </div>
-            </div>
-          )}
-        </>
+          </section>
+        </div>
       )}
+
+      <p className="cc-note tx-disclaimer">Estimates to help you decide, not tax advice. Each result names the rule set it used and how well each rule is verified; check against the current Act before filing.</p>
     </div>
   );
 };

@@ -1106,3 +1106,11 @@ h1, h2, h3, h4, h5 {
 .fc-type--info { background: var(--info-bg); color: #93c5fd; }
 .fc-type--warning { background: var(--warning-bg); color: var(--warning); }
 .fc-type--accent { background: rgba(139, 92, 246, 0.12); color: var(--accent-light); }
+
+/* Taxation outer page (components/Taxation.tsx). */
+.tx-pickers { display: flex; gap: 8px; }
+.tx-pickers select { width: auto; font-size: 13px; padding: 7px 10px; }
+.tx-quick { display: flex; flex-direction: column; gap: 18px; }
+.tx-col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.tx-actions { display: flex; align-items: center; gap: 12px; }
+.tx-disclaimer { margin: 8px 0 0; font-size: 11.5px; }
