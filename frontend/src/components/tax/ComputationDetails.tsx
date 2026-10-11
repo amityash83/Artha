@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { TaxRegimeKey } from '../../types';
 import type { PlannerChildProps } from './TaxPlanner';
-import { WarningList } from './PlannerOverview';
+import { WarningList } from './TaxWarnings';
 import { EmptyState, formatINR, Pill, Section, SourceBadge, SubTabs, VerificationBadge } from './taxUi';
 
 const STEP_NAMES: Record<number, string> = {

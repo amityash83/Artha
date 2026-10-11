@@ -280,7 +280,7 @@ export const ImportSection: React.FC<SectionProps> = ({ onRefresh }) => {
   };
   return (
     <>
-      <SectionHeader title="Import" intro="Bring data in from other apps. Payslips are imported from the Tax Planner (Salary & CTC, month by month)." />
+      <SectionHeader title="Import" intro="Bring data in from other apps. Payslips are imported in Taxation, under Income (salary month by month)." />
       <Group title="Bank statements">
         <Row label="Statement lines (CSV or Excel)" description="In Transactions Ledger, choose Import statement: pick the account and the file your bank's website gives you. Lines Artha already has are left out, and each import can be undone." />
       </Group>

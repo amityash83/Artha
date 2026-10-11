@@ -62,7 +62,7 @@ export const OldRegimeInputs: React.FC<PlannerChildProps> = ({ inputs, result, u
       >
         {inputs.monthly?.enabled && (
           <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-            Month-by-month entry is on: rent comes from the "Rent paid" row of the grid on the Salary &amp; CTC tab, and the
+            Month-by-month entry is on: rent comes from the "Rent paid" row of the month-by-month grid under Income, and the
             exemption is worked out for each month separately (below).
           </div>
         )}
@@ -86,7 +86,7 @@ export const OldRegimeInputs: React.FC<PlannerChildProps> = ({ inputs, result, u
             help={hraRules?.metro_cities ? `Metro in this rule set: ${hraRules.metro_cities.join(', ')}.` : undefined} />
         </div>
         <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-          HRA received ({formatINR(inputs.salary.hra || 0)}) and basic + DA come from the Salary & CTC tab.
+          HRA received ({formatINR(inputs.salary.hra || 0)}) and basic + DA come from your salary under Income.
         </div>
         {old?.hra?.computed_monthly && old.hra.per_month && (
           <div style={{ overflowX: 'auto' }}>

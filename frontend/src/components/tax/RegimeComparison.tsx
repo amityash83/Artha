@@ -32,7 +32,8 @@ export const COMPARISON_ROWS: ComparisonRow[] = [
 
 const cell: React.CSSProperties = { padding: '9px 12px', fontSize: '13px', borderBottom: '1px solid var(--border-glass)', textAlign: 'right', whiteSpace: 'nowrap' };
 
-export const RegimeComparison: React.FC<PlannerChildProps> = ({ result }) => {
+/** The full old-vs-new table. On the Summary the headline above it already says which is cheaper (hideBanner). */
+export const RegimeComparison: React.FC<PlannerChildProps & { hideBanner?: boolean }> = ({ result, hideBanner }) => {
   if (!result) return <EmptyState>Computing…</EmptyState>;
   const { old: oldR, new: newR } = result.regimes;
   const cmp = result.comparison;
@@ -47,7 +48,7 @@ export const RegimeComparison: React.FC<PlannerChildProps> = ({ result }) => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <div style={{
+      {!hideBanner && <div style={{
         padding: '14px 18px', borderRadius: '12px', fontSize: '13px', lineHeight: 1.6,
         background: 'rgba(16, 185, 129, 0.06)', border: '1px solid rgba(16, 185, 129, 0.25)', color: 'var(--text-secondary)',
       }}>
@@ -59,7 +60,7 @@ export const RegimeComparison: React.FC<PlannerChildProps> = ({ result }) => {
             {cmp.savings_pct_of_old !== null && `, ${Math.abs(cmp.savings_pct_of_old).toFixed(1)}% of old-regime tax`}). {cmp.explanation}
           </>
         ) : <>Both regimes give the same tax. {cmp.explanation}</>}
-      </div>
+      </div>}
 
       <Section title="Old vs new regime" subtitle="Difference = old regime − new regime. A positive tax difference means the new regime saves that much.">
         <div style={{ overflowX: 'auto' }}>

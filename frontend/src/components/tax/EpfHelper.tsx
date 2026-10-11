@@ -69,7 +69,7 @@ export const EpfHelper: React.FC<{
           ))}
           {!monthly && data.ceiling_changes.length > 0 && (
             <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
-              Annual entry fills the year's total; the Payslip tab then shows an average month. Switch to month by month to see each month's own EPF.
+              Annual entry fills the year's total; the payslip under Pay & TDS then shows an average month. Switch to month by month to see each month's own EPF.
             </div>
           )}
         </div>

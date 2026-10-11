@@ -119,7 +119,7 @@ export const PrefillDialog: React.FC<{
                 </span>
               </div>
               {blocked(target) && (
-                <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>Salary entry is month by month, so this comes from the grid. Switch Salary &amp; CTC to annual to fill it here.</div>
+                <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>Salary entry is month by month, so this comes from the grid. Switch the salary under Income to annual to fill it here.</div>
               )}
               {items.map((i) => (
                 <label key={i.id} style={{ display: 'grid', gridTemplateColumns: '20px 1fr auto', gap: '8px', alignItems: 'start', padding: '6px 0', fontSize: '12.5px', opacity: blocked(target) ? 0.5 : 1 }}>

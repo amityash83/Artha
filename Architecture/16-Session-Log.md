@@ -246,3 +246,32 @@ and emphatically, applies to every commit going forward, no exceptions.
 - **Not done:** PDF statements (layouts vary too much to read reliably)
   and old .xls (it would need xlrd). Both are refused with a message
   saying what to download instead.
+
+### Taxation simplified (2026-10-11)
+
+The user found Taxation a mess, and they were right. The engine was fine; the page wasn't:
+
+- **Two calculators.** Planner and Quick estimate kept separate figures for the
+  same person and year, and could disagree. Capital gains also needed the Quick
+  estimate saved before it would show the year's sales.
+- **Too many tabs.** The Planner had 13, with everyday ones next to specialist ones.
+- **A crowded overview.** It showed 15 KPI cards, most of them restating each other.
+- **A misleading default.** Every new plan opened on a ₹54 lakh sample payroll, so
+  the first screen showed someone else's tax.
+
+Now it's one planner:
+- **Five tabs:** Summary, Income, Deductions, Pay & TDS, Ways to save. The rest
+  (charts, what-ifs, workings, scenarios, reports, tax rules) moved under More.
+- **Summary leads with the answer and a to-do list.** The list is worked out
+  from the results: a cheaper regime than the employer's, TDS still to deduct,
+  the next advance-tax instalment, an employer NPS saving, unused tax-free gains.
+- **New plans start empty,** with Fill from my data first and the sample as
+  "Try sample figures".
+- **Nothing was dropped.** Every Quick estimate input has a Planner field. Its
+  saved figures seed a year that has no plan yet, and Fill from my data keeps
+  offering them. Its two read-outs moved too: realised gains (now by person and
+  year, not by profile) and unrealised gains. The old regime/new regime split
+  became one Deductions tab that says which regime allows what. The AI
+  assistant's tax context reads the saved plans instead of `tax_profiles`.
+- **Kept for now:** the `tax_profiles` tables and routes, for data that already
+  exists and its tests.

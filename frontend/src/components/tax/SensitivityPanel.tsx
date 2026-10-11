@@ -108,7 +108,7 @@ export const SensitivityPanel: React.FC<OptimizationProps> = ({ inputs, financia
           </Section>
 
           <Section title="Employer NPS for a target saving"
-            subtitle={`Smallest employer NPS that saves at least this much a year (${opt.funding === 'restructure' ? 'restructured from salary' : 'over CTC'}, ${opt.regime === 'best' ? 'cheaper regime' : `${opt.regime} regime`}; set these on the NPS Optimizer tab).`}>
+            subtitle={`Smallest employer NPS that saves at least this much a year (${opt.funding === 'restructure' ? 'restructured from salary' : 'over CTC'}, ${opt.regime === 'best' ? 'cheaper regime' : `${opt.regime} regime`}; set these under Ways to save, Employer NPS).`}>
             <NumberField id="sens-target" label="Target annual tax saving" value={target} onChange={(v) => setTarget(Math.max(v, 0))} />
             <Freshness stale={nps.stale}>
               {nps.error ? <ErrorBanner message={nps.error} /> : !nps.data ? <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Calculating…</span> : nps.data.status === 'found' ? (

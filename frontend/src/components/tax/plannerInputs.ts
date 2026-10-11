@@ -36,6 +36,30 @@ export const DEFAULT_PLANNER_INPUTS: TaxPlannerInputs = {
   advance_tax_payments: [],
 };
 
+/** Every figure zero (and no list entries), keeping the shape and the profile's settings. */
+function zeroed<T>(value: T): T {
+  if (typeof value === 'number') return 0 as T;
+  if (Array.isArray(value)) return [] as T;
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, zeroed(v)])) as T;
+  return value;
+}
+
+/** A new plan: nothing filled in. The sample payroll above is only offered ("Try sample figures"). */
+export const EMPTY_PLANNER_INPUTS: TaxPlannerInputs = {
+  ...zeroed(DEFAULT_PLANNER_INPUTS),
+  profile: DEFAULT_PLANNER_INPUTS.profile,
+  salary_monthly: null,
+  hra: { rent_paid_monthly: 0, months_rented: 12 },
+  monthly: null,
+};
+
+/** True when nothing that's taxed has been entered yet. */
+export function isEmptyPlan(inputs: TaxPlannerInputs): boolean {
+  const sum = (o: Record<string, number> | null | undefined) => Object.values(o ?? {}).reduce((t, v) => t + (Number(v) || 0), 0);
+  const months = inputs.monthly?.enabled ? inputs.monthly.months.reduce((t, m) => t + sum(m.salary), 0) : 0;
+  return sum(inputs.salary) + months + sum(inputs.other_income) + sum(inputs.capital_gains) === 0;
+}
+
 export const MONTHS = 12;
 
 /** "2026-27" -> ["Apr 2026", ..., "Mar 2027"] (Indian financial year order). */

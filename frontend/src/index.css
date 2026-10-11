@@ -1209,3 +1209,57 @@ h1, h2, h3, h4, h5 {
 .si-goes { font-size: 12.5px; padding: 5px 8px; }
 .si-amt { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .si-actions { margin-top: 14px; }
+
+/* Tax planner (components/tax/TaxPlanner.tsx, PlannerTabs.tsx) */
+.tp-stack { display: flex; flex-direction: column; gap: 16px; }
+.tp-muted { color: var(--text-muted); font-size: 12.5px; }
+.tp-para { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+.tp-good { color: var(--success); }
+.tp-warn { color: var(--warning); }
+.tp-bad { color: #fca5a5; }
+.tp-heading { margin: 8px 0 -4px; font: 600 15px var(--font-display); color: var(--text-primary); }
+.tp-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 14px; font-size: 12.5px; }
+.tp-pick { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; }
+.tp-pick .form-control { width: auto; padding: 6px 10px; font-size: 12.5px; }
+.tp-rules { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border: none; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font: 12px var(--font-sans); cursor: pointer; }
+.tp-rules:hover { background: rgba(255, 255, 255, 0.05); color: var(--text-primary); }
+.tp-bar-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.tp-fill { display: flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: 12px; }
+.tp-tabs { margin-bottom: 0; }
+.tp-more { position: relative; }
+.tp-more > .cc-view { display: inline-flex; align-items: center; gap: 4px; }
+.tp-more-menu { left: 0; right: auto; min-width: 300px; z-index: 40; }
+.tp-more-item { flex-direction: column; align-items: flex-start; gap: 2px; }
+.tp-more-item small { color: var(--text-muted); font-size: 11.5px; }
+.tp-start { padding: 22px 24px; display: flex; flex-direction: column; gap: 10px; }
+.tp-start h3 { margin: 0; font: 600 16px var(--font-display); color: var(--text-primary); }
+.tp-start p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; max-width: 720px; }
+.tp-start-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 4px; }
+.tp-start-actions .btn { display: inline-flex; align-items: center; gap: 6px; }
+.tp-answer { padding: 18px 20px; display: flex; flex-direction: column; gap: 16px; }
+.tp-answer-head { display: flex; flex-direction: column; gap: 4px; }
+.tp-answer-title { font: 700 22px var(--font-display); color: var(--success); }
+.tp-answer-line { color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+.tp-answer-line strong { color: var(--text-primary); }
+.tp-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.tp-tile { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; border-radius: var(--radius-md); background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-glass); }
+.tp-tile strong { font: 700 19px var(--font-display); color: var(--text-primary); }
+.tp-tile strong.tp-good { color: var(--success); }
+.tp-tile strong.tp-warn { color: var(--warning); }
+.tp-tile-label { display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: 11.5px; }
+.tp-tile-sub { color: var(--text-muted); font-size: 11px; }
+.tp-todo { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.tp-todo li { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; padding: 9px 0; border-top: 1px solid var(--border-glass); color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
+.tp-todo li:first-child { border-top: none; padding-top: 0; }
+.tp-todo li strong { color: var(--text-primary); }
+.tp-todo .settings-link { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.tp-list { display: flex; flex-direction: column; }
+.tp-list-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border-glass); font-size: 13px; color: var(--text-secondary); }
+.tp-list-row:first-child { border-top: none; }
+.tp-list-row > span { display: flex; flex-direction: column; gap: 2px; }
+.tp-list-row strong { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.tp-list-row small { color: var(--text-muted); font-size: 11.5px; }
+@media (max-width: 700px) {
+  .tp-bar-actions { margin-left: 0; }
+  .tp-todo li { flex-direction: column; gap: 4px; }
+}

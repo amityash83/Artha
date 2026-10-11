@@ -51,7 +51,7 @@ export const PayslipSimulator: React.FC<OptimizationProps> = ({ inputs, financia
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       <Section title="What's being compared"
-        subtitle={<>Before: your current inputs. After: {describe}, funded by {opt.funding === 'restructure' ? `restructuring ${labelFor(opt.restructure_from, metadata.salary_components)}` : 'adding it over CTC'}, in {opt.regime === 'best' ? 'whichever regime is cheaper' : `the ${opt.regime} regime`}. Change these on the NPS Optimizer tab.</>}>
+        subtitle={<>Before: your current inputs. After: {describe}, funded by {opt.funding === 'restructure' ? `restructuring ${labelFor(opt.restructure_from, metadata.salary_components)}` : 'adding it over CTC'}, in {opt.regime === 'best' ? 'whichever regime is cheaper' : `the ${opt.regime} regime`}. Change these under Ways to save, Employer NPS.</>}>
         <div style={fieldGrid}>
           <NumberField id="ps-tds-before" label="Actual monthly TDS now (from your payslip)" value={opt.actual_monthly_tds_before ?? 0}
             onChange={(v) => set({ actual_monthly_tds_before: v > 0 ? v : null })} help="Leave at 0 to use the annual tax ÷ 12 average." />
@@ -66,7 +66,7 @@ export const PayslipSimulator: React.FC<OptimizationProps> = ({ inputs, financia
         </div>
         {!monthlyOn && (
           <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
-            This is an average month (annual figures ÷ 12). If your pay or PF changes during the year, switch Salary &amp; CTC to month by month to see a specific month.
+            This is an average month (annual figures ÷ 12). If your pay or PF changes during the year, switch the salary under Income to month by month to see a specific month.
           </div>
         )}
       </Section>
@@ -83,7 +83,7 @@ export const PayslipSimulator: React.FC<OptimizationProps> = ({ inputs, financia
             }}>
               The cheaper regime changes from <strong style={{ color: 'var(--text-primary)' }}>{data.before.regime}</strong> to{' '}
               <strong style={{ color: 'var(--text-primary)' }}>{data.after.regime}</strong> with this optimisation, so the tax saved
-              below includes the effect of switching regime, not just NPS. Pick a fixed regime on the NPS Optimizer tab to isolate the NPS effect.
+              below includes the effect of switching regime, not just NPS. Pick a fixed regime in the employer NPS section of Ways to save to isolate the NPS effect.
             </div>
           )}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: '12px' }}>

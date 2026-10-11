@@ -2606,6 +2606,47 @@ def tax_harvesting(person_id: int, financial_year: Optional[str] = None):
         return tax_harvesting_mod.harvest_plan(conn, person_id, rules["financial_year"], rules)
     return _tax_store_call(run)
 
+@app.post("/api/tax/break-even")
+def tax_break_even(req: TaxComputeRequest):
+    """How much more the old regime's deductions would need to be for it to cost no more
+    than the new regime (bisection over full engine runs); the Planner's Ways to save."""
+    def run(conn):
+        rules, _meta = _resolve_for(conn, req.financial_year, req.rule_set_id, req.rule_set_version)
+        return tax_sensitivity_mod.old_regime_break_even(tax_engine.normalize_inputs(req.inputs), rules)
+    return _tax_store_call(run)
+
+def _fy_or_default(financial_year: Optional[str]) -> str:
+    if financial_year and not re.fullmatch(r"\d{4}-\d{2}", financial_year):
+        raise HTTPException(status_code=422, detail="financial_year must look like 2026-27")
+    return financial_year or _default_financial_year()
+
+@app.get("/api/tax/realised-gains")
+def tax_realised_gains(person_id: int, financial_year: Optional[str] = None):
+    """This person's sales in the year (the capital_gains_realizations log written when a
+    Sell is recorded), newest first."""
+    fy = _fy_or_default(financial_year)
+    conn = get_db_connection()
+    try:
+        rows = conn.execute("""
+            SELECT cgr.*, a.name AS asset_name FROM capital_gains_realizations cgr
+            LEFT JOIN assets a ON cgr.asset_id = a.id
+            WHERE cgr.owner_id = ? AND cgr.financial_year = ? ORDER BY cgr.sale_date DESC""", (person_id, fy)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+@app.get("/api/tax/unrealised-gains")
+def tax_unrealised_gains(person_id: int):
+    """Gains on this person's stocks, funds and property if all were sold today, by how
+    they'd be taxed (111A / 112A / 112 / slab)."""
+    conn = get_db_connection()
+    try:
+        notes: list = []
+        gains = _estimate_capital_gains(conn.cursor(), person_id, notes)
+        return {"gains": {k: round(v, 2) for k, v in gains.items()}, "total": round(sum(gains.values()), 2), "notes": notes}
+    finally:
+        conn.close()
+
 PLANNER_SLOT_PATTERN = re.compile(r"^p(\d+)-(\d{4}-\d{2})$")
 
 def _tax_calendar_events(today, horizon) -> list:

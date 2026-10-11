@@ -128,9 +128,26 @@ def build_ask_context(conn, question: str):
         """)
         ctx["assets"] = [dict(r) for r in cursor.fetchall()]
     if "tax_profiles" in sections:
-        cursor.execute("SELECT * FROM tax_profiles ORDER BY financial_year DESC LIMIT 1")
-        row = cursor.fetchone()
-        ctx["latest_tax_profile"] = dict(row) if row else {}
+        # The Tax Planner's saved plans (one per person and year, slot p<person>-<FY>): the
+        # figures the person entered, without the month grid. The older Quick estimate
+        # figures (tax_profiles) only if no plan exists yet.
+        plans = []
+        names = {r["id"]: r["name"] for r in cursor.execute("SELECT id, name FROM people").fetchall()}
+        for row in cursor.execute("""SELECT slot, content_json FROM tax_planner_drafts WHERE slot GLOB 'p[0-9]*-[0-9][0-9][0-9][0-9]-[0-9][0-9]'
+                                     ORDER BY substr(slot, -7) DESC LIMIT 2""").fetchall():
+            try:
+                content = json.loads(row["content_json"] or "{}")
+            except ValueError:
+                continue
+            person_id = int(row["slot"][1:].split("-", 1)[0])
+            inputs = {k: v for k, v in (content.get("inputs") or {}).items() if k not in ("monthly", "salary_monthly")}
+            plans.append({"person": names.get(person_id), "financial_year": row["slot"][-7:], "inputs": inputs})
+        if plans:
+            ctx["tax_plans"] = plans
+        else:
+            cursor.execute("SELECT * FROM tax_profiles ORDER BY financial_year DESC LIMIT 1")
+            row = cursor.fetchone()
+            ctx["latest_tax_profile"] = dict(row) if row else {}
     if "card_variants" in sections:
         cursor.execute("SELECT name, issuer, annual_fee, point_value FROM card_variants LIMIT 10")
         ctx["card_library_sample"] = [dict(r) for r in cursor.fetchall()]

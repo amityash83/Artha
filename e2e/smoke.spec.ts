@@ -128,14 +128,32 @@ test('go-to search ranks the Loan planner first for "EMI"', async ({ page }) => 
   await expect(page.locator('.palette [role=option]').first()).toContainText('Loan planner');
 });
 
-test('taxation quick estimate compares the regimes', async ({ page }) => {
+test('taxation: a new plan starts empty, then gives the answer and every tab opens', async ({ page }) => {
+  const errors = watchErrors(page);
   await open(page);
   await go(page, 'Taxation');
-  await page.locator('.cc-view', { hasText: 'Quick estimate' }).click();
-  await money(page, '#tax-tds_deducted', 400000);
-  await page.locator('.tx-actions .btn-primary').click();
-  await expect(page.getByText(/Better for you: the (old|new) regime/)).toBeVisible();
-  await expect(page.locator('.cf-compare')).toContainText('Total tax');
+  await expect(page.getByText(/Start with your figures for FY/)).toBeVisible();
+  await page.getByRole('button', { name: 'Try sample figures' }).click();
+  await expect(page.getByText(/^The (new|old) regime$/)).toBeVisible();
+  await expect(page.getByText('What to do next')).toBeVisible();
+  await expect(page.getByText('Old vs new regime')).toBeVisible();
+  for (const tab of ['Income', 'Deductions', 'Pay & TDS', 'Ways to save']) {
+    await page.getByRole('tab', { name: tab, exact: true }).click();
+    await page.waitForTimeout(400);
+  }
+  await page.getByRole('tab', { name: 'Ways to save' }).click();
+  await expect(page.getByText('Would the old regime be better with more deductions?')).toBeVisible();
+  await expect(page.getByText(/You'd need .* more in deductions|already cheaper/)).toBeVisible();
+  for (const item of ['Charts', 'What-ifs', 'Workings & audit', 'Saved scenarios', 'Reports & export', 'Tax rules']) {
+    await page.getByRole('tab', { name: /More|Charts|What-ifs|Workings|Saved scenarios|Reports|Tax rules/ }).last().click();
+    await page.getByRole('menuitem', { name: new RegExp(item.replace('&', '\\&')) }).click();
+    await page.waitForTimeout(400);
+  }
+  await page.getByRole('tab', { name: 'Summary' }).click();
+  await page.getByRole('button', { name: 'Clear figures' }).click();
+  await page.getByRole('button', { name: 'Clear', exact: true }).click();
+  await expect(page.getByText(/Start with your figures for FY/)).toBeVisible();
+  expect(errors, errors.join('\n')).toEqual([]);
 });
 
 test('backups are also copied to a second folder', async ({ page }) => {
@@ -197,4 +215,28 @@ test('importing a bank statement, then undoing it', async ({ page }) => {
   await past.getByRole('button', { name: 'Remove them' }).click();
   await expect(page.getByText(/Removed 3 entries/)).toBeVisible();
   await expect(past).toHaveCount(0);
+});
+
+test('a year with Quick estimate figures and no plan starts from them', async ({ page, request }) => {
+  const backend = `http://127.0.0.1:${process.env.E2E_BACKEND_PORT}/api`;
+  const init = await (await request.get(`${backend}/init`)).json();
+  const person = (init.people.find((p: { role: string }) => p.role === 'Primary Owner') ?? init.people[0]).id;
+  const made = await (await request.post(`${backend}/tax-profiles`, { data: {
+    person_id: person, financial_year: '2025-26', regime: 'Old', age_band: 'Below60', hra_rent_paid: 240000, hra_basic_salary: 600000,
+    hra_received: 240000, is_metro_city: true, home_loan_interest_self_occupied: 0, other_income_reported: 0, tds_deducted: 90000, advance_tax_paid: 0, notes: '',
+  } })).json();
+  await request.post(`${backend}/tax-profiles/${made.id}/deductions`, { data: { section: '80C', label: 'PPF', amount: 150000 } });
+  await open(page);
+  await go(page, 'Taxation');
+  await expect(page.locator('#planner-fy')).toBeVisible();
+  await page.locator('#planner-fy').selectOption('2025-26');
+  await expect(page.getByText(/Started FY 2025-26 from your Quick estimate figures/)).toBeVisible();
+  await page.getByRole('tab', { name: 'Pay & TDS', exact: true }).click();
+  await expect(page.locator('#tp-tds')).toHaveValue(/90,?000/);
+  await page.getByRole('tab', { name: 'Deductions', exact: true }).click();
+  // The rent recorded in Income & Expenses (₹50,000) wins over the Quick estimate's; that one is offered unticked.
+  await expect(page.locator('#hra-rent')).toHaveValue(/50,?000/);
+  await expect(page.locator('#ded-deductions-80C-other')).toHaveValue(/1,?50,?000/);
+  await page.getByRole('tab', { name: 'Income', exact: true }).click();
+  await expect(page.locator('#tp-selected-regime')).toHaveValue('old');
 });

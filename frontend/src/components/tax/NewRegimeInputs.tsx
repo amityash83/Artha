@@ -17,7 +17,11 @@ const Row: React.FC<{ ok: boolean; label: React.ReactNode; detail?: React.ReactN
   </li>
 );
 
-export const NewRegimeInputs: React.FC<PlannerChildProps> = ({ inputs, result, update, metadata }) => {
+/**
+ * The new regime on the Deductions tab: part "allowances" says what each regime allows
+ * (from the rule set), part "rare" holds the few items only the new regime takes.
+ */
+export const NewRegimeInputs: React.FC<PlannerChildProps & { part: 'allowances' | 'rare' }> = ({ inputs, result, update, metadata, part }) => {
   const rules = useRuleSetContent(result?.rule_set.rule_set_id, result?.rule_set.version);
   if (!result) return <EmptyState>Computing…</EmptyState>;
   const regime = result.regimes.new;
@@ -30,14 +34,27 @@ export const NewRegimeInputs: React.FC<PlannerChildProps> = ({ inputs, result, u
   const ignored = result.warnings.find((w) => w.code === 'old_regime_only_deductions' && w.regime === 'new');
   const otherNew = metadata.deduction_fields.filter((f) => f.rule_key === 'other_new');
 
+  if (part === 'rare') {
+    return (
+      <Section title="New regime: rarely used items" subtitle="Only a few people have these. Taken as entered; eligibility isn't checked.">
+        <div style={fieldGrid}>
+          {otherNew.map((f) => (
+            <DeductionInput key={f.path} field={f} value={getIn(inputs, f.path)} onChange={(v) => update(f.path, v)} />
+          ))}
+          <NumberField id="ea-other-new" label="Exempt allowances allowed in the new regime (e.g. conveyance for divyang employees)"
+            value={inputs.exempt_allowances.other_new} onChange={(v) => update('exempt_allowances.other_new', v)} />
+        </div>
+      </Section>
+    );
+  }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <Section title="What the new regime allows" subtitle="Read from the selected rule set. Old-regime deductions are never applied here.">
+      <Section title="Which regime allows what" subtitle="The new regime allows only what's ticked below; everything else on this tab lowers old-regime tax only. Read from the selected rule set.">
         <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <Row ok label={`Standard deduction: ${formatINR(regime.standard_deduction)}`}
             detail={<>{sectionLabel(sd)} <VerificationBadge level={sd?.verification} /></>} />
           <Row ok={(inputs.employer_contributions.nps || 0) > 0}
-            label={`Employer NPS: ${formatINR(regime.deductions.employer_nps || 0)} deducted`}
+            label={`Employer NPS: ${formatINR(regime.deductions.employer_nps || 0)} deducted (of ${formatINR(inputs.employer_contributions.nps || 0)} paid in)`}
             detail={<>{npsPct !== undefined && `limit ${npsPct}% of basic + DA`} {sectionLabel(nps)} <VerificationBadge level={nps?.verification} /></>} />
           <Row ok={false} label="HRA exemption: not available" detail={<>{sectionLabel(hra)} <VerificationBadge level={hra?.verification} /></>} />
           <Row ok={false} label="Professional tax deduction: not available" detail={<>{sectionLabel(pt)} <VerificationBadge level={pt?.verification} /></>} />
@@ -48,22 +65,5 @@ export const NewRegimeInputs: React.FC<PlannerChildProps> = ({ inputs, result, u
           <div style={{ fontSize: '12px', color: 'var(--warning)' }}>{ignored.message}</div>
         )}
       </Section>
-
-      <Section title="Employer NPS" subtitle="Entered on the Salary & CTC tab. The Corporate NPS optimiser (Phase 3) will compare contribution levels and funding methods.">
-        <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-          Contribution {formatINR(inputs.employer_contributions.nps || 0)} a year; deductible here {formatINR(regime.deductions.employer_nps || 0)}.
-        </div>
-      </Section>
-
-      <Section title="Other new-regime items" subtitle="Rarely used. Taken as entered; the engine cannot check eligibility.">
-        <div style={fieldGrid}>
-          {otherNew.map((f) => (
-            <DeductionInput key={f.path} field={f} value={getIn(inputs, f.path)} onChange={(v) => update(f.path, v)} />
-          ))}
-          <NumberField id="ea-other-new" label="Exempt allowances allowed in the new regime (e.g. conveyance for divyang employees)"
-            value={inputs.exempt_allowances.other_new} onChange={(v) => update('exempt_allowances.other_new', v)} />
-        </div>
-      </Section>
-    </div>
   );
 };

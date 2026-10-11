@@ -158,7 +158,7 @@ export const SalaryInputs: React.FC<PlannerChildProps> = ({ inputs, update, meta
   const p = inputs.profile;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <Section title="Profile" subtitle="Age and residency decide which old-regime slabs, rebates and 80TTB apply.">
+      <Section title="About you" subtitle="Age and residency decide which old-regime slabs, rebates and 80TTB apply.">
         <div style={fieldGrid}>
           <NumberField id="tp-age" label="Age" value={p.age} min={0} max={130} onChange={(v) => update('profile.age', Math.round(v))} />
           <SelectField id="tp-residency" label="Residential status" value={p.residential_status}
@@ -169,7 +169,7 @@ export const SalaryInputs: React.FC<PlannerChildProps> = ({ inputs, update, meta
             onChange={(v) => update('profile.employer_type', v)} help="Sets the old-regime employer NPS limit." />
           <SelectField id="tp-selected-regime" label="Regime your employer deducts TDS under" value={p.selected_regime ?? ''}
             options={[{ value: '', label: 'Not known' }, { value: 'new', label: 'New regime' }, { value: 'old', label: 'Old regime' }]}
-            onChange={(v) => update('profile.selected_regime', v || null)} help="Used to reconcile TDS against the computed liability." />
+            onChange={(v) => update('profile.selected_regime', v || null)} help="Checks your TDS against the tax, and the Summary says if the other regime would cost less." />
         </div>
       </Section>
 
@@ -241,29 +241,36 @@ export const SalaryInputs: React.FC<PlannerChildProps> = ({ inputs, update, meta
         </div>
       </Section>
 
-      <Section title="Tax already paid" subtitle="Used to work out tax still payable or refundable.">
-        <div style={fieldGrid}>
-          {monthlyOn
-            ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                <span className="form-label" style={{ fontSize: '12px' }}>TDS deducted so far</span>
-                <strong style={{ fontSize: '14px', color: 'var(--text-primary)', padding: '8px 0' }}>{formatINR(result?.inputs.prepaid.tds ?? 0)}</strong>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Total of the actual months' TDS in the grid above.</span>
-              </div>
-            )
-            : <NumberField id="tp-tds" label="TDS deducted this year" value={inputs.prepaid.tds} onChange={(v) => update('prepaid.tds', v)} />}
-          {inputs.advance_tax_payments?.length
-            ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                <span className="form-label" style={{ fontSize: '12px' }}>Advance tax paid</span>
-                <strong style={{ fontSize: '14px', color: 'var(--text-primary)', padding: '8px 0' }}>{formatINR(inputs.advance_tax_payments.reduce((t, p) => t + (p.amount || 0), 0))}</strong>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Total of the dated payments on the Advance Tax tab.</span>
-              </div>
-            )
-            : <NumberField id="tp-advance" label="Advance tax paid" value={inputs.prepaid.advance_tax} onChange={(v) => update('prepaid.advance_tax', v)}
-                help="Or enter each payment with its date on the Advance Tax tab." />}
-        </div>
-      </Section>
     </div>
+  );
+};
+
+/** TDS and advance tax already paid (on Pay & TDS): what's still payable or refundable is worked out from these. */
+export const TaxPaidInputs: React.FC<PlannerChildProps> = ({ inputs, result, update }) => {
+  const monthlyOn = !!inputs.monthly?.enabled;
+  return (
+    <Section title="Tax already paid" subtitle="Used to work out tax still payable or refundable.">
+      <div style={fieldGrid}>
+        {monthlyOn
+          ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+              <span className="form-label" style={{ fontSize: '12px' }}>TDS deducted so far</span>
+              <strong style={{ fontSize: '14px', color: 'var(--text-primary)', padding: '8px 0' }}>{formatINR(result?.inputs.prepaid.tds ?? 0)}</strong>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Total of the actual months' TDS in the month-by-month grid under Income.</span>
+            </div>
+          )
+          : <NumberField id="tp-tds" label="TDS deducted this year" value={inputs.prepaid.tds} onChange={(v) => update('prepaid.tds', v)} />}
+        {inputs.advance_tax_payments?.length
+          ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+              <span className="form-label" style={{ fontSize: '12px' }}>Advance tax paid</span>
+              <strong style={{ fontSize: '14px', color: 'var(--text-primary)', padding: '8px 0' }}>{formatINR(inputs.advance_tax_payments.reduce((t, p) => t + (p.amount || 0), 0))}</strong>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Total of the dated payments under Advance tax below.</span>
+            </div>
+          )
+          : <NumberField id="tp-advance" label="Advance tax paid" value={inputs.prepaid.advance_tax} onChange={(v) => update('prepaid.advance_tax', v)}
+              help="Or enter each payment with its date under Advance tax below." />}
+      </div>
+    </Section>
   );
 };

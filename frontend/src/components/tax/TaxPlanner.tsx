@@ -1,42 +1,35 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { RotateCcw, Wand2 } from 'lucide-react';
-import { Person, TaxComputeResult, TaxInputMetadata, TaxOptimization, TaxPayslipResult, TaxPlannerInputs, TaxRuleSetMeta } from '../../types';
+import { ChevronDown, Wand2 } from 'lucide-react';
+import { KnowledgeArticle, Person, TaxComputeResult, TaxInputMetadata, TaxOptimization, TaxPayslipResult, TaxPlannerInputs, TaxPrefillResult, TaxProfile, TaxRuleSetMeta } from '../../types';
 import { API_BASE_URL } from '../../config';
-import { apiJson, EmptyState, ErrorBanner, Pill, SubTabs } from './taxUi';
-import { annualFromMonths, clearDraft, DEFAULT_OPTIMIZATION, DEFAULT_PLANNER_INPUTS, loadDraft, payslipRequest, setIn, toEngineInputs } from './plannerInputs';
-import { PrefillDialog } from './PrefillDialog';
-import { PlannerOverview } from './PlannerOverview';
-import { SalaryInputs } from './SalaryInputs';
-import { OldRegimeInputs } from './OldRegimeInputs';
-import { NewRegimeInputs } from './NewRegimeInputs';
-import { RegimeComparison } from './RegimeComparison';
+import { ConfirmAction } from '../settings/ui';
+import { apiJson, EmptyState, ErrorBanner, Pill } from './taxUi';
+import { annualFromMonths, clearDraft, DEFAULT_OPTIMIZATION, DEFAULT_PLANNER_INPUTS, EMPTY_PLANNER_INPUTS, isEmptyPlan, loadDraft, payslipRequest, setIn, toEngineInputs } from './plannerInputs';
+import { applyTarget, PrefillDialog } from './PrefillDialog';
 import { ComputationDetails } from './ComputationDetails';
 import { ScenariosPanel } from './ScenariosPanel';
-import { NpsOptimizer } from './NpsOptimizer';
-import { PayslipSimulator } from './PayslipSimulator';
 import { TaxChartsTab } from './TaxChartsTab';
 import { SensitivityPanel } from './SensitivityPanel';
 import { ReportsPanel } from './ReportsPanel';
-import { AdvanceTaxPanel } from './AdvanceTaxPanel';
+import { TaxRulesManager } from './TaxRulesManager';
+import { DeductionsTab, IncomeTab, MainTab, PayTab, TAB_LABELS, TaxSummary, WaysToSaveTab } from './PlannerTabs';
 import { useTaxPost } from './useTaxPost';
 
-type PlannerTab = 'overview' | 'salary' | 'old' | 'new' | 'comparison' | 'nps' | 'payslip' | 'advance' | 'charts' | 'sensitivity' | 'computation' | 'scenarios' | 'reports';
+// Five tabs for what most people need; the specialist views sit under More.
+type MoreTab = 'charts' | 'sensitivity' | 'computation' | 'scenarios' | 'reports' | 'rules';
+type PlannerTab = MainTab | MoreTab;
 
-const TABS: { key: PlannerTab; label: string }[] = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'salary', label: 'Salary & CTC' },
-  { key: 'old', label: 'Old Regime' },
-  { key: 'new', label: 'New Regime' },
-  { key: 'comparison', label: 'Old vs New' },
-  { key: 'nps', label: 'NPS Optimizer' },
-  { key: 'payslip', label: 'Payslip' },
-  { key: 'advance', label: 'Advance Tax' },
-  { key: 'charts', label: 'Charts' },
-  { key: 'sensitivity', label: 'Sensitivity' },
-  { key: 'computation', label: 'Computation & Audit' },
-  { key: 'scenarios', label: 'Scenarios' },
-  { key: 'reports', label: 'Reports & Export' },
+const MAIN_TABS: MainTab[] = ['summary', 'income', 'deductions', 'pay', 'save'];
+const MORE_TABS: { key: MoreTab; label: string; hint: string }[] = [
+  { key: 'charts', label: 'Charts', hint: 'Tax by regime, the savings waterfall, NPS levels' },
+  { key: 'sensitivity', label: 'What-ifs', hint: 'A raise, a bonus, a different basic share, NPS for a target saving' },
+  { key: 'computation', label: 'Workings & audit', hint: 'Every step of the calculation and the rule behind it' },
+  { key: 'scenarios', label: 'Saved scenarios', hint: 'Keep a version of this plan and compare later' },
+  { key: 'reports', label: 'Reports & export', hint: 'CSV and PDF' },
+  { key: 'rules', label: 'Tax rules', hint: "The year's slabs and limits, and your own copies" },
 ];
+
+const AGE_FROM_BAND: Record<string, number | undefined> = { '60to80': 60, Above80: 80 };
 
 const COMPUTE_DEBOUNCE_MS = 250;
 const DRAFT_SAVE_DEBOUNCE_MS = 600;
@@ -71,14 +64,19 @@ export interface PlannerChildProps {
 
 interface TaxPlannerProps {
   people?: Person[];
+  /** The earlier Quick estimate's saved figures: a year with no plan yet starts from them. */
+  taxProfiles?: TaxProfile[];
+  articles?: KnowledgeArticle[];
   showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
-  onOpenRules: () => void;
 }
 
-export const TaxPlanner: React.FC<TaxPlannerProps> = ({ people = [], showToast, onOpenRules }) => {
+export const TaxPlanner: React.FC<TaxPlannerProps> = ({ people = [], taxProfiles = [], articles, showToast }) => {
   const primaryId = (people.find((p) => p.role === 'Primary Owner') ?? people[0])?.id ?? null;
   const [personId, setPersonId] = useState<number | null>(primaryId);
-  const [tab, setTab] = useState<PlannerTab>('overview');
+  const [tab, setTab] = useState<PlannerTab>('summary');
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [rulesVersion, setRulesVersion] = useState(0);
+  const moreRef = useRef<HTMLDivElement>(null);
   const [metadata, setMetadata] = useState<TaxInputMetadata | null>(null);
   const [ruleSets, setRuleSets] = useState<TaxRuleSetMeta[]>([]);
   const [financialYear, setFinancialYear] = useState<string>('');
@@ -96,9 +94,40 @@ export const TaxPlanner: React.FC<TaxPlannerProps> = ({ people = [], showToast, 
   }, []);
 
   const apply = (d: DraftContent | null, fy: string) => {
-    setInputs(withDefaults(DEFAULT_PLANNER_INPUTS, d?.inputs));
+    setInputs(withDefaults(EMPTY_PLANNER_INPUTS, d?.inputs));
     setOptimization(withDefaults(DEFAULT_OPTIMIZATION, d?.optimization));
     setFinancialYear(fy);
+  };
+
+  /**
+   * A year with no plan but with figures saved in the earlier Quick estimate starts from
+   * them: what Fill from my data proposes (its yearly figures and deductions are among
+   * those), the salary split into the basic and HRA it recorded with the rest as special
+   * allowance, and its age band, metro and regime. Null when there's nothing to bring over.
+   */
+  const fromQuickEstimate = async (pid: number | null, fy: string, meta: TaxInputMetadata): Promise<TaxPlannerInputs | null> => {
+    const profile = taxProfiles.find((p) => p.person_id === pid && p.financial_year === fy);
+    if (!profile || pid === null) return null;
+    const pre = await apiJson<TaxPrefillResult>(`/api/tax/prefill?financial_year=${encodeURIComponent(fy)}&person_id=${pid}`).catch(() => null);
+    const sums = new Map<string, number>();
+    pre?.items.filter((i) => i.selected).forEach((i) => sums.set(i.target, (sums.get(i.target) ?? 0) + i.amount));
+    const total = Math.round(sums.get('salary_total') ?? 0);
+    sums.delete('salary_total');
+    let next: TaxPlannerInputs = EMPTY_PLANNER_INPUTS;
+    sums.forEach((v, t) => { next = applyTarget(next, meta, t, Math.round(v)); });
+    const basic = profile.hra_basic_salary || 0;
+    const hra = profile.hra_received || 0;
+    const salary: Record<string, number> = basic || hra ? { basic, hra, special_allowance: Math.max(total - basic - hra, 0) } : { basic: total };
+    return {
+      ...next,
+      salary: { ...next.salary, ...salary },
+      profile: {
+        ...next.profile,
+        age: AGE_FROM_BAND[profile.age_band] ?? next.profile.age,
+        metro: profile.is_metro_city ? true : null,
+        selected_regime: profile.regime === 'Old' ? 'old' : 'new',
+      },
+    };
   };
 
   // Plans live in the database, so they travel with the .db file.
@@ -120,7 +149,14 @@ export const TaxPlanner: React.FC<TaxPlannerProps> = ({ people = [], showToast, 
       else if (legacy) {
         apply(legacy, fy);
         await putDraft(draftUrl(primaryId, fy), { ...legacy, financialYear: fy }).catch(() => undefined);
-      } else apply(null, fy);
+      } else {
+        const migrated = await fromQuickEstimate(primaryId, fy, meta);
+        apply(migrated ? { inputs: migrated } : null, fy);
+        if (migrated) {
+          await putDraft(draftUrl(primaryId, fy), { inputs: migrated, financialYear: fy, optimization: DEFAULT_OPTIMIZATION }).catch(() => undefined);
+          showToast?.(`Started FY ${fy} from your Quick estimate figures. Check them under Income and Deductions.`, 'info');
+        }
+      }
       if (legacy) {
         await apiJson(LEGACY_DRAFT_URL, { method: 'DELETE' }).catch(() => undefined);
         clearDraft(); // never leaks into a different database opened later
@@ -146,10 +182,15 @@ export const TaxPlanner: React.FC<TaxPlannerProps> = ({ people = [], showToast, 
     if (nextPerson === personId && nextFy === financialYear) return;
     await putDraft(draftUrl(personId, financialYear), { inputs, financialYear, optimization }).catch(() => undefined);
     const saved = await getDraft(draftUrl(nextPerson, nextFy));
+    const migrated = saved || !metadata ? null : await fromQuickEstimate(nextPerson, nextFy, metadata);
     setResult(null);
     skipNextSave.current = true;
     if (saved) apply(saved, nextFy);
-    else if (nextPerson === personId) {
+    else if (migrated) {
+      apply({ inputs: migrated }, nextFy);
+      skipNextSave.current = false; // keep it as this year's plan straight away
+      showToast?.(`Started FY ${nextFy} from your Quick estimate figures. Check them under Income and Deductions.`, 'info');
+    } else if (nextPerson === personId) {
       // A new year starts from this year's figures. Month-by-month entries belong to one
       // year, so they're folded into annual totals.
       setInputs(inputs.monthly?.enabled ? { ...annualFromMonths(inputs), monthly: null } : inputs);
@@ -157,8 +198,6 @@ export const TaxPlanner: React.FC<TaxPlannerProps> = ({ people = [], showToast, 
       showToast?.(`New plan for FY ${nextFy}, starting from your FY ${financialYear} figures`, 'info');
     } else {
       apply(null, nextFy);
-      const who = people.find((p) => p.id === nextPerson)?.name ?? 'this person';
-      showToast?.(`New plan for ${who}: starting from the sample payroll. Use "Fill from my data" to bring in their figures.`, 'info');
     }
     setPersonId(nextPerson);
   };
@@ -196,21 +235,48 @@ export const TaxPlanner: React.FC<TaxPlannerProps> = ({ people = [], showToast, 
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [inputs, financialYear, draftReady]);
+  }, [inputs, financialYear, draftReady, rulesVersion]);
 
-  // Before/after payslip for the Overview cards (the Payslip tab fetches its own).
-  const overviewPayslip = useTaxPost<TaxPayslipResult>('/api/tax/payslip', payslipRequest(inputs, financialYear, optimization),
-    !!financialYear && tab === 'overview');
+  // Before/after payslip for the Summary's employer-NPS suggestion (Pay & TDS fetches its own).
+  const summaryPayslip = useTaxPost<TaxPayslipResult>('/api/tax/payslip', payslipRequest(inputs, financialYear, optimization),
+    !!financialYear && tab === 'summary' && !isEmptyPlan(inputs));
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !moreRef.current?.contains(e.target as Node)) setMoreOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', close);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close); };
+  }, [moreOpen]);
+
+  /** Leaving Tax rules: a different rule set may now apply to this year. */
+  const goTo = (next: PlannerTab) => {
+    if (tab === 'rules' && next !== 'rules') {
+      loadRuleSets();
+      setRulesVersion((v) => v + 1);
+    }
+    setTab(next);
+    setMoreOpen(false);
+  };
 
   const update = useCallback((path: string, value: unknown) => {
     setInputs((prev) => setIn(prev, path, value));
   }, []);
 
-  const resetToDefaults = () => {
-    apiJson(draftUrl(personId, financialYear), { method: 'DELETE' }).catch(() => undefined);
-    setInputs(DEFAULT_PLANNER_INPUTS);
+  const clearPlan = () => {
+    // Saved as an empty plan (not deleted), so the year stays cleared: with no plan it
+    // would start again from any Quick estimate figures.
+    putDraft(draftUrl(personId, financialYear), { inputs: EMPTY_PLANNER_INPUTS, financialYear, optimization: DEFAULT_OPTIMIZATION }).catch(() => undefined);
+    setInputs(EMPTY_PLANNER_INPUTS);
     setOptimization(DEFAULT_OPTIMIZATION);
-    showToast?.('Planner inputs reset to the sample payroll', 'info');
+    setTab('summary');
+    showToast?.(`Cleared FY ${financialYear}'s figures`, 'info');
+  };
+  const trySample = () => {
+    setInputs(DEFAULT_PLANNER_INPUTS);
+    showToast?.('Sample figures loaded: a ₹54 lakh salary. Replace them with yours, or clear them from the top bar.', 'info');
   };
 
   if (!metadata || !draftReady) {
@@ -225,44 +291,37 @@ export const TaxPlanner: React.FC<TaxPlannerProps> = ({ people = [], showToast, 
   const childProps: PlannerChildProps = { inputs, result, update, metadata, financialYear };
   const optProps = { inputs, financialYear, metadata, optimization, setOptimization };
 
+  const moreActive = MORE_TABS.find((t) => t.key === tab);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <div className="glass-panel" style={{ padding: '12px 16px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', fontSize: '12.5px' }}>
+    <div className="tp-stack">
+      <div className="glass-panel tp-bar">
         {people.length > 0 && (
-          <>
-            <label htmlFor="planner-person" className="form-label" style={{ fontSize: '12px' }}>Whose tax</label>
-            <select id="planner-person" className="form-input" style={{ padding: '6px 10px', fontSize: '12.5px', width: 'auto' }}
-              value={personId ?? ''} onChange={(e) => { void switchPlan(Number(e.target.value), financialYear); }}>
+          <label className="tp-pick"><span>Whose tax</span>
+            <select id="planner-person" className="form-control" value={personId ?? ''} onChange={(e) => { void switchPlan(Number(e.target.value), financialYear); }}>
               {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
-          </>
+          </label>
         )}
-        <label htmlFor="planner-fy" className="form-label" style={{ fontSize: '12px' }}>Financial year</label>
-        <select id="planner-fy" className="form-input" style={{ padding: '6px 10px', fontSize: '12.5px', width: 'auto' }}
-          value={financialYear} onChange={(e) => changeYear(e.target.value)}>
-          {(years.includes(financialYear) || !financialYear ? years : [financialYear, ...years]).map((fy) => <option key={fy} value={fy}>FY {fy}</option>)}
-        </select>
+        <label className="tp-pick"><span>Financial year</span>
+          <select id="planner-fy" className="form-control" value={financialYear} onChange={(e) => changeYear(e.target.value)}>
+            {(years.includes(financialYear) || !financialYear ? years : [financialYear, ...years]).map((fy) => <option key={fy} value={fy}>FY {fy}</option>)}
+          </select>
+        </label>
         {result && (
-          <span style={{ color: 'var(--text-secondary)' }}>
-            Rules: <strong style={{ color: 'var(--text-primary)' }}>{result.rule_set.name ?? result.rule_set.rule_set_id}</strong>{' '}
-            v{result.rule_set.version} · {result.rule_set.act}{' '}
+          <button type="button" className="tp-rules" onClick={() => goTo('rules')} title="See or change the tax rules used for this year">
+            {result.rule_set.name ?? result.rule_set.rule_set_id} · v{result.rule_set.version} · {result.rule_set.act}
             {result.rule_set.source === 'user' && <Pill color="#ec4899" title="Your own rule set is selected for this year">Your rules</Pill>}
-          </span>
+          </button>
         )}
         {ruleSets.length > 0 && !applying && (
-          <Pill color="#f59e0b" title="Select a rule set for this year in Tax Rules">No rule set in use for this year</Pill>
+          <Pill color="#f59e0b" title="Select a rule set for this year in Tax rules">No rule set in use for this year</Pill>
         )}
-        <span style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
-          {computing && <span style={{ color: 'var(--text-muted)' }} aria-live="polite">Recalculating…</span>}
-          <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', gap: '6px', alignItems: 'center' }}
-            onClick={() => setShowPrefill(true)} title="Propose figures from your income, investments, insurance, loans and gains">
+        <span className="tp-bar-actions">
+          {computing && <span className="tp-muted" aria-live="polite">Recalculating…</span>}
+          <button className="btn btn-primary tp-fill" onClick={() => setShowPrefill(true)} title="Propose figures from your income, investments, insurance, loans and gains">
             <Wand2 size={13} /> Fill from my data
           </button>
-          <button className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={onOpenRules}>Manage tax rules</button>
-          <button className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', gap: '6px', alignItems: 'center' }}
-            onClick={resetToDefaults} title="Replace all inputs with the sample payroll">
-            <RotateCcw size={13} /> Reset inputs
-          </button>
+          <ConfirmAction label="Clear figures" confirmLabel="Clear" danger question={`Clear every figure in ${people.find((p) => p.id === personId)?.name ?? 'this'}'s FY ${financialYear} plan?`} onConfirm={clearPlan} />
         </span>
       </div>
 
@@ -272,20 +331,39 @@ export const TaxPlanner: React.FC<TaxPlannerProps> = ({ people = [], showToast, 
           onApply={(next, summary) => { setInputs(next); setShowPrefill(false); showToast?.(summary, 'success'); }} />
       )}
 
-      <SubTabs label="Tax planner sections" tabs={TABS} active={tab} onChange={setTab} />
+      <div className="cc-views tp-tabs" role="tablist" aria-label="Tax planner sections">
+        {MAIN_TABS.map((t) => (
+          <button key={t} type="button" role="tab" aria-selected={tab === t} className="cc-view" onClick={() => goTo(t)}>{TAB_LABELS[t]}</button>
+        ))}
+        <div ref={moreRef} className="tp-more">
+          <button type="button" role="tab" aria-selected={!!moreActive} aria-haspopup="menu" aria-expanded={moreOpen} className="cc-view" onClick={() => setMoreOpen(!moreOpen)}>
+            {moreActive ? moreActive.label : 'More'} <ChevronDown size={13} />
+          </button>
+          {moreOpen && (
+            <div role="menu" className="topbar-menu tp-more-menu">
+              {MORE_TABS.map((t) => (
+                <button key={t.key} type="button" role="menuitem" className="topbar-menu-item tp-more-item" onClick={() => goTo(t.key)}>
+                  <span>{t.label}</span><small>{t.hint}</small>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
 
-      {tab === 'overview' && <PlannerOverview {...childProps} payslip={overviewPayslip.stale ? null : overviewPayslip.data} />}
-      {tab === 'salary' && <SalaryInputs {...childProps} />}
-      {tab === 'old' && <OldRegimeInputs {...childProps} />}
-      {tab === 'new' && <NewRegimeInputs {...childProps} />}
-      {tab === 'comparison' && <RegimeComparison {...childProps} />}
-      {tab === 'nps' && <NpsOptimizer {...optProps} />}
-      {tab === 'payslip' && <PayslipSimulator {...optProps} />}
-      {tab === 'advance' && <AdvanceTaxPanel {...childProps} />}
+      {tab === 'summary' && (
+        <TaxSummary {...childProps} personId={personId} payslip={summaryPayslip.stale ? null : summaryPayslip.data} articles={articles}
+          onGo={goTo} onFill={() => setShowPrefill(true)} onSample={trySample} />
+      )}
+      {tab === 'income' && <IncomeTab {...childProps} personId={personId} />}
+      {tab === 'deductions' && <DeductionsTab {...childProps} />}
+      {tab === 'pay' && <PayTab {...childProps} opt={optProps} />}
+      {tab === 'save' && <WaysToSaveTab opt={optProps} personId={personId} articles={articles} />}
       {tab === 'charts' && <TaxChartsTab {...optProps} result={result} />}
       {tab === 'sensitivity' && <SensitivityPanel {...optProps} />}
       {tab === 'reports' && <ReportsPanel {...optProps} result={result} />}
       {tab === 'computation' && <ComputationDetails {...childProps} />}
+      {tab === 'rules' && <TaxRulesManager showToast={showToast} />}
       {tab === 'scenarios' && (
         <ScenariosPanel
           inputs={inputs}
@@ -298,8 +376,8 @@ export const TaxPlanner: React.FC<TaxPlannerProps> = ({ people = [], showToast, 
               setResult(null);
               setFinancialYear(fy);
             }
-            setInputs(withDefaults(DEFAULT_PLANNER_INPUTS, loadedInputs));
-            setTab('overview');
+            setInputs(withDefaults(EMPTY_PLANNER_INPUTS, loadedInputs));
+            setTab('summary');
           }}
         />
       )}

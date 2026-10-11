@@ -45,13 +45,18 @@ TARGET_LABELS = {
     "deductions.home_loan_interest_self_occupied": "Home loan interest (self-occupied)",
     "deductions.80E": "80E: education loan interest",
     "deductions.80G_eligible": "80G: eligible donations",
+    "deductions.80D_parents": "80D: parents' health insurance",
+    "deductions.other_old": "Other old-regime deductions",
+    "other_income.other": "Other income",
+    "prepaid.tds": "TDS deducted this year",
+    "prepaid.advance_tax": "Advance tax paid",
     "capital_gains.stcg_111a": "Short-term equity gains (111A)",
     "capital_gains.ltcg_112a": "Long-term equity gains (112A)",
     "capital_gains.ltcg_112": "Long-term other gains (112)",
     "capital_gains.stcg_slab": "Short-term gains at slab rates",
 }
 # Targets the month-by-month grid owns when it's switched on.
-MONTHLY_GRID_TARGETS = ("salary_total", "salary.bonus", "hra.rent_paid_monthly")
+MONTHLY_GRID_TARGETS = ("salary_total", "salary.bonus", "hra.rent_paid_monthly", "prepaid.tds")
 
 
 def fy_bounds(financial_year: str):
@@ -375,15 +380,63 @@ def _gains_items(cur, person_id, financial_year) -> List[dict]:
     return items
 
 
-def _profile_items(cur, person_id, financial_year) -> List[dict]:
-    """Itemised entries from Profile & Deductions for this person and year."""
+# The earlier Quick estimate's yearly figures (tax_profiles), for the plan's matching fields.
+# Its basic salary and HRA aren't offered here: the salary's total comes from Income &
+# Expenses, and the Planner sets the structure when it first opens that year's figures.
+PROFILE_FIELDS = [
+    ("home_loan_interest_self_occupied", "deductions.home_loan_interest_self_occupied", "Home loan interest"),
+    ("other_income_reported", "other_income.other", "Other taxable income"),
+    ("tds_deducted", "prepaid.tds", "TDS deducted"),
+    ("advance_tax_paid", "prepaid.advance_tax", "Advance tax paid"),
+]
+
+
+def _profile_items(cur, person_id, financial_year, rules: Optional[dict] = None) -> List[dict]:
+    """Figures entered in the earlier Quick estimate (tax_profiles / tax_deductions) for this
+    person and year: its yearly figures and its itemised deductions."""
+    items = []
+    profile = cur.execute("SELECT * FROM tax_profiles WHERE person_id = ? AND financial_year = ?", (person_id, financial_year)).fetchone()
+    if profile:
+        for column, target, label in PROFILE_FIELDS:
+            if (profile[column] or 0) > 0:
+                items.append(_item(target, profile[column], label, "recorded", "Entered in the Quick estimate",
+                                   {"type": "tax_profile", "id": profile["id"]}))
+        if (profile["hra_rent_paid"] or 0) > 0:
+            items.append(_item("hra.rent_paid_monthly", round(profile["hra_rent_paid"] / 12, 2), "Rent paid (a year's rent ÷ 12)", "recorded",
+                               "Entered in the Quick estimate", {"type": "tax_profile", "id": profile["id"]}))
     cur.execute("""SELECT d.id, d.section, d.label, d.amount FROM tax_deductions d
                    JOIN tax_profiles p ON p.id = d.tax_profile_id
                    WHERE p.person_id = ? AND p.financial_year = ? ORDER BY d.section, d.label""", (person_id, financial_year))
     targets = {"80C": "deductions.80C.other", "80D": "deductions.80D_self_family", "80CCD1B": "deductions.employee_nps",
-               "80E": "deductions.80E", "80G": "deductions.80G_eligible", "24B": "deductions.home_loan_interest_self_occupied"}
-    return [_item(targets[d["section"]], d["amount"], d["label"], "recorded", f"Entered under {d['section']} in Profile & Deductions",
-                  {"type": "tax_deduction", "id": d["id"]}) for d in cur.fetchall() if d["section"] in targets and d["amount"] > 0]
+               "80E": "deductions.80E", "80G": "deductions.80G_eligible", "24B": "deductions.home_loan_interest_self_occupied",
+               "Other": "deductions.other_old"}
+    # 80TTA isn't carried: the planner works it out from savings-account interest itself.
+    rows = [d for d in cur.fetchall() if d["section"] in targets and d["amount"] > 0]
+    # The Quick estimate didn't split 80D by who was insured; like its estimate, the amount
+    # above the self/family limit counts as parents' (non-senior) premium.
+    self_cap = None
+    if rules and profile:
+        try:
+            limits = rules["regimes"]["old"]["deductions"]["value"]["80D"]
+            senior = (profile["age_band"] or "Below60") != "Below60"
+            self_cap = float(limits["self_family_senior"] if senior else limits["self_family"])
+        except (KeyError, TypeError, ValueError):
+            self_cap = None
+    used_80d = 0.0
+    for d in rows:
+        explanation = f"Entered under {d['section']} in the Quick estimate"
+        source = {"type": "tax_deduction", "id": d["id"]}
+        if d["section"] == "80D" and self_cap is not None:
+            own = max(min(d["amount"], self_cap - used_80d), 0.0)
+            used_80d += own
+            if own > 0:
+                items.append(_item(targets["80D"], own, d["label"], "recorded", explanation, source))
+            if d["amount"] - own > 0:
+                items.append(_item("deductions.80D_parents", d["amount"] - own, f"{d['label']} (above the self/family limit)", "recorded",
+                                   explanation + "; the part above the self/family limit is taken as parents' premium", source))
+            continue
+        items.append(_item(targets[d["section"]], d["amount"], d["label"], "recorded", explanation, source))
+    return items
 
 
 def prefill(conn: sqlite3.Connection, financial_year: str, person_id: Optional[int] = None, today: Optional[date] = None,
@@ -404,20 +457,21 @@ def prefill(conn: sqlite3.Connection, financial_year: str, person_id: Optional[i
         loan_items, loan_notes = _loan_items(cur, person_id, start, end, today, rules)
         items += (_income_items(cur, person_id) + _rent_paid_items(cur, person_id) + _rental_ledger_items(cur, person_id, start, end) + _asset_items(cur, person_id, start, end)
                   + _insurance_items(cur, person_id, start, end) + loan_items
-                  + _gains_items(cur, person_id, financial_year) + _profile_items(cur, person_id, financial_year))
+                  + _gains_items(cur, person_id, financial_year) + _profile_items(cur, person_id, financial_year, rules))
 
     # The same money can show up twice (rent in both the ledger and an income row; a
-    # deduction typed in Profile & Deductions and also derived from a policy or loan):
+    # figure typed in the Quick estimate and also derived from a policy, loan or salary):
     # start those with one source ticked and say why.
     by_target: Dict[str, List[dict]] = {}
     for it in items:
         by_target.setdefault(it["target"], []).append(it)
     for target, group in by_target.items():
-        derived = [it for it in group if it["source"]["type"] not in ("tax_deduction", "income")]
+        typed = ("tax_deduction", "tax_profile", "income")
+        derived = [it for it in group if it["source"]["type"] not in typed]
         if not derived:
             continue
         for it in group:
-            if it["source"]["type"] in ("tax_deduction", "income"):
+            if it["source"]["type"] in typed:
                 it["selected"] = False
                 it["overlap"] = "May be the same money as the other source(s) for this field; tick only one."
     for i, it in enumerate(items):
