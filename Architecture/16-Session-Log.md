@@ -109,3 +109,81 @@ Decisions made explicitly with the user (not assumed):
 Never add `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>` (or
 any Co-Authored-By trailer) to commits in this repo — stated explicitly
 and emphatically, applies to every commit going forward, no exceptions.
+
+---
+
+## 2026-10-10 / 11 — Tax planner, app-wide redesign, money-model corrections
+
+### Tax planner (phases 1–4) — see `Domains/Taxation.md` for the design
+
+- **Engine in Python, rules in versioned JSON**, one file per financial
+  year, each figure tagged with how well it's verified. A test forbids
+  numeric thresholds in `backend/tax/*.py`, so a new year never means a
+  code change. Users edit copies stored in the DB; shipped files stay
+  read-only, and saved scenarios snapshot the rule set they used.
+- Everything derived (NPS scenarios, payslips, the savings waterfall,
+  break-even, sensitivity) **re-runs the full engine** rather than using
+  per-rupee shortcuts: surcharge thresholds and marginal relief make
+  shortcuts wrong exactly where the answers matter.
+- The EPF wage ceiling (₹15k → ₹25k from 17 Sep 2026, S.O. 5109(E)) is a
+  dated EPFO rule in `tax/metadata/epf_rules.json`, separate from income-
+  tax rules, marked as secondary-source until the gazette text is checked.
+
+### Design pass
+
+- One visual language across the app, taken from the redesigned Settings
+  (the user liked MMEX's plain, quiet look): settings-style groups and
+  rows, a summary strip at the top of each page, plain-English labels,
+  delete inside the edit form, ₹ inputs with Indian grouping. Pages were
+  rewritten in place; save paths and data shapes were left alone unless a
+  bug was found on the way (each such fix is in its commit message).
+- Merged overlapping pages: EMI Tool + Loan Optimizer → **Loan planner**;
+  Monthly Snapshot → a "Record this month" panel on the Dashboard.
+- A top bar (+ New, Ctrl/Cmd+K Go-to, database/backup chip) and Artha's
+  own desktop menu replaced Electron's default; both drive one command
+  handler (`App.runCommand`).
+
+### Money-model decisions (the "why")
+
+- **Savings rate counts money invested.** It is (income − spending − EMIs
+  − premiums) ÷ income. Before, investing more lowered it, which
+  contradicted the rule's own definition and punished the behaviour the
+  rule exists to encourage. EMIs and premiums stay outflows: they are
+  commitments, not choices to save.
+- **A holding's risk is derived, not just stored** (`backend/risk.py`): a
+  mutual fund's fund type, else a Low/High set by hand, else the usual
+  risk of its kind. "Medium" is the column default, so on its own it says
+  nothing. This let a goal say "only low-risk holdings" — a liquid fund
+  can back an insurance reserve while an equity fund is flagged — which a
+  category exclusion on "Mutual Fund" could not express. The fund type
+  also fixes tax: debt/liquid funds no longer get 112A harvesting advice.
+- **Several loans on one property.** `liabilities.linked_asset_id` already
+  allowed it; only the forms limited it. A top-up is filed as a Home Loan
+  (same property, same lender, and so it sits with the property), and a
+  dedicated link route was added because the generic entity PUT rebuilds
+  `metadata_json` from the payload and would wipe a loan's other fields
+  on a partial save.
+- **A home loan's tax treatment follows what the money was used for**, not
+  its type: buying/building (24(b) + 80C), repairs (24(b) only, capped by
+  a rule-file item), something else (neither), optionally only a share.
+  Considered and rejected: a separate "Top-up" loan type (still needs the
+  same field) and unticking in the planner each year (easy to forget).
+- **EPF: balances, not a ledger.** One asset per PF member account (one
+  UAN, one member ID per employer). The EPFO passbook is already the
+  monthly ledger; copying it would duplicate and drift. The pension (EPS)
+  share is recorded but kept out of net worth — it's an entitlement, not
+  a withdrawable balance — and a transferred account counts as nil so a
+  merge isn't double counted.
+- **No invented figures.** Several screens pre-filled made-up numbers
+  (₹1.5L salary in Cash Flow, ₹50k/month prepayment in the Loan
+  Optimizer). They now start from the user's own data (last logged month,
+  the Income & Expenses plan, last month's left-over) or from zero.
+
+### Deferred
+
+- Taxation's outer page, Credit Cards' Library/Compare tabs, Simulations,
+  Reports and Ask Artha still use the old styling.
+- The payslip view could show the employer's EPF/EPS split; tax doesn't
+  need it.
+- Mutual fund gains realised through the ledger are still classified by
+  asset category, not fund type.
