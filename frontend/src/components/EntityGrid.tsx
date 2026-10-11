@@ -49,6 +49,20 @@ const COMMON_COLUMNS: Record<string, Column[]> = {
     { label: 'Owner', key: 'owner_name' },
     { label: 'Status', key: 'status' },
   ],
+  income: [
+    { label: 'Name', key: 'name' },
+    { label: 'Category', key: 'category_name' },
+    { label: 'Amount', key: 'amount', alignRight: true },
+    { label: 'Frequency', key: 'frequency' },
+    { label: 'Owner', key: 'owner_name' },
+  ],
+  expenses: [
+    { label: 'Name', key: 'name' },
+    { label: 'Category', key: 'category_name' },
+    { label: 'Amount', key: 'amount', alignRight: true },
+    { label: 'Frequency', key: 'frequency' },
+    { label: 'Owner', key: 'owner_name' },
+  ],
   goals: [
     { label: 'Goal Name', key: 'name' },
     { label: 'Target Amount', key: 'target_amount', alignRight: true },

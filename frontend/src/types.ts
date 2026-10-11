@@ -304,9 +304,13 @@ export interface Income {
   name: string;
   category_id: number;
   category_name?: string;
-  amount: number;
+  amount: number; // gross, per period
   frequency: string;
   status?: string;
+  taxable?: number;
+  owner_id?: number;
+  owner_name?: string;
+  net_amount?: number; // Salary only: take-home per period (a Salary category custom field)
 }
 
 export interface Expense {
@@ -317,6 +321,8 @@ export interface Expense {
   amount: number;
   frequency: string;
   status?: string;
+  owner_id?: number;
+  owner_name?: string;
 }
 
 export interface Goal {

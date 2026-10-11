@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { InitData, MonthlyCashFlow } from '../types';
 import { API_BASE_URL } from '../config';
+import { monthlyEquivalent } from '../frequency';
 
 interface CashFlowPlanningProps {
   data: InitData;
@@ -13,7 +14,7 @@ interface CashFlowPlanningProps {
 }
 
 export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefresh, showToast }) => {
-  const { cash_flows = [], liabilities, assets, goals, accounts } = data;
+  const { cash_flows = [], liabilities, assets, goals, accounts, income = [], expenses = [] } = data;
   const loans = liabilities.filter((l: any) => l.category_name !== 'Credit Card');
   const properties = assets.filter((a: any) => a.category_name === 'Property');
   const insurance = assets.filter((a: any) => a.category_name === 'Insurance');
@@ -35,6 +36,7 @@ export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefr
   const [investments, setInvestments] = useState<number>(30000);
   const [oneTimeExpenses, setOneTimeExpenses] = useState<number>(0);
   const [notes, setNotes] = useState('');
+  const [autoFillNote, setAutoFillNote] = useState<string | null>(null);
 
   // What-If Simulation State
   const [simSalaryChangePct, setSimSalaryChangePct] = useState<number>(0);
@@ -89,15 +91,38 @@ export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefr
     }).format(val);
   };
 
-  // Run auto-fill routine from database portfolio
+  // Run auto-fill routine from database portfolio and the Income & Expenses plan
   const handleAutoFill = () => {
+    const filled: string[] = [];
+    const active = <T extends { status?: string }>(rows: T[]) => rows.filter((r) => (r.status ?? 'Active') === 'Active');
+
+    // 0. Take-home salary from the plan's Salary entries (their take-home field; the amount is gross)
+    const salaries = active(income).filter((i) => i.category_name === 'Salary');
+    const withTakeHome = salaries.filter((i) => (i.net_amount || 0) > 0);
+    if (withTakeHome.length) {
+      setNetSalary(Math.round(withTakeHome.reduce((s, i) => s + monthlyEquivalent(i.net_amount || 0, i.frequency), 0)));
+      filled.push(`take-home from ${withTakeHome.length} salary entr${withTakeHome.length === 1 ? 'y' : 'ies'}`);
+    }
+    const missingTakeHome = salaries.filter((i) => !((i.net_amount || 0) > 0)).map((i) => `"${i.name}"`);
+
     // 1. EMI Sum from active outstanding loans
     const emiSum = loans.reduce((sum: number, l: any) => sum + (l.outstanding > 0 ? l.emi : 0), 0);
     setEmi(emiSum);
 
-    // 2. Rental Income sum from properties
-    const rentSum = properties.reduce((sum: number, p: any) => sum + (p.rental_income || 0), 0);
-    setOtherIncome(rentSum);
+    // 2. Other income: the plan's non-salary income; property rent only when the plan has no Rental entry
+    //    (the same rent would otherwise be counted twice)
+    const otherPlanned = active(income).filter((i) => i.category_name !== 'Salary' && i.category_name !== 'Bonus');
+    const hasPlannedRent = otherPlanned.some((i) => i.category_name === 'Rental');
+    const rentSum = hasPlannedRent ? 0 : properties.reduce((sum: number, p: any) => sum + (p.rental_income || 0), 0);
+    setOtherIncome(Math.round(rentSum + otherPlanned.reduce((s, i) => s + monthlyEquivalent(i.amount, i.frequency), 0)));
+    if (otherPlanned.length) filled.push(`${otherPlanned.length} other income entr${otherPlanned.length === 1 ? 'y' : 'ies'}`);
+
+    // 2b. Household expenses from the plan (EMIs come from loans above, not from EMI expense entries)
+    const planned = active(expenses).filter((e) => e.category_name !== 'EMI');
+    if (planned.length) {
+      setHouseholdExpenses(Math.round(planned.reduce((s, e) => s + monthlyEquivalent(e.amount, e.frequency), 0)));
+      filled.push(`${planned.length} expense entr${planned.length === 1 ? 'y' : 'ies'}`);
+    }
 
     // 3. Pro-rata monthly insurance premium equivalent
     const insSum = insurance.reduce((sum: number, ins: any) => {
@@ -112,6 +137,16 @@ export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefr
     // 4. Goals contribution sum
     const investSum = goals.reduce((sum: number, g: any) => sum + (g.monthly_contribution || 0), 0);
     setInvestments(investSum);
+
+    setAutoFillNote(
+      `Filled EMIs, premiums and investments from your loans, policies and goals${filled.length ? `; ${filled.join(', ')} from Income & Expenses` : ''}.`
+      + (missingTakeHome.length
+        ? withTakeHome.length
+          ? ` Net salary leaves out ${missingTakeHome.join(', ')}: add its take-home amount under Income & Expenses to include it.`
+          : ` No salary entry has a take-home amount yet, so net salary was left as it was.`
+        : '')
+      + (!income.length && !expenses.length ? ' Add your recurring income and expenses under Income & Expenses to fill salary and household spending too.' : ''),
+    );
   };
 
   // Handle save snapshot
@@ -165,6 +200,7 @@ export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefr
     setInvestments(cf.investments);
     setOneTimeExpenses(cf.one_time_expenses);
     setNotes(cf.notes || '');
+    setAutoFillNote(null);
     setModalOpen(true);
   };
 
@@ -239,6 +275,7 @@ export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefr
         </div>
         <button className="btn btn-primary" onClick={() => {
           setEditingId(null);
+          setAutoFillNote(null);
           setModalOpen(true);
         }}>
           <Plus size={16} /> Log Monthly Flow
@@ -280,7 +317,7 @@ export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefr
               <p style={{ maxWidth: '400px', margin: '8px auto 20px auto', fontSize: '13px' }}>
                 Create your first monthly cash flow log to unlock KPIs, safety metrics, ratios analysis, and projections.
               </p>
-              <button className="btn btn-primary" onClick={() => setModalOpen(true)}>
+              <button className="btn btn-primary" onClick={() => { setAutoFillNote(null); setModalOpen(true); }}>
                 <Plus size={16} /> Log First Month
               </button>
             </div>
@@ -865,6 +902,9 @@ export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefr
                 </button>
               </div>
             </div>
+            {autoFillNote && (
+              <div role="status" style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5, marginTop: '8px' }}>{autoFillNote}</div>
+            )}
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', borderTop: '1px solid var(--border-glass)', paddingTop: '16px', marginTop: '8px' }}>
               <div className="form-group">

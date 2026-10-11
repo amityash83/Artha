@@ -88,6 +88,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def _with_metadata(row: dict) -> dict:
+    """Custom fields (category fields_definition) flattened onto the row, as for assets and
+    liabilities; a custom key never overrides a real column."""
+    try:
+        meta = json.loads(row.get("metadata_json") or "{}")
+    except ValueError:
+        meta = {}
+    if isinstance(meta, dict):
+        for k, v in meta.items():
+            row.setdefault(k, v)
+    return row
+
 def default_owner_id(cursor) -> int:
     """Owner for a record created without one (e.g. from the Credit Cards screen): the
     Primary Owner, else the first person, else 1 for an empty people table."""
@@ -375,19 +387,21 @@ def get_init_data():
 
         # Income
         cursor.execute("""
-            SELECT inc.*, c.name as category_name
+            SELECT inc.*, c.name as category_name, p.name as owner_name
             FROM income inc
             LEFT JOIN categories c ON inc.category_id = c.id
+            LEFT JOIN people p ON inc.owner_id = p.id
         """)
-        income = [dict(row) for row in cursor.fetchall()]
+        income = [_with_metadata(dict(row)) for row in cursor.fetchall()]
 
         # Expenses
         cursor.execute("""
-            SELECT e.*, c.name as category_name
+            SELECT e.*, c.name as category_name, p.name as owner_name
             FROM expenses e
             LEFT JOIN categories c ON e.category_id = c.id
+            LEFT JOIN people p ON e.owner_id = p.id
         """)
-        expenses = [dict(row) for row in cursor.fetchall()]
+        expenses = [_with_metadata(dict(row)) for row in cursor.fetchall()]
 
         # Goals: current_amount is derived from linked holdings when any exist, else the
         # manually-entered stored value (goals funded outside tracked assets stay manual).
@@ -814,7 +828,7 @@ def create_entity(entity_type: str, payload: dict):
     cursor = conn.cursor()
     try:
         initial_balance = 0.0
-        if entity_type in ("accounts", "assets", "liabilities") and not payload.get("owner_id"):
+        if entity_type in ("accounts", "assets", "liabilities", "income", "expenses") and not payload.get("owner_id"):
             payload["owner_id"] = default_owner_id(cursor)
         if entity_type == "accounts":
             initial_balance = float(payload.pop("current_balance", 0.0))
@@ -2436,8 +2450,8 @@ def _tax_profile_to_engine_inputs(cursor, profile: dict, rules: dict) -> tuple:
     cursor.execute("""
         SELECT i.amount, i.frequency, c.name as category_name
         FROM income i LEFT JOIN categories c ON i.category_id = c.id
-        WHERE i.taxable = 1
-    """)
+        WHERE i.taxable = 1 AND (i.owner_id = ? OR i.owner_id IS NULL)
+    """, (profile["person_id"],))
     for row in cursor.fetchall():
         freq = (row["frequency"] or "Monthly").strip().lower()
         per_year = INCOME_FREQUENCY_PER_YEAR.get(freq)
@@ -2457,7 +2471,7 @@ def _tax_profile_to_engine_inputs(cursor, profile: dict, rules: dict) -> tuple:
         else:
             other["other"] += annual
     other["other"] += float(profile.get("other_income_reported") or 0.0)
-    notes.append("Income is taken from all taxable income rows (income rows have no owner), not just this person's.")
+    notes.append("Income is this person's taxable income entries (Income & Expenses).")
 
     basic = min(float(profile.get("hra_basic_salary") or 0.0), salary_total)
     hra = min(float(profile.get("hra_received") or 0.0), salary_total - basic)

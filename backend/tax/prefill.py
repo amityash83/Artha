@@ -9,9 +9,7 @@ would fill (target), the amount, where it came from (source rows) and how firm i
     guess     - inferred from a name (a mutual fund called "ELSS ..." or "... Tax Saver")
 
 The UI shows the items, the user ticks the ones that apply, and ticked items for the same
-target are summed and replace that field. Income and expense rows have no owner in Artha,
-so every one is listed separately for the user to pick; assets, liabilities, insurance and
-realised gains are filtered to the chosen person.
+target are summed and replace that field. Everything is filtered to the chosen person.
 """
 import re
 import sqlite3
@@ -80,9 +78,10 @@ def _item(target, amount, label, basis, explanation, source, selected=True, **ex
             "selected": selected, **extra}
 
 
-def _income_items(cur) -> List[dict]:
+def _income_items(cur, person_id) -> List[dict]:
     cur.execute("""SELECT i.id, i.name, i.amount, i.frequency, i.taxable, c.name AS category
-                   FROM income i LEFT JOIN categories c ON c.id = i.category_id ORDER BY c.name, i.name""")
+                   FROM income i LEFT JOIN categories c ON c.id = i.category_id
+                   WHERE i.owner_id = ? OR i.owner_id IS NULL ORDER BY c.name, i.name""", (person_id,))
     targets = {"Salary": "salary_total", "Bonus": "salary.bonus", "Rental": "other_income.rental_gross",
                "Dividend": "other_income.dividends", "Interest": "other_income.interest_deposits"}
     items = []
@@ -102,9 +101,9 @@ def _income_items(cur) -> List[dict]:
     return items
 
 
-def _rent_paid_items(cur) -> List[dict]:
+def _rent_paid_items(cur, person_id) -> List[dict]:
     cur.execute("""SELECT e.id, e.name, e.amount, e.frequency FROM expenses e JOIN categories c ON c.id = e.category_id
-                   WHERE c.name = 'Rent' ORDER BY e.name""")
+                   WHERE c.name = 'Rent' AND (e.owner_id = ? OR e.owner_id IS NULL) ORDER BY e.name""", (person_id,))
     items = []
     for r in cur.fetchall():
         per_year = _per_year(r["frequency"]) or 1
@@ -297,9 +296,9 @@ def prefill(conn: sqlite3.Connection, financial_year: str, person_id: Optional[i
     elif not any(p["id"] == person_id for p in people):
         raise TaxInputError(f"Person {person_id} not found")
 
-    items: List[dict] = _income_items(cur) + _rent_paid_items(cur)
+    items: List[dict] = []
     if person_id is not None:
-        items += (_rental_ledger_items(cur, person_id, start, end) + _asset_items(cur, person_id, start, end)
+        items += (_income_items(cur, person_id) + _rent_paid_items(cur, person_id) + _rental_ledger_items(cur, person_id, start, end) + _asset_items(cur, person_id, start, end)
                   + _insurance_items(cur, person_id) + _loan_items(cur, person_id, start, end, today)
                   + _gains_items(cur, person_id, financial_year) + _profile_items(cur, person_id, financial_year))
 
@@ -327,7 +326,7 @@ def prefill(conn: sqlite3.Connection, financial_year: str, person_id: Optional[i
         "items": items,
         "monthly_grid_targets": list(MONTHLY_GRID_TARGETS),
         "notes": [
-            "Income and expense rows have no owner in Artha, so all of them are listed; tick only this person's.",
+            "Income and expenses are this person's entries in Income & Expenses.",
             "Health and life policy premiums are their current yearly premium, not what was actually paid this year.",
         ],
     }

@@ -7,6 +7,7 @@ import { PropertyRentalLedgerEditor } from './PropertyRentalLedgerEditor';
 import { InsuranceClaimsEditor } from './InsuranceClaimsEditor';
 import { InsurancePremiumPaymentsEditor } from './InsurancePremiumPaymentsEditor';
 import { API_BASE_URL } from '../config';
+import { FREQUENCIES } from '../frequency';
 
 interface DynamicFormProps {
   entityType: 'accounts' | 'assets' | 'liabilities' | 'income' | 'expenses' | 'goals';
@@ -149,8 +150,11 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       standardFields['target_date'] = 'date';
       standardFields['priority'] = 'select_priority';
     } else if (entityType === 'income' || entityType === 'expenses') {
+      standardFields['category_id'] = 'category_select';
+      standardFields['owner_id'] = 'person_select';
       standardFields['amount'] = 'number';
-      standardFields['frequency'] = 'text';
+      standardFields['frequency'] = 'select_frequency';
+      if (entityType === 'income') standardFields['taxable'] = 'checkbox';
       standardFields['status'] = 'select_status';
     }
 
@@ -210,6 +214,10 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         defaultData[k] = 'Medium';
       } else if (type === 'select_policy_type') {
         defaultData[k] = 'Life';
+      } else if (type === 'select_frequency') {
+        defaultData[k] = 'Monthly';
+      } else if (type === 'checkbox') {
+        defaultData[k] = 1;
       } else {
         defaultData[k] = '';
       }
@@ -334,6 +342,8 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       annual_fee: 'Annual Fee',
       policy_type: 'Policy Type',
       policy_number: 'Policy Number',
+      amount: entityType === 'income' ? 'Amount per period (gross)' : 'Amount per period',
+      taxable: 'Taxable income',
     };
     if (knownLabels[key]) return knownLabels[key];
 
@@ -437,9 +447,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           }
 
           if (type === 'category_select') {
-            const catEntityType = entityType === 'accounts' ? 'Account' : 'Asset';
+            const catEntityType = ({ accounts: 'Account', income: 'Income', expenses: 'Expense' } as Record<string, string>)[entityType] ?? 'Asset';
             const assetCategories = categories ? categories.filter((c) => c.entity_type === catEntityType) : [];
-            const catLabel = entityType === 'accounts' ? 'Account Type (Category)' : 'Asset Class (Category)';
+            const catLabel = entityType === 'accounts' ? 'Account Type (Category)' : entityType === 'assets' ? 'Asset Class (Category)' : 'Category';
             // assets.category_id is NOT NULL; accounts.category_id is nullable —
             // an account that fits no defined type may stay uncategorized.
             const categoryRequired = entityType !== 'accounts';
@@ -461,6 +471,28 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
                   ))}
                 </select>
               </div>
+            );
+          }
+
+          if (type === 'select_frequency') {
+            const current = formData[k] || 'Monthly';
+            const options: string[] = (FREQUENCIES as readonly string[]).includes(current) ? [...FREQUENCIES] : [current, ...FREQUENCIES];
+            return (
+              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label htmlFor={`field-${k}`} style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{getLabel(k)}</label>
+                <select id={`field-${k}`} className="form-control" value={current} onChange={(e) => handleChange(k, e.target.value)}>
+                  {options.map((f) => <option key={f} value={f}>{f}</option>)}
+                </select>
+              </div>
+            );
+          }
+
+          if (type === 'checkbox') {
+            return (
+              <label key={k} htmlFor={`field-${k}`} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-secondary)', paddingTop: '18px' }}>
+                <input id={`field-${k}`} type="checkbox" checked={!!Number(formData[k])} onChange={(e) => handleChange(k, e.target.checked ? 1 : 0)} />
+                {getLabel(k)}
+              </label>
             );
           }
 

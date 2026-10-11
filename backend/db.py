@@ -9,6 +9,8 @@ os.makedirs(SETTINGS_DIR, exist_ok=True)
 SETTINGS_PATH = os.path.join(SETTINGS_DIR, "settings.json")
 
 # Prefixed onto the legacy Taxation financial_rules rows' descriptions by init_db().
+SALARY_FIELDS_DEFINITION = [{"name": "net_amount", "type": "number", "label": "Take-home per period (after tax and deductions)"}]
+
 TAX_RULE_SUPERSEDED_PREFIX = "[Not used: tax figures now come from the versioned tax rule set for each financial year] "
 
 def load_settings():
@@ -1098,7 +1100,9 @@ def init_db():
         ('Liability', 'Credit Card', None),
         ('Liability', 'Car Loan', None),
         # Income
-        ('Income', 'Salary', None),
+        # Gross is the entry's amount (what the Tax Planner needs); take-home is what
+        # Cash Flow Planning's monthly log records as "net salary".
+        ('Income', 'Salary', json.dumps(SALARY_FIELDS_DEFINITION)),
         ('Income', 'Bonus', None),
         ('Income', 'Rental', None),
         ('Income', 'Dividend', None),
@@ -2190,6 +2194,31 @@ def init_db():
             print(f"[Migration] Converted manual current_statement_spend into dated Spend transactions for {converted} card(s).")
     except Exception as e:
         print("[Migration Warning] current_statement_spend baseline conversion error:", e)
+
+    # Income and expense entries (the recurring plan) belong to a person, like assets and
+    # liabilities. Added later, so existing rows (and any written without an owner) are
+    # assigned to the Primary Owner. Idempotent.
+    for table in ('income', 'expenses'):
+        # Its own step: the tax queries filter on this column, so a failure here must be
+        # loud and must not take the steps below down with it.
+        try:
+            cols = [r['name'] for r in cursor.execute(f"PRAGMA table_info('{table}')").fetchall()]
+            if 'owner_id' not in cols:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN owner_id INTEGER REFERENCES people(id)")
+                print(f"[Migration] Added owner_id to {table}.")
+        except Exception as e:
+            print(f"[Migration ERROR] Could not add owner_id to {table}; per-person income/expense features will fail:", e)
+    try:
+        primary = cursor.execute(
+            "SELECT id FROM people ORDER BY CASE role WHEN 'Primary Owner' THEN 0 ELSE 1 END, id LIMIT 1").fetchone()
+        if primary:
+            for table in ('income', 'expenses'):
+                cursor.execute(f"UPDATE {table} SET owner_id = ? WHERE owner_id IS NULL", (primary['id'],))
+        # Salary's take-home field, for databases seeded before it existed.
+        cursor.execute("UPDATE categories SET fields_definition = ? WHERE entity_type = 'Income' AND name = 'Salary' "
+                       "AND (fields_definition IS NULL OR fields_definition = '')", (json.dumps(SALARY_FIELDS_DEFINITION),))
+    except Exception as e:
+        print("[Migration Warning] income/expenses owner migration error:", e)
 
     # Liability owners: the loan forms used to send a free-text "owner" (stored in
     # metadata_json) while liabilities.owner_id silently defaulted to 1. Where that text

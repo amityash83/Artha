@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Landmark, LandmarkIcon, PiggyBank,
   Target, FileText, Database, Compass, Calendar, Calculator, Zap, LineChart, ArrowRightLeft, Sliders,
-  CheckCircle2, AlertCircle, Info, X, CreditCard, Percent, Sparkles, HelpCircle
+  CheckCircle2, AlertCircle, Info, X, CreditCard, Percent, Sparkles, HelpCircle, Wallet
 } from 'lucide-react';
 import { InitData } from './types';
 import { Dashboard } from './components/Dashboard';
@@ -15,6 +15,7 @@ import { EmiCalculator } from './components/EmiCalculator';
 import { FinancialCalendar } from './components/FinancialCalendar';
 import { LoanOptimizer } from './components/LoanOptimizer';
 import { CashFlowPlanning } from './components/CashFlowPlanning';
+import { IncomeExpenses } from './components/IncomeExpenses';
 import { TransactionsLedger } from './components/TransactionsLedger';
 import { BudgetPlanner } from './components/BudgetPlanner';
 import { CreditCards } from './components/CreditCards';
@@ -194,6 +195,16 @@ const App: React.FC = () => {
               >
                 <Calendar size={16} />
                 Monthly Snapshot
+              </div>
+            </li>
+            <li>
+              <div
+                className={`sidebar-item ${activeTab === 'income-expenses' ? 'active' : ''}`}
+                aria-current={activeTab === 'income-expenses' ? 'page' : undefined}
+                onClick={() => handleNavigate('income-expenses')}
+              >
+                <Wallet size={16} />
+                Income &amp; Expenses
               </div>
             </li>
             <li>
@@ -396,6 +407,9 @@ const App: React.FC = () => {
         )}
         {activeTab === 'transactions' && (
           <TransactionsLedger data={data} onRefresh={fetchFinanceData} showToast={showToast} />
+        )}
+        {activeTab === 'income-expenses' && (
+          <IncomeExpenses data={data} onRefresh={fetchFinanceData} showToast={showToast} />
         )}
         {activeTab === 'budget-planner' && (
           <BudgetPlanner data={data} onRefresh={fetchFinanceData} showToast={showToast} />

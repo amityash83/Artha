@@ -47,10 +47,11 @@ correctness of what's already shipped:
   to without a join). See `Domains/Banking.md`.
 - **`no_villa_equity` rule has zero enforcement code** — stored,
   editable, documented, never checked. See `06-Business-Rules-Engine.md`.
-- **`income` table and `monthly_cash_flows` table are non-synced
-  duplicates** of the same concept — `CashFlowPlanning.tsx` only ever
-  touches the latter. Decide whether to unify or explicitly scope them
-  as separate concerns. See `Domains/Income.md`.
+- ~~**`income` table and `monthly_cash_flows` table are non-synced
+  duplicates**~~ — **Resolved 2026-10** by scoping them separately:
+  `income`/`expenses` are the per-person recurring plan (Income &
+  Expenses screen); `monthly_cash_flows` is the monthly actuals log,
+  whose auto-fill now reads the plan. See `Domains/Income.md`.
 
 ## Phase 1 — Shipped Foundation (context, not a plan)
 
