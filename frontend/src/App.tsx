@@ -357,7 +357,7 @@ const App: React.FC = () => {
           />
         )}
         {activeTab === 'simulations' && (
-          <Simulations data={data} initialParams={simRedirectParams} />
+          <Simulations data={data} initialParams={simRedirectParams} onGo={(page) => navigateTo(page)} />
         )}
         {activeTab === 'financial-calendar' && (
           <FinancialCalendar />

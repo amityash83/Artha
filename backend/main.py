@@ -3079,7 +3079,9 @@ def run_simulation(req: SimulationRequestSchema):
         current_monthly_emi = sum(l["emi"] for l in loans)
         
         # Calculate current debt free date (max tenure of active loans)
-        current_tenures = [calc.calculate_remaining_tenure(l["outstanding"], l["roi"], l["emi"]) for l in loans if l["outstanding"] > 0]
+        # Debt-free date: loans with an EMI. Cards and other debts without one have no
+        # schedule, and would otherwise read as never paid off.
+        current_tenures = [calc.calculate_remaining_tenure(l["outstanding"], l["roi"], l["emi"]) for l in loans if l["outstanding"] > 0 and (l["emi"] or 0) > 0]
         max_tenure_current = max(current_tenures) if current_tenures else 0.0
         
         # Cloned simulated variables
@@ -3101,13 +3103,15 @@ def run_simulation(req: SimulationRequestSchema):
             # Find the loan
             loan = next((l for l in sim_loans if l["id"] == loan_id), None)
             if loan and loan["outstanding"] > 0:
-                outstanding_cost = loan["outstanding"]
+                outstanding_cost, old_emi = loan["outstanding"], loan["emi"]
+                # Work out what closing saves before zeroing the loan (it used to zero the
+                # EMI first, so both figures always read ₹0).
+                interest_saved = calc.calculate_remaining_interest(outstanding_cost, loan["roi"], old_emi) if old_emi > 0 else 0.0
                 sim_liquid -= outstanding_cost
                 loan["outstanding"] = 0.0
                 loan["emi"] = 0.0
-                interest_saved = calc.calculate_remaining_interest(outstanding_cost, loan["roi"], loan["emi"])
-                recommendation = (f"Prepaying {loan['name']} loan saves {inr(interest_saved)} in future interest. "
-                                  f"Your monthly commitments drop by {inr(loan['emi'])}. Recommended if liquid funds permit.")
+                recommendation = (f"Closing {loan['name']} now ({inr(outstanding_cost)}) saves about {inr(interest_saved)} of future interest "
+                                  f"and frees {inr(old_emi)} a month.")
                 
         elif s_type == "delay_goal":
             goal_id = params.get("goal_id")
@@ -3116,12 +3120,13 @@ def run_simulation(req: SimulationRequestSchema):
             if goal:
                 # Simulating delay reduces required monthly contribution to reach target
                 gap = max(goal["target_amount"] - goal["current_amount"], 0.0)
-                current_rem_months = gap / goal["monthly_contribution"] if goal["monthly_contribution"] > 0 else 12.0
+                old_contribution = goal["monthly_contribution"]
+                current_rem_months = gap / old_contribution if old_contribution > 0 else 12.0
                 new_rem_months = current_rem_months + delay_months
                 new_contribution = gap / new_rem_months if new_rem_months > 0 else 0.0
                 goal["monthly_contribution"] = new_contribution
-                recommendation = (f"Delaying the goal '{goal['name']}' by {delay_months} months reduces its "
-                                  f"required monthly contribution to {inr(new_contribution)} (Saving {inr(goal['monthly_contribution'] - new_contribution)}/mo).")
+                recommendation = (f"Delaying '{goal['name']}' by {delay_months} months lowers what it needs each month to "
+                                  f"{inr(new_contribution)}, {inr(max(old_contribution - new_contribution, 0.0))} less than now.")
                 
         elif s_type == "increase_sip":
             increment = params.get("increment_amount", 5000.0)
@@ -3200,7 +3205,9 @@ def run_simulation(req: SimulationRequestSchema):
         sim_net_worth = sim_assets - sim_debt
         sim_monthly_emi = sum(l["emi"] for l in sim_loans)
         
-        sim_tenures = [calc.calculate_remaining_tenure(l["outstanding"], l["roi"], l["emi"]) for l in sim_loans if l["outstanding"] > 0]
+        sim_tenures = [calc.calculate_remaining_tenure(l["outstanding"], l["roi"], l["emi"]) for l in sim_loans if l["outstanding"] > 0 and (l["emi"] or 0) > 0]
+        if sim_liquid < 0 <= total_liquid:
+            recommendation += f" You'd need {inr(-sim_liquid)} more cash than your accounts hold."
         max_tenure_sim = max(sim_tenures) if sim_tenures else 0.0
         
         # Handle JSON compliance for infinite tenures

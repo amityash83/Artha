@@ -1123,3 +1123,4 @@ h1, h2, h3, h4, h5 {
 .cc-compare-caveats { margin-top: 10px; }
 .cl-pros { color: var(--success) !important; }
 .cl-rate { font-size: 14px; color: var(--text-primary); padding: 9px 0; font-variant-numeric: tabular-nums; }
+.db-rec-plain { margin: 0; font-size: 13.5px; color: var(--text-secondary); line-height: 1.55; }

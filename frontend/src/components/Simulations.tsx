@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Sparkles } from 'lucide-react';
 import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS, CategoryScale, LinearScale, PointElement, 
@@ -7,6 +6,8 @@ import {
 } from 'chart.js';
 import { InitData } from '../types';
 import { API_BASE_URL } from '../config';
+import { formatINR } from '../format';
+import { AmountInput, Group, Row } from './settings/ui';
 
 ChartJS.register(
   CategoryScale, LinearScale, PointElement, LineElement, 
@@ -19,155 +20,97 @@ interface SimulationsProps {
     scenario_type: string;
     loan_id?: number;
   };
+  onGo?: (page: string) => void;
 }
 
-export const Simulations: React.FC<SimulationsProps> = ({ data, initialParams }) => {
-  const loans = React.useMemo(() => {
-    return data.liabilities
-      .filter((l: any) => l.category_name !== 'Credit Card')
-      .map((l: any) => ({
-        ...l,
-        roi: l.interest_rate
-      }));
-  }, [data.liabilities]);
+// The questions this page answers. 'debt_payoff' (prepaying several loans) lives in the
+// Loan planner's "Which loan to pay first"; the API still accepts it.
+const SCENARIOS: { id: string; label: string }[] = [
+  { id: 'close_loan', label: 'Close or prepay a loan' },
+  { id: 'roi_reduction', label: 'Get a lower interest rate (refinance)' },
+  { id: 'brother_property', label: 'Make a large purchase' },
+  { id: 'receive_bonus', label: 'Receive a bonus or lump sum' },
+  { id: 'salary_change', label: 'My salary changes' },
+  { id: 'increase_sip', label: 'Increase my SIPs' },
+  { id: 'delay_goal', label: 'Delay a goal' },
+  { id: 'net_worth_forecast', label: 'Where will my net worth be in a few years?' },
+];
+
+const shortINR = (v: number) => (Math.abs(v) >= 1e7 ? `₹${(v / 1e7).toFixed(1).replace(/\.0$/, '')}Cr` : Math.abs(v) >= 1e5 ? `₹${(v / 1e5).toFixed(0)}L` : `₹${Math.round(v)}`);
+// The API sends -1 for a debt its EMI never clears, and 0 when nothing with an EMI is left.
+const months = (raw: number) => {
+  if (raw < 0) return 'never, at this EMI';
+  const n = Math.round(raw);
+  if (n === 0) return 'now';
+  return n >= 12 ? `${Math.floor(n / 12)} yr${n >= 24 ? 's' : ''}${n % 12 ? ` ${n % 12} mo` : ''}` : `${n} mo`;
+};
+
+export const Simulations: React.FC<SimulationsProps> = ({ data, initialParams, onGo }) => {
+  const loans = React.useMemo(() => data.liabilities
+    .filter((l: any) => l.category_name !== 'Credit Card')
+    .map((l: any) => ({ ...l, roi: l.interest_rate })), [data.liabilities]);
+
+  // The forecast's monthly saving starts from what the latest Cash Flow month kept
+  // (left over + invested), not an invented figure.
+  const latest = data.cash_flows?.[0];
+  const kept = latest
+    ? latest.net_salary + latest.other_income - latest.household_expenses - latest.one_time_expenses - latest.emi - latest.insurance_premium
+    : 0;
 
   const [scenarioType, setScenarioType] = useState('close_loan');
-  
-  // Payoff simulator states
-  const [extraMonthly, setExtraMonthly] = useState<number>(10000);
-  const [strategy, setStrategy] = useState<string>('avalanche');
-  const [prepaymentFrequency, setPrepaymentFrequency] = useState<string>('monthly');
-  const [prepaymentAmount, setPrepaymentAmount] = useState<number>(50000);
-  const [prepaymentMonth, setPrepaymentMonth] = useState<number>(3);
-
-  // Net Worth Forecast states
-  const [horizonYears, setHorizonYears] = useState<number>(10);
-  const [expectedReturn, setExpectedReturn] = useState<number>(12.0);
-  const [monthlySavings, setMonthlySavings] = useState<number>(20000);
-  const [inflationRate, setInflationRate] = useState<number>(6.0);
-  
-  // Dynamic parameters depending on selection
-  const [loanId, setLoanId] = useState<number>(0);
-  const [goalId, setGoalId] = useState<number>(0);
-  const [delayMonths, setDelayMonths] = useState<number>(12);
-  const [sipIncrement, setSipIncrement] = useState<number>(10000);
-  const [salaryChange, setSalaryChange] = useState<number>(20000);
-  const [bonusAmount, setBonusAmount] = useState<number>(200000);
+  const [horizonYears, setHorizonYears] = useState(10);
+  const [expectedReturn, setExpectedReturn] = useState(10);
+  const [monthlySavings, setMonthlySavings] = useState(kept > 0 ? Math.round(kept / 1000) * 1000 : 0);
+  const [inflationRate, setInflationRate] = useState(6);
+  const [loanId, setLoanId] = useState(0);
+  const [goalId, setGoalId] = useState(0);
+  const [delayMonths, setDelayMonths] = useState(12);
+  const [sipIncrement, setSipIncrement] = useState(10000);
+  const [salaryChange, setSalaryChange] = useState(20000);
+  const [bonusAmount, setBonusAmount] = useState(200000);
   const [bonusAllocation, setBonusAllocation] = useState('prepay');
-  const [newRoi, setNewRoi] = useState<number>(7.5);
-  const [propertyCost, setPropertyCost] = useState<number>(1500000);
+  const [newRoi, setNewRoi] = useState(7.5);
+  const [propertyCost, setPropertyCost] = useState(1500000);
   const [propertyFunding, setPropertyFunding] = useState('loan');
-  
-  // Custom large purchase states
-  const [purchaseName, setPurchaseName] = useState('Family Property');
-  const [loanRoi, setLoanRoi] = useState<number>(8.5);
-  const [loanTenureMonths, setLoanTenureMonths] = useState<number>(120);
-
+  const [purchaseName, setPurchaseName] = useState('');
+  const [loanRoi, setLoanRoi] = useState(8.5);
+  const [loanTenureMonths, setLoanTenureMonths] = useState(120);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  // A result is only shown for the scenario it was run for (switching used to render one
+  // scenario's result with another's layout, which crashed the forecast chart).
+  const [result, setResult] = useState<{ type: string; data: any } | null>(null);
 
-  // Pre-load parameters from dashboard redirects
   useEffect(() => {
     if (initialParams) {
-      setScenarioType(initialParams.scenario_type);
-      if (initialParams.loan_id) {
-        setLoanId(initialParams.loan_id);
-      }
+      setScenarioType(initialParams.scenario_type === 'debt_payoff' ? 'close_loan' : initialParams.scenario_type);
+      if (initialParams.loan_id) setLoanId(initialParams.loan_id);
     } else {
-      if (loans.length > 0) {
-        setLoanId(loans[0].id);
-      }
-      if (data.goals.length > 0) {
-        setGoalId(data.goals[0].id);
-      }
+      if (loans.length > 0) setLoanId((id) => id || loans[0].id);
+      if (data.goals.length > 0) setGoalId((id) => id || data.goals[0].id);
     }
   }, [initialParams, data, loans]);
 
   const handleRun = async () => {
     setLoading(true);
-    let params: any = {};
-    
-    if (scenarioType === 'close_loan') {
-      params = { loan_id: Number(loanId) };
-    } else if (scenarioType === 'delay_goal') {
-      params = { goal_id: Number(goalId), delay_months: Number(delayMonths) };
-    } else if (scenarioType === 'increase_sip') {
-      params = { increment_amount: Number(sipIncrement) };
-    } else if (scenarioType === 'salary_change') {
-      params = { change_amount: Number(salaryChange) };
-    } else if (scenarioType === 'receive_bonus') {
-      params = { bonus_amount: Number(bonusAmount), allocation_target: bonusAllocation };
-    } else if (scenarioType === 'roi_reduction') {
-      params = { loan_id: Number(loanId), new_roi: Number(newRoi) };
-    } else if (scenarioType === 'brother_property') {
-      params = { 
-        purchase_name: purchaseName, 
-        cost: Number(propertyCost), 
-        funding_source: propertyFunding,
-        roi: Number(loanRoi),
-        tenure_months: Number(loanTenureMonths)
-      };
-    }
-
-    if (scenarioType === 'net_worth_forecast') {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/simulations/net_worth_forecast`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            horizon_years: Number(horizonYears),
-            expected_return: Number(expectedReturn),
-            monthly_savings: Number(monthlySavings),
-            inflation_rate: Number(inflationRate)
-          })
-        });
-        if (res.ok) {
-          const d = await res.json();
-          setResult(d);
-        }
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-      return;
-    }
-
-    if (scenarioType === 'debt_payoff') {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/simulations/debt_payoff`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            extra_monthly: Number(extraMonthly),
-            strategy,
-            prepayment_frequency: prepaymentFrequency,
-            prepayment_amount: Number(prepaymentAmount),
-            prepayment_month: Number(prepaymentMonth)
-          })
-        });
-        if (res.ok) {
-          const d = await res.json();
-          setResult(d);
-        }
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-      return;
-    }
-
+    const type = scenarioType;
+    const post = (path: string, body: any) => fetch(`${API_BASE_URL}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     try {
-      const res = await fetch(`${API_BASE_URL}/api/simulations/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scenario_type: scenarioType, params })
-      });
-      if (res.ok) {
-        const d = await res.json();
-        setResult(d);
+      let res: Response;
+      if (type === 'net_worth_forecast') {
+        res = await post('/api/simulations/net_worth_forecast', { horizon_years: horizonYears, expected_return: expectedReturn, monthly_savings: monthlySavings, inflation_rate: inflationRate });
+      } else {
+        const params = ({
+          close_loan: { loan_id: loanId },
+          delay_goal: { goal_id: goalId, delay_months: delayMonths },
+          increase_sip: { increment_amount: sipIncrement },
+          salary_change: { change_amount: salaryChange },
+          receive_bonus: { bonus_amount: bonusAmount, allocation_target: bonusAllocation },
+          roi_reduction: { loan_id: loanId, new_roi: newRoi },
+          brother_property: { purchase_name: purchaseName || 'the purchase', cost: propertyCost, funding_source: propertyFunding, roi: loanRoi, tenure_months: loanTenureMonths },
+        } as Record<string, Record<string, unknown>>)[type];
+        res = await post('/api/simulations/run', { scenario_type: type, params });
       }
+      if (res.ok) setResult({ type, data: await res.json() });
     } catch (err) {
       console.error(err);
     } finally {
@@ -175,548 +118,176 @@ export const Simulations: React.FC<SimulationsProps> = ({ data, initialParams })
     }
   };
 
-  const formatCurrency = (val: number) => {
-    return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(val);
-  };
+  const loanSelect = (label: string) => (
+    <Row label={label} htmlFor="sim-loan">
+      <select id="sim-loan" className="form-control" value={loanId} onChange={(e) => setLoanId(Number(e.target.value))}>
+        {loans.map((l: any) => <option key={l.id} value={l.id}>{l.name} ({formatINR(l.outstanding)}, {l.roi}%)</option>)}
+      </select>
+    </Row>
+  );
+  const money = (label: string, value: number, set: (v: number) => void, description?: string, allowNegative = false) => (
+    <Row label={label} description={description} htmlFor={`sim-${label}`}>
+      <AmountInput id={`sim-${label}`} label={label} prefix="₹" width={120} value={value} onChange={set} allowNegative={allowNegative} />
+    </Row>
+  );
+  const number = (label: string, value: number, set: (v: number) => void, suffix: string) => (
+    <Row label={label} htmlFor={`sim-${label}`}>
+      <AmountInput id={`sim-${label}`} label={label} suffix={suffix} width={70} value={value} onChange={set} />
+    </Row>
+  );
+  const needsLoan = scenarioType === 'close_loan' || scenarioType === 'roi_reduction';
+  const needsGoal = scenarioType === 'delay_goal';
+  const blocked = (needsLoan && loans.length === 0) || (needsGoal && data.goals.length === 0);
+  const r = result && result.type === scenarioType ? result.data : null;
+
+  const signed = (v: number, goodWhenUp: boolean) => (
+    <span style={{ color: v === 0 ? 'var(--text-muted)' : (v > 0) === goodWhenUp ? 'var(--success)' : '#fca5a5' }}>{v === 0 ? '—' : `${v > 0 ? '+' : '−'}${formatINR(Math.abs(v))}`}</span>
+  );
 
   return (
-    <div>
-      <div className="page-header">
-        <h1 className="page-title">Simulations</h1>
-        <p className="page-subtitle">Try a big decision, like closing a loan or a large purchase, and see its effect before you make it.</p>
+    <div className="db-page">
+      <div className="eg-head">
+        <div>
+          <h1 className="page-title">Simulations</h1>
+          <p className="page-subtitle">Try a big decision, like closing a loan or a large purchase, and see its effect before you make it.</p>
+        </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 2fr', gap: '32px' }}>
-        {/* Scenario Config Panel */}
-        <div className="glass-panel" style={{ padding: '24px' }}>
-          <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '20px' }}>Simulation Setup</h3>
-
-          <div className="form-group">
-            <label className="form-label">Simulation Scenario</label>
-            <select className="form-input" value={scenarioType} onChange={e => setScenarioType(e.target.value)}>
-              <option value="close_loan">What if I close/prepay a Loan?</option>
-              <option value="debt_payoff">What if I prepay multiple loans? (Payoff Planner)</option>
-              <option value="net_worth_forecast">What if I project my Net Worth? (Forecast)</option>
-              <option value="delay_goal">What if a Villa/Goal is delayed?</option>
-              <option value="increase_sip">What if I increase monthly SIP?</option>
-              <option value="salary_change">What if my Salary changes?</option>
-              <option value="receive_bonus">What if I receive a lump sum Bonus?</option>
-              <option value="roi_reduction">What if loan ROI reduces (Refinance)?</option>
-              <option value="brother_property">What if I make a Large Purchase? (e.g. Car/Home)</option>
-            </select>
-          </div>
-
-          {/* Dynamic input controls based on chosen type */}
-          {scenarioType === 'close_loan' && (
-            <div className="form-group">
-              <label className="form-label">Select Loan to Close</label>
-              <select className="form-input" value={loanId} onChange={e => setLoanId(Number(e.target.value))}>
-                {loans.map((l: any) => (
-                  <option key={l.id} value={l.id}>{l.name} ({formatCurrency(l.outstanding)})</option>
-                ))}
+      <div className="cf-whatif">
+        <div className="db-col">
+          <Group title="What if I…">
+            <Row label="Scenario" htmlFor="sim-type">
+              <select id="sim-type" className="form-control" value={scenarioType} onChange={(e) => setScenarioType(e.target.value)}>
+                {SCENARIOS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
               </select>
-            </div>
-          )}
-
-          {scenarioType === 'delay_goal' && (
-            <>
-              <div className="form-group">
-                <label className="form-label">Select Goal</label>
-                <select className="form-input" value={goalId} onChange={e => setGoalId(Number(e.target.value))}>
-                  {data.goals.map((g: any) => (
-                    <option key={g.id} value={g.id}>{g.name} (Target: {formatCurrency(g.target_amount)})</option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Delay Duration (months)</label>
-                <input type="number" className="form-input" value={delayMonths} onChange={e => setDelayMonths(parseInt(e.target.value) || 0)} />
-              </div>
-            </>
-          )}
-
-          {scenarioType === 'increase_sip' && (
-            <div className="form-group">
-              <label className="form-label">Monthly SIP Increase Amount (₹)</label>
-              <input type="number" className="form-input" value={sipIncrement} onChange={e => setSipIncrement(parseFloat(e.target.value) || 0)} />
-            </div>
-          )}
-
-          {scenarioType === 'salary_change' && (
-            <div className="form-group">
-              <label className="form-label">Monthly Change Value (₹ - Negative for decrease)</label>
-              <input type="number" className="form-input" value={salaryChange} onChange={e => setSalaryChange(parseFloat(e.target.value) || 0)} />
-            </div>
-          )}
-
-          {scenarioType === 'receive_bonus' && (
-            <>
-              <div className="form-group">
-                <label className="form-label">Bonus Amount (₹)</label>
-                <input type="number" className="form-input" value={bonusAmount} onChange={e => setBonusAmount(parseFloat(e.target.value) || 0)} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Allocation Strategy</label>
-                <select className="form-input" value={bonusAllocation} onChange={e => setBonusAllocation(e.target.value)}>
-                  <option value="liquid">Keep in Liquid Cash</option>
-                  <option value="prepay">Prepay Highest ROI Loan</option>
-                  <option value="invest">Invest entirely in Equity Mutual Funds</option>
-                </select>
-              </div>
-            </>
-          )}
-
-          {scenarioType === 'roi_reduction' && (
-            <>
-              <div className="form-group">
-                <label className="form-label">Select Loan</label>
-                <select className="form-input" value={loanId} onChange={e => setLoanId(Number(e.target.value))}>
-                  {loans.map((l: any) => (
-                    <option key={l.id} value={l.id}>{l.name} (Current ROI: {l.roi}%)</option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label">New ROI (%)</label>
-                <input type="number" step="0.01" className="form-input" value={newRoi} onChange={e => setNewRoi(parseFloat(e.target.value) || 0)} />
-              </div>
-            </>
-          )}
-
-          {scenarioType === 'brother_property' && (
-            <>
-              <div className="form-group">
-                <label className="form-label">Purchase / Expense Name</label>
-                <input type="text" className="form-input" value={purchaseName} onChange={e => setPurchaseName(e.target.value)} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Cost Valuation (₹)</label>
-                <input type="number" className="form-input" value={propertyCost} onChange={e => setPropertyCost(parseFloat(e.target.value) || 0)} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Funding Strategy</label>
-                <select className="form-input" value={propertyFunding} onChange={e => setPropertyFunding(e.target.value)}>
-                  <option value="liquid">Direct Cash (Liquid Reserves)</option>
-                  <option value="loan">New Loan (EMI Projections)</option>
-                </select>
-              </div>
-              {propertyFunding === 'loan' && (
-                <>
-                  <div className="form-group">
-                    <label className="form-label">Simulated Loan ROI (%)</label>
-                    <input type="number" step="0.1" className="form-input" value={loanRoi} onChange={e => setLoanRoi(parseFloat(e.target.value) || 8.5)} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Simulated Loan Tenure (Months)</label>
-                    <input type="number" className="form-input" value={loanTenureMonths} onChange={e => setLoanTenureMonths(parseInt(e.target.value) || 120)} />
-                  </div>
-                </>
-              )}
-            </>
-          )}
-
-          {scenarioType === 'debt_payoff' && (
-            <>
-              <div className="form-group">
-                <label className="form-label">Extra Prepayment Budget (Monthly ₹)</label>
-                <input type="number" className="form-input" value={extraMonthly} onChange={e => setExtraMonthly(parseFloat(e.target.value) || 0)} />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Prepayment Cascade Strategy</label>
-                <select className="form-input" value={strategy} onChange={e => setStrategy(e.target.value)}>
-                  <option value="avalanche">Debt Avalanche (Highest ROI First)</option>
-                  <option value="snowball">Debt Snowball (Lowest Balance First)</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Prepayment Schedule Frequency</label>
-                <select className="form-input" value={prepaymentFrequency} onChange={e => setPrepaymentFrequency(e.target.value)}>
-                  <option value="monthly">Monthly Extra Payments Only</option>
-                  <option value="annually">Annual Bonus Infusions</option>
-                  <option value="none">No Prepayments (Baseline comparison)</option>
-                </select>
-              </div>
-
-              {prepaymentFrequency === 'annually' && (
-                <>
-                  <div className="form-group">
-                    <label className="form-label">Annual Prepayment Month</label>
-                    <select className="form-input" value={prepaymentMonth} onChange={e => setPrepaymentMonth(Number(e.target.value))}>
-                      {Array.from({ length: 12 }, (_, i) => (
-                        <option key={i+1} value={i+1}>
-                          {new Date(0, i).toLocaleString('en', { month: 'long' })}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Annual Prepayment Amount (₹)</label>
-                    <input type="number" className="form-input" value={prepaymentAmount} onChange={e => setPrepaymentAmount(parseFloat(e.target.value) || 0)} />
-                  </div>
-                </>
-              )}
-            </>
-          )}
-
-          {scenarioType === 'net_worth_forecast' && (
-            <>
-              <div className="form-group">
-                <label className="form-label">Forecast Horizon (Years)</label>
-                <select className="form-input" value={horizonYears} onChange={e => setHorizonYears(Number(e.target.value))}>
-                  <option value={5}>5 Years</option>
-                  <option value={10}>10 Years</option>
-                  <option value={20}>20 Years</option>
-                  <option value={30}>30 Years</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Expected Annual Return (%)</label>
-                <input type="number" step="0.1" className="form-input" value={expectedReturn} onChange={e => setExpectedReturn(parseFloat(e.target.value) || 0)} />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Monthly Additional Savings (₹)</label>
-                <input type="number" className="form-input" value={monthlySavings} onChange={e => setMonthlySavings(parseFloat(e.target.value) || 0)} />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Expected Inflation Rate (%)</label>
-                <input type="number" step="0.1" className="form-input" value={inflationRate} onChange={e => setInflationRate(parseFloat(e.target.value) || 0)} />
-              </div>
-            </>
-          )}
-
-          <button 
-            type="button" 
-            className="btn btn-primary" 
-            style={{ width: '100%', marginTop: '12px' }}
-            onClick={handleRun}
-            disabled={loading}
-          >
-            <Play size={16} /> {loading ? 'Running simulation...' : 'Run Simulation'}
-          </button>
+            </Row>
+            {scenarioType === 'close_loan' && loanSelect('Loan')}
+            {scenarioType === 'roi_reduction' && <>{loanSelect('Loan')}{number('New interest rate', newRoi, setNewRoi, '%')}</>}
+            {scenarioType === 'delay_goal' && (
+              <>
+                <Row label="Goal" htmlFor="sim-goal">
+                  <select id="sim-goal" className="form-control" value={goalId} onChange={(e) => setGoalId(Number(e.target.value))}>
+                    {data.goals.map((g: any) => <option key={g.id} value={g.id}>{g.name} ({formatINR(g.target_amount)})</option>)}
+                  </select>
+                </Row>
+                {number('Delay by', delayMonths, (v) => setDelayMonths(Math.round(v)), 'months')}
+              </>
+            )}
+            {scenarioType === 'increase_sip' && money('Extra each month', sipIncrement, setSipIncrement)}
+            {scenarioType === 'salary_change' && money('Change each month', salaryChange, setSalaryChange, 'Negative for a cut.', true)}
+            {scenarioType === 'receive_bonus' && (
+              <>
+                {money('Amount', bonusAmount, setBonusAmount)}
+                <Row label="Use it to" htmlFor="sim-bonus">
+                  <select id="sim-bonus" className="form-control" value={bonusAllocation} onChange={(e) => setBonusAllocation(e.target.value)}>
+                    <option value="prepay">Prepay the costliest loan</option>
+                    <option value="invest">Invest in equity funds</option>
+                    <option value="liquid">Keep as cash</option>
+                  </select>
+                </Row>
+              </>
+            )}
+            {scenarioType === 'brother_property' && (
+              <>
+                <Row label="What" htmlFor="sim-name">
+                  <input id="sim-name" className="form-control" placeholder="e.g. a car" value={purchaseName} onChange={(e) => setPurchaseName(e.target.value)} />
+                </Row>
+                {money('Cost', propertyCost, setPropertyCost)}
+                <Row label="Paid with" htmlFor="sim-funding">
+                  <select id="sim-funding" className="form-control" value={propertyFunding} onChange={(e) => setPropertyFunding(e.target.value)}>
+                    <option value="loan">A new loan</option>
+                    <option value="liquid">Cash I have</option>
+                  </select>
+                </Row>
+                {propertyFunding === 'loan' && <>{number('Loan interest rate', loanRoi, setLoanRoi, '%')}{number('Loan tenure', loanTenureMonths, (v) => setLoanTenureMonths(Math.round(v)), 'months')}</>}
+              </>
+            )}
+            {scenarioType === 'net_worth_forecast' && (
+              <>
+                <Row label="Years ahead" htmlFor="sim-years">
+                  <select id="sim-years" className="form-control" value={horizonYears} onChange={(e) => setHorizonYears(Number(e.target.value))}>
+                    {[5, 10, 20, 30].map((y) => <option key={y} value={y}>{y} years</option>)}
+                  </select>
+                </Row>
+                {money('Saved each month', monthlySavings, setMonthlySavings, kept > 0 ? 'Starts from what your latest Cash Flow month kept.' : 'What you can put away each month.')}
+                {number('Yearly return', expectedReturn, setExpectedReturn, '%')}
+                {number('Inflation', inflationRate, setInflationRate, '%')}
+              </>
+            )}
+          </Group>
+          {blocked
+            ? <p className="cc-note">{needsLoan ? 'Add a loan under Liabilities first.' : 'Add a goal first.'}</p>
+            : <div className="tx-actions"><button className="btn btn-primary" onClick={handleRun} disabled={loading}>{loading ? 'Working it out…' : 'Show me'}</button></div>}
+          <p className="cc-note" style={{ margin: 0 }}>Prepaying several loans? <button type="button" className="db-link" onClick={() => onGo?.('loans')}>Loan planner</button> compares which to clear first.</p>
         </div>
 
-        {/* Results view */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          {result ? (
+        <div className="db-col">
+          {!r ? (
+            <div className="settings-group"><div className="ie-empty"><p>Pick a scenario and press "Show me" to see its effect on your net worth, cash and debt.</p></div></div>
+          ) : result!.type === 'net_worth_forecast' ? (() => {
+            const start = r.initial_net_worth;
+            const growth = start > 0 ? r.final_net_worth_nominal / start : null;
+            return (
+              <>
+                <div className="glass-panel cc-summary db-summary" style={{ gridTemplateColumns: 'minmax(200px, 1.4fr) repeat(2, minmax(140px, 1fr))' }}>
+                  <div className="cc-summary-main">
+                    <div className="cc-label">Net worth in {horizonYears} years</div>
+                    <strong className="eg-figure db-networth">{formatINR(r.final_net_worth_nominal)}</strong>
+                    <span className="cc-note">from {formatINR(start)} today{growth ? `, ${growth.toFixed(1)}×` : ''}</span>
+                  </div>
+                  <div className="cc-summary-stat"><div className="cc-label">In today's money</div><strong>{formatINR(r.final_net_worth_real)}</strong><span className="cc-note">after {inflationRate}% inflation</span></div>
+                  <div className="cc-summary-stat"><div className="cc-label">Debt left then</div><strong>{formatINR(r.schedule[r.schedule.length - 1]?.debt ?? 0)}</strong><span className="cc-note">on today's EMIs</span></div>
+                </div>
+                <section className="glass-panel db-card">
+                  <div style={{ height: '260px', position: 'relative' }}>
+                    <Line data={{
+                      labels: r.schedule.map((s: any) => `Year ${s.year}`),
+                      datasets: [
+                        { label: 'Net worth', data: r.schedule.map((s: any) => s.net_worth_nominal), borderColor: '#8b5cf6', borderWidth: 2, tension: 0.3, pointRadius: 2 },
+                        { label: "In today's money", data: r.schedule.map((s: any) => s.net_worth_real), borderColor: '#10b981', borderWidth: 2, tension: 0.3, pointRadius: 2 },
+                        { label: 'Debt', data: r.schedule.map((s: any) => s.debt), borderColor: '#ef4444', borderDash: [4, 4], borderWidth: 1.5, tension: 0.3, pointRadius: 0 },
+                      ],
+                    }} options={{
+                      responsive: true, maintainAspectRatio: false,
+                      plugins: {
+                        legend: { labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 14 } },
+                        tooltip: { backgroundColor: '#0d111d', borderColor: 'rgba(255,255,255,0.08)', borderWidth: 1, callbacks: { label: (c: any) => ` ${c.dataset.label}: ${formatINR(c.parsed.y)}` } },
+                      },
+                      scales: {
+                        x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 11 }, maxTicksLimit: 10 } },
+                        y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b', font: { size: 11 }, maxTicksLimit: 6, callback: (v: any) => shortINR(Number(v)) } },
+                      },
+                    }} />
+                  </div>
+                  <p className="cc-note" style={{ margin: 0 }}>Assumes a steady {expectedReturn}% a year on everything you own and {formatINR(monthlySavings)} added each month. Real returns vary year to year.</p>
+                </section>
+              </>
+            );
+          })() : (
             <>
-              {scenarioType === 'net_worth_forecast' ? (
-                <>
-                  {/* Summary Metric Projections */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '20px' }}>
-                    <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Nominal Net Worth</span>
-                      <h2 style={{ fontSize: '22px', fontWeight: 700, margin: '4px 0', color: 'var(--accent-light)' }}>
-                        {formatCurrency(result.final_net_worth_nominal)}
-                      </h2>
-                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                        Valuation in {horizonYears} years (compounded)
-                      </span>
-                    </div>
-
-                    <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Real Net Worth</span>
-                      <h2 style={{ fontSize: '22px', fontWeight: 700, margin: '4px 0', color: '#10b981' }}>
-                        {formatCurrency(result.final_net_worth_real)}
-                      </h2>
-                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                        Adjusted for {inflationRate}% inflation (purchasing power)
-                      </span>
-                    </div>
-
-                    <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Total Growth</span>
-                      <h2 style={{ fontSize: '22px', fontWeight: 700, margin: '4px 0', color: '#8b5cf6' }}>
-                        {((result.final_net_worth_nominal / (result.initial_net_worth || 1) - 1) * 100).toFixed(0)}%
-                      </h2>
-                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                        Multiplier of {((result.final_net_worth_nominal / (result.initial_net_worth || 1))).toFixed(1)}x over start
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Projections Line Chart */}
-                  {(() => {
-                    const chartLabels = result.schedule.map((s: any) => `Yr ${s.year}`);
-                    const nominalNW = result.schedule.map((s: any) => s.net_worth_nominal);
-                    const realNW = result.schedule.map((s: any) => s.net_worth_real);
-                    const debtPath = result.schedule.map((s: any) => s.debt);
-
-                    const forecastData = {
-                      labels: chartLabels,
-                      datasets: [
-                        {
-                          label: 'Nominal Net Worth',
-                          data: nominalNW,
-                          borderColor: '#8b5cf6',
-                          backgroundColor: 'rgba(139, 92, 246, 0.03)',
-                          borderWidth: 2.5,
-                          tension: 0.3,
-                          pointRadius: 3,
-                          pointBackgroundColor: '#8b5cf6'
-                        },
-                        {
-                          label: 'Real Net Worth (Inflation-Adj)',
-                          data: realNW,
-                          borderColor: '#10b981',
-                          backgroundColor: 'rgba(16, 185, 129, 0.03)',
-                          borderWidth: 2,
-                          tension: 0.3,
-                          pointRadius: 3,
-                          pointBackgroundColor: '#10b981'
-                        },
-                        {
-                          label: 'Outstanding Liabilities',
-                          data: debtPath,
-                          borderColor: '#ef4444',
-                          borderDash: [4, 4],
-                          borderWidth: 1.5,
-                          tension: 0.3,
-                          pointRadius: 0
-                        }
-                      ]
-                    };
-
-                    const forecastOptions = {
-                      responsive: true,
-                      maintainAspectRatio: false,
-                      plugins: {
-                        legend: {
-                          labels: { color: '#94a3b8', font: { family: 'Inter', size: 11 } }
-                        },
-                        tooltip: {
-                          backgroundColor: '#0d111d',
-                          titleFont: { family: 'Outfit' },
-                          bodyFont: { family: 'Inter' },
-                          borderColor: 'rgba(255,255,255,0.08)',
-                          borderWidth: 1,
-                          callbacks: {
-                            label: (context: any) => ` Value: ${new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(context.parsed.y)}`
-                          }
-                        }
-                      },
-                      scales: {
-                        x: {
-                          grid: { display: false },
-                          ticks: { color: '#64748b', font: { family: 'Inter', size: 10 } }
-                        },
-                        y: {
-                          grid: { color: 'rgba(255,255,255,0.04)' },
-                          ticks: { 
-                            color: '#64748b', 
-                            font: { family: 'Inter', size: 10 },
-                            callback: (value: any) => {
-                              if (value >= 10000000) return `₹${(value/10000000).toFixed(1)}Cr`;
-                              if (value >= 100000) return `₹${(value/100000).toFixed(0)}L`;
-                              return `₹${value}`;
-                            }
-                          }
-                        }
-                      }
-                    };
-
-                    return (
-                      <div className="glass-panel" style={{ height: '320px', display: 'flex', flexDirection: 'column', padding: '24px' }}>
-                        <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '16px' }}>
-                          Long-Term Asset &amp; Wealth Projection Trajectory
-                        </h3>
-                        <div style={{ flex: 1, position: 'relative' }}>
-                          <Line data={forecastData} options={forecastOptions} />
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </>
-              ) : scenarioType === 'debt_payoff' ? (
-                <>
-                  {/* Debt Payoff Summary Grid Cards */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-                    <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Debt Free Timeline</span>
-                      <h2 style={{ fontSize: '24px', fontWeight: 700, margin: '4px 0', color: '#10b981' }}>
-                        {result.baseline.months - result.optimized.months > 0 ? (
-                          `Save ${Math.floor((result.baseline.months - result.optimized.months) / 12)} Yr ${((result.baseline.months - result.optimized.months) % 12)} Mo`
-                        ) : (
-                          'No acceleration'
-                        )}
-                      </h2>
-                      <span style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
-                        Payoff finishes in <strong style={{ color: '#fff' }}>{result.optimized.months} months</strong> instead of baseline {result.baseline.months} months!
-                      </span>
-                    </div>
-
-                    <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Total Interest Saved</span>
-                      <h2 style={{ fontSize: '24px', fontWeight: 700, margin: '4px 0', color: '#10b981' }}>
-                        {formatCurrency(result.baseline.total_interest - result.optimized.total_interest)}
-                      </h2>
-                      <span style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
-                        Interest reduced to <strong style={{ color: '#fff' }}>{formatCurrency(result.optimized.total_interest)}</strong> from baseline {formatCurrency(result.baseline.total_interest)}!
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Comparative Line Chart */}
-                  {(() => {
-                    const maxMonths = Math.max(result.baseline.schedule.length, result.optimized.schedule.length);
-                    const chartLabels = Array.from({ length: maxMonths }, (_, i) => `Mo ${i + 1}`);
-                    const baselineValues = Array.from({ length: maxMonths }, (_, i) => {
-                      const item = result.baseline.schedule[i];
-                      return item ? item.outstanding : 0;
-                    });
-                    const optimizedValues = Array.from({ length: maxMonths }, (_, i) => {
-                      const item = result.optimized.schedule[i];
-                      return item ? item.outstanding : 0;
-                    });
-
-                    const payoffData = {
-                      labels: chartLabels,
-                      datasets: [
-                        {
-                          label: 'Baseline payoff schedule',
-                          data: baselineValues,
-                          borderColor: '#64748b',
-                          backgroundColor: 'rgba(100, 116, 139, 0.03)',
-                          borderWidth: 2,
-                          tension: 0.3,
-                          pointRadius: 0
-                        },
-                        {
-                          label: 'Optimized payoff schedule',
-                          data: optimizedValues,
-                          borderColor: '#10b981',
-                          backgroundColor: 'rgba(16, 185, 129, 0.03)',
-                          borderWidth: 2.5,
-                          tension: 0.3,
-                          pointRadius: 0
-                        }
-                      ]
-                    };
-
-                    const payoffOptions = {
-                      responsive: true,
-                      maintainAspectRatio: false,
-                      plugins: {
-                        legend: {
-                          labels: { color: '#94a3b8', font: { family: 'Inter', size: 11 } }
-                        },
-                        tooltip: {
-                          backgroundColor: '#0d111d',
-                          titleFont: { family: 'Outfit' },
-                          bodyFont: { family: 'Inter' },
-                          borderColor: 'rgba(255,255,255,0.08)',
-                          borderWidth: 1
-                        }
-                      },
-                      scales: {
-                        x: {
-                          grid: { display: false },
-                          ticks: { color: '#64748b', font: { family: 'Inter', size: 10 } }
-                        },
-                        y: {
-                          grid: { color: 'rgba(255,255,255,0.04)' },
-                          ticks: { 
-                            color: '#64748b', 
-                            font: { family: 'Inter', size: 10 },
-                            callback: (value: any) => `₹${(value / 100000).toFixed(1)}L`
-                          }
-                        }
-                      }
-                    };
-
-                    return (
-                      <div className="glass-panel" style={{ height: '300px', display: 'flex', flexDirection: 'column', padding: '24px' }}>
-                        <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '16px' }}>
-                          Outstanding Balance Paydown Calendar
-                        </h3>
-                        <div style={{ flex: 1, position: 'relative' }}>
-                          <Line data={payoffData} options={payoffOptions} />
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </>
-              ) : (
-                <>
-                  {/* Recommendation card */}
-                  <div style={{ padding: '20px', background: 'var(--success-bg)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                    <Sparkles size={20} style={{ color: 'var(--success)', marginTop: '2px', flexShrink: 0 }} />
-                    <div>
-                      <h4 style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '15px', marginBottom: '6px' }}>Simulation Recommendation</h4>
-                      <p style={{ color: 'var(--text-secondary)', fontSize: '13px', lineHeight: '1.4' }}>{result.recommendation}</p>
-                    </div>
-                  </div>
-
-                  {/* Side by side comparison metrics */}
-                  <div className="glass-panel" style={{ padding: '24px' }}>
-                    <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>Scenario Comparison Metrics</h3>
-                    
-                    <table className="custom-table" style={{ marginTop: 0 }}>
-                      <thead>
-                        <tr>
-                          <th>Financial Metric</th>
-                          <th>Current</th>
-                          <th>Simulated</th>
-                          <th>Difference</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr>
-                          <td style={{ fontWeight: 600 }}>Net Worth</td>
-                          <td>{formatCurrency(result.current.net_worth)}</td>
-                          <td style={{ color: 'var(--success)', fontWeight: 600 }}>{formatCurrency(result.simulated.net_worth)}</td>
-                          <td style={{ fontWeight: 600, color: result.difference.net_worth >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                            {result.difference.net_worth >= 0 ? '+' : ''}{formatCurrency(result.difference.net_worth)}
-                          </td>
-                        </tr>
-                        <tr>
-                          <td style={{ fontWeight: 600 }}>Liquidity (Cash)</td>
-                          <td>{formatCurrency(result.current.liquid_funds)}</td>
-                          <td>{formatCurrency(result.simulated.liquid_funds)}</td>
-                          <td style={{ fontWeight: 600, color: result.difference.liquid_funds >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                            {result.difference.liquid_funds >= 0 ? '+' : ''}{formatCurrency(result.difference.liquid_funds)}
-                          </td>
-                        </tr>
-                        <tr>
-                          <td style={{ fontWeight: 600 }}>Total Active Debt</td>
-                          <td>{formatCurrency(result.current.total_debt)}</td>
-                          <td style={{ color: 'var(--danger)' }}>{formatCurrency(result.simulated.total_debt)}</td>
-                          <td style={{ fontWeight: 600, color: result.difference.total_debt <= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                            {result.difference.total_debt >= 0 ? '+' : ''}{formatCurrency(result.difference.total_debt)}
-                          </td>
-                        </tr>
-                        <tr>
-                          <td style={{ fontWeight: 600 }}>Monthly EMI Outflow</td>
-                          <td>{formatCurrency(result.current.monthly_emi)}</td>
-                          <td>{formatCurrency(result.simulated.monthly_emi)}</td>
-                          <td style={{ fontWeight: 600, color: result.difference.monthly_emi <= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                            {result.difference.monthly_emi >= 0 ? '+' : ''}{formatCurrency(result.difference.monthly_emi)}
-                          </td>
-                        </tr>
-                        <tr>
-                          <td style={{ fontWeight: 600 }}>Max Debt Tenure</td>
-                          <td>{result.current.remaining_tenure_months} mo</td>
-                          <td>{result.simulated.remaining_tenure_months} mo</td>
-                          <td style={{ fontWeight: 600, color: result.difference.tenure_months <= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                            {result.difference.tenure_months >= 0 ? '+' : ''}{result.difference.tenure_months} mo
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              )}
+              <section className="glass-panel db-card">
+                <div className="db-card-head"><h3>What it means</h3></div>
+                <p className="db-rec-plain">{r.recommendation}</p>
+              </section>
+              <section className="glass-panel db-card">
+                <table className="cf-compare">
+                  <thead><tr><th /><th>Now</th><th>After</th><th>Difference</th></tr></thead>
+                  <tbody>
+                    <tr className="cf-compare-total"><th scope="row">Net worth</th><td>{formatINR(r.current.net_worth)}</td><td>{formatINR(r.simulated.net_worth)}</td><td>{signed(r.difference.net_worth, true)}</td></tr>
+                    <tr><th scope="row">Cash</th><td>{formatINR(r.current.liquid_funds)}</td><td>{formatINR(r.simulated.liquid_funds)}</td><td>{signed(r.difference.liquid_funds, true)}</td></tr>
+                    <tr><th scope="row">Debt</th><td>{formatINR(r.current.total_debt)}</td><td>{formatINR(r.simulated.total_debt)}</td><td>{signed(r.difference.total_debt, false)}</td></tr>
+                    <tr><th scope="row">EMIs each month</th><td>{formatINR(r.current.monthly_emi)}</td><td>{formatINR(r.simulated.monthly_emi)}</td><td>{signed(r.difference.monthly_emi, false)}</td></tr>
+                    <tr><th scope="row">Debt-free in</th><td>{months(r.current.remaining_tenure_months)}</td><td>{months(r.simulated.remaining_tenure_months)}</td>
+                      {(() => {
+                        const unknown = r.current.remaining_tenure_months < 0 || r.simulated.remaining_tenure_months < 0;
+                        const d = r.simulated.remaining_tenure_months - r.current.remaining_tenure_months;
+                        return <td style={{ color: unknown || Math.round(d) === 0 ? 'var(--text-muted)' : d < 0 ? 'var(--success)' : '#fca5a5' }}>
+                          {unknown || Math.round(d) === 0 ? '—' : `${d < 0 ? '−' : '+'}${months(Math.abs(d))}`}</td>;
+                      })()}</tr>
+                  </tbody>
+                </table>
+              </section>
             </>
-          ) : (
-            <div className="glass-panel" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-              <Sparkles size={36} style={{ color: 'var(--accent-light)', marginBottom: '16px', opacity: 0.5 }} />
-              <span style={{ fontSize: '14px', fontWeight: 500 }}>Select a financial change scenario and click "Run Simulation".</span>
-              <span style={{ fontSize: '12px', marginTop: '6px' }}>See the dynamic impacts on your net worth, liquidity, and debt calendars.</span>
-            </div>
           )}
         </div>
       </div>
