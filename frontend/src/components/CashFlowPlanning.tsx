@@ -1,11 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  TrendingUp, TrendingDown, Plus, Trash2, Edit2,
-  Sparkles, RefreshCw, Info, AlertTriangle, CheckCircle, Shield
-} from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Plus } from 'lucide-react';
 import { InitData, MonthlyCashFlow } from '../types';
 import { API_BASE_URL } from '../config';
 import { monthlyEquivalent } from '../frequency';
+import { formatINR } from '../format';
+import { useModalA11y } from '../hooks/useModalA11y';
+import { AmountInput, ConfirmAction, Group, Row } from './settings/ui';
+
+// The monthly actuals log (monthly_cash_flows): what came in and went out each month.
+// Distinct from the recurring plan on Income & Expenses, which "Fill from my plan" reads.
 
 interface CashFlowPlanningProps {
   data: InitData;
@@ -13,953 +16,432 @@ interface CashFlowPlanningProps {
   showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
 
+type View = 'latest' | 'log' | 'whatif';
+type Draft = Omit<MonthlyCashFlow, 'id'>;
+
+const FIELDS: { key: keyof Draft; label: string; hint?: string }[] = [
+  { key: 'net_salary', label: 'Take-home salary', hint: 'What reached your account after tax and deductions.' },
+  { key: 'other_income', label: 'Other income', hint: 'Rent, interest, freelance and the like.' },
+  { key: 'household_expenses', label: 'Household spending', hint: 'Regular living costs for the month.' },
+  { key: 'one_time_expenses', label: 'One-off spending', hint: 'Anything unusual: a trip, a repair, a big purchase.' },
+  { key: 'emi', label: 'Loan EMIs' },
+  { key: 'insurance_premium', label: 'Insurance premiums', hint: 'Yearly premiums count as a twelfth each month.' },
+  { key: 'investments', label: 'Invested', hint: 'SIPs, PPF, NPS and other money put away.' },
+];
+const SECTIONS: { title: string; keys: (keyof Draft)[] }[] = [
+  { title: 'Came in', keys: ['net_salary', 'other_income'] },
+  { title: 'Spent', keys: ['household_expenses', 'one_time_expenses'] },
+  { title: 'Commitments and saving', keys: ['emi', 'insurance_premium', 'investments'] },
+];
+const EMPTY: Draft = { month: '', net_salary: 0, other_income: 0, household_expenses: 0, emi: 0, insurance_premium: 0, investments: 0, one_time_expenses: 0, notes: '' };
+
+const thisMonth = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+};
+const monthName = (ym: string, style: 'long' | 'short' = 'long') => {
+  const m = /^(\d{4})-(\d{2})$/.exec(ym || '');
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, 1).toLocaleDateString('en-IN', { month: style, year: 'numeric' }) : ym;
+};
+
+// The page's arithmetic, in one place.
+const cameIn = (f: Draft) => (f.net_salary || 0) + (f.other_income || 0);
+const spent = (f: Draft) => (f.household_expenses || 0) + (f.one_time_expenses || 0);
+const leftOver = (f: Draft) => cameIn(f) - spent(f) - (f.emi || 0) - (f.insurance_premium || 0) - (f.investments || 0);
+/** Share of income not spent: left over plus invested (the target_savings_rate rule's meaning). */
+const savingsRate = (f: Draft) => (cameIn(f) > 0 ? ((leftOver(f) + (f.investments || 0)) / cameIn(f)) * 100 : 0);
+const pct = (part: number, whole: number) => (whole > 0 ? (part / whole) * 100 : 0);
+
 export const CashFlowPlanning: React.FC<CashFlowPlanningProps> = ({ data, onRefresh, showToast }) => {
   const { cash_flows = [], liabilities, assets, goals, accounts, income = [], expenses = [] } = data;
-  const loans = liabilities.filter((l: any) => l.category_name !== 'Credit Card');
-  const properties = assets.filter((a: any) => a.category_name === 'Property');
-  const insurance = assets.filter((a: any) => a.category_name === 'Insurance');
-  
-  // Tab State: 'dashboard' | 'history' | 'simulation'
-  const [activeSubTab, setActiveSubTab] = useState<'dashboard' | 'history' | 'simulation'>('dashboard');
+  const [view, setView] = useState<View>('latest');
 
-  // Form State for new/editing snapshot
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [deletingCfId, setDeletingCfId] = useState<number | null>(null);
-  
-  const [month, setMonth] = useState('');
-  const [netSalary, setNetSalary] = useState<number>(150000);
-  const [otherIncome, setOtherIncome] = useState<number>(20000);
-  const [householdExpenses, setHouseholdExpenses] = useState<number>(45000);
-  const [emi, setEmi] = useState<number>(35000);
-  const [insurancePremium, setInsurancePremium] = useState<number>(5000);
-  const [investments, setInvestments] = useState<number>(30000);
-  const [oneTimeExpenses, setOneTimeExpenses] = useState<number>(0);
-  const [notes, setNotes] = useState('');
-  const [autoFillNote, setAutoFillNote] = useState<string | null>(null);
+  const savingsRule = data.rules?.find((r: any) => r.rule_key === 'target_savings_rate');
+  const targetRate = savingsRule && savingsRule.is_enabled === 1 ? savingsRule.value : 35.0;
+  const cash = accounts.reduce((s, a) => s + (a.current_balance || 0), 0);
 
-  // What-If Simulation State
-  const [simSalaryChangePct, setSimSalaryChangePct] = useState<number>(0);
-  const [simSalaryChangeAbs, setSimSalaryChangeAbs] = useState<number>(0);
-  const [simOneTimeBonus, setSimOneTimeBonus] = useState<number>(0);
-  const [simNewEmi, setSimNewEmi] = useState<number>(0);
-  const [simEmiReduction, setSimEmiReduction] = useState<number>(0);
-  const [simAdditionalInvestment, setSimAdditionalInvestment] = useState<number>(0);
-  const [simExpenseReductionPct, setSimExpenseReductionPct] = useState<number>(0);
-  const [simExpenseReductionAbs, setSimExpenseReductionAbs] = useState<number>(0);
-  
-  const [simResult, setSimResult] = useState<any>(null);
-  const [simLoading, setSimLoading] = useState<boolean>(false);
+  const latest = cash_flows[0] ?? null;
+  const previous = cash_flows[1] ?? null;
 
-  // Dynamic target savings rate from database rules
-  const savingsRateRule = data.rules?.find((r: any) => r.rule_key === 'target_savings_rate');
-  const targetSavingsRate = savingsRateRule && savingsRateRule.is_enabled === 1 ? savingsRateRule.value : 35.0;
+  // ---- Log a month / edit ------------------------------------------------------------
+  const [editing, setEditing] = useState<MonthlyCashFlow | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [draft, setDraft] = useState<Draft>(EMPTY);
+  const [fillNote, setFillNote] = useState<string | null>(null);
+  const closeForm = () => { setFormOpen(false); setEditing(null); };
+  const formRef = useModalA11y(formOpen, closeForm);
 
-  // Auto fill date
-  useEffect(() => {
-    const today = new Date();
-    const MM = String(today.getMonth() + 1).padStart(2, '0');
-    setMonth(`${today.getFullYear()}-${MM}`);
-  }, []);
-
-  // Compute overall liquid assets from accounts
-  const liquidAssets = accounts.reduce((sum, a) => sum + a.current_balance, 0);
-
-  // Find current month cash flow snapshot for dashboard KPI cards
-  const latestFlow = cash_flows.length > 0 ? cash_flows[0] : null;
-  const previousFlow = cash_flows.length > 1 ? cash_flows[1] : null;
-
-  // Auto-calculate current surplus
-  const calculateSurplus = (cf: MonthlyCashFlow | any) => {
-    if (!cf) return 0;
-    const totalInc = cf.net_salary + cf.other_income;
-    const totalExp = cf.household_expenses + cf.one_time_expenses;
-    return totalInc - totalExp - cf.emi - cf.insurance_premium - cf.investments;
-  };
-
-  const currentSurplus = latestFlow ? calculateSurplus(latestFlow) : 0;
-  const currentTotalIncome = latestFlow ? (latestFlow.net_salary + latestFlow.other_income) : 0;
-  const currentTotalExpenses = latestFlow ? (latestFlow.household_expenses + latestFlow.one_time_expenses) : 0;
-  const currentSavingsRate = currentTotalIncome > 0 ? (currentSurplus / currentTotalIncome * 100) : 0;
-  
-  // Format Currency
-  const formatCurrency = (val: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      maximumFractionDigits: 0
-    }).format(val);
-  };
-
-  // Run auto-fill routine from database portfolio and the Income & Expenses plan
-  const handleAutoFill = () => {
+  /** Figures from the plan (Income & Expenses), loans, policies and goals. */
+  const fromPlan = (base: Draft): { draft: Draft; note: string } => {
+    const next = { ...base };
     const filled: string[] = [];
     const active = <T extends { status?: string }>(rows: T[]) => rows.filter((r) => (r.status ?? 'Active') === 'Active');
 
-    // 0. Take-home salary from the plan's Salary entries (their take-home field; the amount is gross)
+    // Take-home from Salary entries' take-home field (their amount is gross).
     const salaries = active(income).filter((i) => i.category_name === 'Salary');
     const withTakeHome = salaries.filter((i) => (i.net_amount || 0) > 0);
     if (withTakeHome.length) {
-      setNetSalary(Math.round(withTakeHome.reduce((s, i) => s + monthlyEquivalent(i.net_amount || 0, i.frequency), 0)));
-      filled.push(`take-home from ${withTakeHome.length} salary entr${withTakeHome.length === 1 ? 'y' : 'ies'}`);
+      next.net_salary = Math.round(withTakeHome.reduce((s, i) => s + monthlyEquivalent(i.net_amount || 0, i.frequency), 0));
+      filled.push('take-home salary');
     }
     const missingTakeHome = salaries.filter((i) => !((i.net_amount || 0) > 0)).map((i) => `"${i.name}"`);
 
-    // 1. EMI Sum from active outstanding loans
-    const emiSum = loans.reduce((sum: number, l: any) => sum + (l.outstanding > 0 ? l.emi : 0), 0);
-    setEmi(emiSum);
+    next.emi = liabilities.filter((l: any) => l.category_name !== 'Credit Card')
+      .reduce((s: number, l: any) => s + (l.outstanding > 0 ? l.emi || 0 : 0), 0);
 
-    // 2. Other income: the plan's non-salary income; property rent only when the plan has no Rental entry
-    //    (the same rent would otherwise be counted twice)
+    // Property rent only when the plan has no Rental entry (it would count twice).
     const otherPlanned = active(income).filter((i) => i.category_name !== 'Salary' && i.category_name !== 'Bonus');
     const hasPlannedRent = otherPlanned.some((i) => i.category_name === 'Rental');
-    const rentSum = hasPlannedRent ? 0 : properties.reduce((sum: number, p: any) => sum + (p.rental_income || 0), 0);
-    setOtherIncome(Math.round(rentSum + otherPlanned.reduce((s, i) => s + monthlyEquivalent(i.amount, i.frequency), 0)));
-    if (otherPlanned.length) filled.push(`${otherPlanned.length} other income entr${otherPlanned.length === 1 ? 'y' : 'ies'}`);
+    const rent = hasPlannedRent ? 0 : assets.filter((a: any) => a.category_name === 'Property').reduce((s: number, p: any) => s + (p.rental_income || 0), 0);
+    next.other_income = Math.round(rent + otherPlanned.reduce((s, i) => s + monthlyEquivalent(i.amount, i.frequency), 0));
+    if (otherPlanned.length) filled.push('other income');
 
-    // 2b. Household expenses from the plan (EMIs come from loans above, not from EMI expense entries)
+    // EMIs come from the loans above, not from EMI expense entries.
     const planned = active(expenses).filter((e) => e.category_name !== 'EMI');
     if (planned.length) {
-      setHouseholdExpenses(Math.round(planned.reduce((s, e) => s + monthlyEquivalent(e.amount, e.frequency), 0)));
-      filled.push(`${planned.length} expense entr${planned.length === 1 ? 'y' : 'ies'}`);
+      next.household_expenses = Math.round(planned.reduce((s, e) => s + monthlyEquivalent(e.amount, e.frequency), 0));
+      filled.push('household spending');
     }
 
-    // 3. Pro-rata monthly insurance premium equivalent
-    const insSum = insurance.reduce((sum: number, ins: any) => {
-      const prem = ins.premium || 0;
-      if (ins.frequency === 'Yearly') return sum + Math.round(prem / 12);
-      if (ins.frequency === 'Half-Yearly') return sum + Math.round(prem / 6);
-      if (ins.frequency === 'Quarterly') return sum + Math.round(prem / 3);
-      return sum + prem; // Monthly
-    }, 0);
-    setInsurancePremium(insSum);
+    next.insurance_premium = Math.round(assets.filter((a: any) => a.category_name === 'Insurance')
+      .reduce((s: number, p: any) => s + monthlyEquivalent(p.premium || 0, p.frequency || 'Yearly'), 0));
+    next.investments = goals.reduce((s: number, g: any) => s + (g.monthly_contribution || 0), 0);
 
-    // 4. Goals contribution sum
-    const investSum = goals.reduce((sum: number, g: any) => sum + (g.monthly_contribution || 0), 0);
-    setInvestments(investSum);
-
-    setAutoFillNote(
-      `Filled EMIs, premiums and investments from your loans, policies and goals${filled.length ? `; ${filled.join(', ')} from Income & Expenses` : ''}.`
+    const note = `EMIs, premiums and investing filled from your loans, policies and goals${filled.length ? `; ${filled.join(', ')} from Income & Expenses` : ''}.`
       + (missingTakeHome.length
         ? withTakeHome.length
-          ? ` Net salary leaves out ${missingTakeHome.join(', ')}: add its take-home amount under Income & Expenses to include it.`
-          : ` No salary entry has a take-home amount yet, so net salary was left as it was.`
+          ? ` Take-home leaves out ${missingTakeHome.join(', ')}: add its take-home amount on Income & Expenses.`
+          : ' No salary entry has a take-home amount yet, so take-home was left as it was.'
         : '')
-      + (!income.length && !expenses.length ? ' Add your recurring income and expenses under Income & Expenses to fill salary and household spending too.' : ''),
+      + (!income.length && !expenses.length ? ' Add your regular income and expenses on Income & Expenses to fill salary and spending too.' : '');
+    return { draft: next, note };
+  };
+
+  const openNew = () => {
+    setEditing(null);
+    const month = thisMonth();
+    if (latest) {
+      // Start from the last month logged: most figures repeat month to month.
+      setDraft({ ...latest, month, one_time_expenses: 0, notes: '' });
+      setFillNote(`Started from ${monthName(latest.month)}. Change what was different, or fill from your plan.`);
+    } else {
+      const { draft: filled, note } = fromPlan({ ...EMPTY, month });
+      setDraft(filled);
+      setFillNote(note);
+    }
+    setFormOpen(true);
+  };
+  const openEdit = (cf: MonthlyCashFlow) => {
+    setEditing(cf);
+    setDraft({ ...cf, notes: cf.notes || '' });
+    setFillNote(null);
+    setFormOpen(true);
+  };
+  const fillFromPlan = () => {
+    const { draft: filled, note } = fromPlan(draft);
+    setDraft(filled);
+    setFillNote(note);
+  };
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = await fetch(`${API_BASE_URL}/api/cash-flows`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...draft, id: editing?.id }),
+    }).catch(() => null);
+    if (res?.ok) {
+      closeForm();
+      onRefresh();
+      showToast?.(`${monthName(draft.month)} saved`, 'success');
+    } else {
+      showToast?.("Couldn't save that month", 'error');
+    }
+  };
+  const remove = async (cf: MonthlyCashFlow) => {
+    const res = await fetch(`${API_BASE_URL}/api/cash-flows/${cf.id}`, { method: 'DELETE' }).catch(() => null);
+    if (res?.ok) {
+      closeForm();
+      onRefresh();
+      showToast?.(`${monthName(cf.month)} deleted`, 'success');
+    }
+  };
+  const logged = (month: string) => cash_flows.find((c) => c.month === month);
+
+  // ---- What if -----------------------------------------------------------------------
+  const NO_CHANGES = { salary_change_pct: 0, salary_change_abs: 0, one_time_bonus: 0, new_emi: 0, emi_reduction: 0, additional_investment: 0, expense_reduction_pct: 0, expense_reduction_abs: 0 };
+  const [changes, setChanges] = useState(NO_CHANGES);
+  const [sim, setSim] = useState<any>(null);
+  const setChange = (k: keyof typeof NO_CHANGES, v: number) => setChanges((c) => ({ ...c, [k]: v }));
+  useEffect(() => {
+    if (view !== 'whatif' || !latest) return;
+    const timer = setTimeout(() => {
+      fetch(`${API_BASE_URL}/api/calculations/cash-flow/simulate`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          net_salary: latest.net_salary, other_income: latest.other_income, household_expenses: latest.household_expenses,
+          emi: latest.emi, insurance_premium: latest.insurance_premium, investments: latest.investments,
+          one_time_expenses: latest.one_time_expenses, ...changes,
+        }),
+      }).then((r) => (r.ok ? r.json() : null)).then((d) => d && setSim(d)).catch(() => null);
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [view, latest, changes]);
+
+  // ---- Render --------------------------------------------------------------------------
+  const vsPrevious = (now: number, before: number | null, higherIsBetter: boolean) => {
+    if (before === null || now === before) return previous ? 'same as last month' : '';
+    const up = now > before;
+    return <span style={{ color: up === higherIsBetter ? 'var(--success)' : '#fca5a5' }}>{up ? '+' : '−'}{formatINR(Math.abs(now - before))} vs {monthName(previous!.month, 'short')}</span>;
+  };
+
+  const renderLatest = () => {
+    if (!latest) {
+      return (
+        <div className="settings-group">
+          <div className="ie-empty">
+            <p>Log what came in and went out each month to see where the money goes, your savings rate, and how it changes over time.
+              {income.length || expenses.length ? ' The first month starts from your Income & Expenses plan.' : ''}</p>
+            <div><button type="button" className="settings-btn" onClick={openNew}><Plus size={12} /> Log {monthName(thisMonth())}</button></div>
+          </div>
+        </div>
+      );
+    }
+    const inflow = cameIn(latest);
+    const rate = savingsRate(latest);
+    const commitments = (latest.emi || 0) + (latest.insurance_premium || 0);
+    const parts: [string, number][] = [
+      ['Household spending', latest.household_expenses], ['One-off spending', latest.one_time_expenses], ['Loan EMIs', latest.emi],
+      ['Insurance', latest.insurance_premium], ['Invested', latest.investments], ['Left over', Math.max(leftOver(latest), 0)],
+    ];
+    const emiShare = pct(latest.emi, inflow);
+    const monthlyOutgo = latest.household_expenses + latest.emi;
+    const months = monthlyOutgo > 0 ? cash / monthlyOutgo : 0;
+    return (
+      <>
+        <div className="glass-panel cc-summary db-summary">
+          <div className="cc-summary-main">
+            <div className="cc-label">Left over in {monthName(latest.month)}</div>
+            <strong className="eg-figure db-networth" style={leftOver(latest) < 0 ? { color: '#fca5a5' } : undefined}>{formatINR(leftOver(latest))}</strong>
+            <span className="cc-note">{vsPrevious(leftOver(latest), previous ? leftOver(previous) : null, true)}</span>
+          </div>
+          <div className="cc-summary-stat">
+            <div className="cc-label">Came in</div><strong>{formatINR(inflow)}</strong>
+            <span className="cc-note">{vsPrevious(inflow, previous ? cameIn(previous) : null, true)}</span>
+          </div>
+          <div className="cc-summary-stat">
+            <div className="cc-label">Spent</div><strong>{formatINR(spent(latest))}</strong>
+            <span className="cc-note">{vsPrevious(spent(latest), previous ? spent(previous) : null, false)}</span>
+          </div>
+          <div className="cc-summary-stat">
+            <div className="cc-label">EMIs and premiums</div><strong>{formatINR(commitments)}</strong>
+            <span className="cc-note">invested {formatINR(latest.investments)}</span>
+          </div>
+        </div>
+
+        <div className="db-pair">
+          <section className="glass-panel db-card">
+            <div className="db-card-head"><h3>Where it went</h3><span className="cc-note">share of what came in</span></div>
+            <ul className="db-bars">
+              {parts.filter(([, v]) => v > 0).map(([label, v]) => (
+                <li key={label}>
+                  <span className="db-bar-label">{label}<span>{formatINR(v)}</span></span>
+                  <span className="db-bar"><span style={{ width: `${Math.min(pct(v, inflow), 100)}%`, background: label === 'Left over' || label === 'Invested' ? 'var(--success)' : undefined }} /></span>
+                  <span className="db-bar-pct">{pct(v, inflow).toFixed(0)}%</span>
+                </li>
+              ))}
+            </ul>
+            {leftOver(latest) < 0 && <p className="cf-warn">You spent {formatINR(-leftOver(latest))} more than came in this month.</p>}
+          </section>
+
+          <section className="glass-panel db-card">
+            <div className="db-card-head">
+              <h3>Savings rate</h3>
+              <span className={`db-pill db-pill--${rate >= targetRate ? 'success' : rate >= targetRate * 0.7 ? 'warning' : 'danger'}`}>
+                {rate >= targetRate ? 'On target' : 'Below target'}
+              </span>
+            </div>
+            <div className="db-reserve">
+              <strong className="eg-figure">{rate.toFixed(0)}% <span>of {targetRate}% target</span></strong>
+              <div className="cc-meter"><div style={{ width: `${Math.min(Math.max(rate, 0) / Math.max(targetRate, 1) * 100, 100)}%`, background: rate >= targetRate ? 'var(--success)' : 'var(--warning)' }} /></div>
+            </div>
+            <ul className="db-facts">
+              <li>Of {formatINR(inflow)} that came in, you kept <strong>{formatINR(leftOver(latest) + latest.investments)}</strong>: {formatINR(latest.investments)} invested and {formatINR(Math.max(leftOver(latest), 0))} left over.</li>
+              {latest.emi > 0 && <li>EMIs take <strong>{emiShare.toFixed(0)}%</strong> of your income{emiShare > 40 ? ', which is heavy: over 40% leaves little room.' : emiShare > 30 ? ', manageable but worth watching.' : ', a comfortable level.'}</li>}
+              {monthlyOutgo > 0 && <li>Cash in your accounts would cover about <strong>{months < 1 ? 'under a month' : `${months.toFixed(1).replace(/\.0$/, '')} months`}</strong> of spending and EMIs.</li>}
+            </ul>
+          </section>
+        </div>
+
+        <section className="glass-panel db-card">
+          <div className="db-card-head"><h3>Over a year at this pace</h3><span className="cc-note">{monthName(latest.month)} × 12</span></div>
+          <div className="db-mini-stats cf-year">
+            <div><span className="cc-label">Comes in</span><strong>{formatINR(inflow * 12)}</strong></div>
+            <div><span className="cc-label">Spent</span><strong>{formatINR(spent(latest) * 12)}</strong></div>
+            <div><span className="cc-label">EMIs and premiums</span><strong>{formatINR(commitments * 12)}</strong></div>
+            <div><span className="cc-label">Saved and invested</span><strong style={{ color: 'var(--success)' }}>{formatINR((leftOver(latest) + latest.investments) * 12)}</strong></div>
+          </div>
+        </section>
+      </>
     );
   };
 
-  // Handle save snapshot
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const payload = {
-      id: editingId || undefined,
-      month,
-      net_salary: netSalary,
-      other_income: otherIncome,
-      household_expenses: householdExpenses,
-      emi,
-      insurance_premium: insurancePremium,
-      investments,
-      one_time_expenses: oneTimeExpenses,
-      notes
-    };
-
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/cash-flows`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (res.ok) {
-        setModalOpen(false);
-        setEditingId(null);
-        setMonth('');
-        setOneTimeExpenses(0);
-        setNotes('');
-        onRefresh();
-        if (showToast) showToast("Cash flow snapshot saved successfully!", "success");
-      } else {
-        if (showToast) showToast("Failed to save snapshot", "error");
-        else alert("Failed to save snapshot");
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  // Open modal for editing
-  const openEdit = (cf: MonthlyCashFlow) => {
-    setEditingId(cf.id);
-    setMonth(cf.month);
-    setNetSalary(cf.net_salary);
-    setOtherIncome(cf.other_income);
-    setHouseholdExpenses(cf.household_expenses);
-    setEmi(cf.emi);
-    setInsurancePremium(cf.insurance_premium);
-    setInvestments(cf.investments);
-    setOneTimeExpenses(cf.one_time_expenses);
-    setNotes(cf.notes || '');
-    setAutoFillNote(null);
-    setModalOpen(true);
-  };
-
-  // Handle delete
-  const handleDelete = async (id: number) => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/cash-flows/${id}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        onRefresh();
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  // Execute What-If simulation request
-  const calculateSimulation = async () => {
-    if (!latestFlow) return;
-    setSimLoading(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/calculations/cash-flow/simulate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          net_salary: latestFlow.net_salary,
-          other_income: latestFlow.other_income,
-          household_expenses: latestFlow.household_expenses,
-          emi: latestFlow.emi,
-          insurance_premium: latestFlow.insurance_premium,
-          investments: latestFlow.investments,
-          one_time_expenses: latestFlow.one_time_expenses,
-          salary_change_pct: simSalaryChangePct,
-          salary_change_abs: simSalaryChangeAbs,
-          one_time_bonus: simOneTimeBonus,
-          new_emi: simNewEmi,
-          emi_reduction: simEmiReduction,
-          additional_investment: simAdditionalInvestment,
-          expense_reduction_pct: simExpenseReductionPct,
-          expense_reduction_abs: simExpenseReductionAbs
-        })
-      });
-      if (res.ok) {
-        const d = await res.json();
-        setSimResult(d);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSimLoading(false);
-    }
-  };
-
-  // Run simulation whenever sliders change
-  useEffect(() => {
-    if (activeSubTab === 'simulation' && latestFlow) {
-      calculateSimulation();
-    }
-  }, [
-    simSalaryChangePct, simSalaryChangeAbs, simOneTimeBonus,
-    simNewEmi, simEmiReduction, simAdditionalInvestment,
-    simExpenseReductionPct, simExpenseReductionAbs, latestFlow, activeSubTab
-  ]);
-
-  return (
-    <div style={{ paddingBottom: '40px' }}>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h1 className="page-title">Cash Flow Planning</h1>
-          <p className="page-subtitle">What actually came in and went out each month, your savings rate, and what-if changes.</p>
-        </div>
-        <button className="btn btn-primary" onClick={() => {
-          setEditingId(null);
-          setAutoFillNote(null);
-          setModalOpen(true);
-        }}>
-          <Plus size={16} /> Log Monthly Flow
-        </button>
+  const renderLog = () => (
+    cash_flows.length === 0 ? renderLatest() : (
+      <div className="settings-group">
+        {cash_flows.map((cf) => (
+          <button key={cf.id} type="button" className="ie-row" onClick={() => openEdit(cf)}>
+            <span className="ie-row-text">
+              <strong>{monthName(cf.month)}</strong>
+              <span>{[`in ${formatINR(cameIn(cf))}`, `spent ${formatINR(spent(cf))}`, cf.emi ? `EMIs ${formatINR(cf.emi)}` : null, cf.investments ? `invested ${formatINR(cf.investments)}` : null, cf.notes || null].filter(Boolean).join(' · ')}</span>
+            </span>
+            <span className="ie-row-amount">
+              <strong style={leftOver(cf) < 0 ? { color: '#fca5a5' } : undefined}>{formatINR(leftOver(cf))}</strong>
+              <span>left over · {savingsRate(cf).toFixed(0)}% saved</span>
+            </span>
+          </button>
+        ))}
       </div>
+    )
+  );
 
-      {/* Sub tabs navigation */}
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', borderBottom: '1px solid var(--border-glass)', paddingBottom: '8px' }}>
-        <button 
-          onClick={() => setActiveSubTab('dashboard')} 
-          className={`sidebar-item ${activeSubTab === 'dashboard' ? 'active' : ''}`}
-          style={{ padding: '8px 16px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '13px' }}
-        >
-          Dashboard &amp; Ratios
-        </button>
-        <button 
-          onClick={() => setActiveSubTab('simulation')} 
-          className={`sidebar-item ${activeSubTab === 'simulation' ? 'active' : ''}`}
-          style={{ padding: '8px 16px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '13px' }}
-        >
-          What-If Planning Sandbox
-        </button>
-        <button 
-          onClick={() => setActiveSubTab('history')} 
-          className={`sidebar-item ${activeSubTab === 'history' ? 'active' : ''}`}
-          style={{ padding: '8px 16px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '13px' }}
-        >
-          Monthly Logs ({cash_flows.length})
-        </button>
-      </div>
+  const renderWhatIf = () => {
+    if (!latest) return renderLatest();
+    const amount = (k: keyof typeof NO_CHANGES, label: string, description: string, allowNegative = false) => (
+      <Row label={label} description={description} htmlFor={`wi-${k}`}>
+        <AmountInput id={`wi-${k}`} label={label} prefix="₹" width={120} value={changes[k]} allowNegative={allowNegative} onChange={(v) => setChange(k, v)} />
+      </Row>
+    );
+    const slider = (k: keyof typeof NO_CHANGES, label: string, max: number, sign: string) => (
+      <Row label={<>{label} <strong className="cf-slider-value">{sign}{changes[k]}%</strong></>} htmlFor={`wi-${k}`}>
+        <input id={`wi-${k}`} type="range" min={0} max={max} step={1} value={changes[k]} onChange={(e) => setChange(k, Number(e.target.value))} className="cf-range" />
+      </Row>
+    );
+    const rows: [string, string, boolean][] = [
+      ['Came in', 'income', true], ['Spent', 'expenses', false], ['Loan EMIs', 'emi', false], ['Invested', 'investments', true], ['Left over', 'surplus', true],
+    ];
+    const changed = JSON.stringify(changes) !== JSON.stringify(NO_CHANGES);
+    return (
+      <div className="cf-whatif">
+        <Group title="Change something" description={`Starting from ${monthName(latest.month)}, your latest month.`}
+          actions={changed ? <button type="button" className="settings-link" onClick={() => setChanges(NO_CHANGES)}>Reset</button> : undefined}>
+          {slider('salary_change_pct', 'Salary rise', 50, '+')}
+          {amount('salary_change_abs', 'Salary change', 'A fixed amount more (or less) each month.', true)}
+          {slider('expense_reduction_pct', 'Spend less', 40, '−')}
+          {amount('additional_investment', 'Invest more', 'Extra each month into SIPs or similar.')}
+          {amount('new_emi', 'New loan EMI', 'A loan you are thinking of taking.')}
+          {amount('emi_reduction', 'EMIs ending', 'A loan you are about to close.')}
+          {amount('one_time_bonus', 'One-time bonus', 'A lump sum, such as a bonus or maturity.')}
+        </Group>
 
-      {/* Dashboard View */}
-      {activeSubTab === 'dashboard' && (
-        <div>
-          {cash_flows.length === 0 ? (
-            <div className="glass-panel" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-muted)' }}>
-              <Info size={40} style={{ margin: '0 auto 16px auto', opacity: 0.5 }} />
-              <h3>No Cash Flow Logs Found</h3>
-              <p style={{ maxWidth: '400px', margin: '8px auto 20px auto', fontSize: '13px' }}>
-                Create your first monthly cash flow log to unlock KPIs, safety metrics, ratios analysis, and projections.
-              </p>
-              <button className="btn btn-primary" onClick={() => { setAutoFillNote(null); setModalOpen(true); }}>
-                <Plus size={16} /> Log First Month
-              </button>
-            </div>
-          ) : (
-            <div>
-              {/* Summary Cards */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '16px', marginBottom: '24px' }}>
-                <div className="glass-panel" style={{ padding: '16px 20px' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Income</span>
-                  <h3 style={{ fontSize: '20px', fontWeight: 700, margin: '8px 0 4px 0' }}>{formatCurrency(currentTotalIncome)}</h3>
-                  {previousFlow && (
-                    <div style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      {currentTotalIncome >= (previousFlow.net_salary + previousFlow.other_income) ? (
-                        <TrendingUp size={12} style={{ color: 'var(--success)' }} />
-                      ) : (
-                        <TrendingDown size={12} style={{ color: 'var(--danger)' }} />
-                      )}
-                      <span style={{ color: 'var(--text-muted)' }}>Prev: {formatCurrency(previousFlow.net_salary + previousFlow.other_income)}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="glass-panel" style={{ padding: '16px 20px' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Expenses</span>
-                  <h3 style={{ fontSize: '20px', fontWeight: 700, margin: '8px 0 4px 0', color: 'var(--text-primary)' }}>{formatCurrency(currentTotalExpenses)}</h3>
-                  {previousFlow && (
-                    <div style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      {currentTotalExpenses <= (previousFlow.household_expenses + previousFlow.one_time_expenses) ? (
-                        <TrendingDown size={12} style={{ color: 'var(--success)' }} />
-                      ) : (
-                        <TrendingUp size={12} style={{ color: 'var(--danger)' }} />
-                      )}
-                      <span style={{ color: 'var(--text-muted)' }}>Prev: {formatCurrency(previousFlow.household_expenses + previousFlow.one_time_expenses)}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="glass-panel" style={{ padding: '16px 20px' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Investments</span>
-                  <h3 style={{ fontSize: '20px', fontWeight: 700, margin: '8px 0 4px 0', color: 'var(--info)' }}>{formatCurrency(latestFlow ? latestFlow.investments : 0)}</h3>
-                  {previousFlow && (
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                      Prev: {formatCurrency(previousFlow.investments)}
-                    </div>
-                  )}
-                </div>
-
-                <div className="glass-panel" style={{ padding: '16px 20px' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Monthly Surplus</span>
-                  <h3 style={{ fontSize: '20px', fontWeight: 700, margin: '8px 0 4px 0', color: currentSurplus >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                    {formatCurrency(currentSurplus)}
-                  </h3>
-                  {previousFlow && (
-                    <div style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      {currentSurplus >= calculateSurplus(previousFlow) ? (
-                        <TrendingUp size={12} style={{ color: 'var(--success)' }} />
-                      ) : (
-                        <TrendingDown size={12} style={{ color: 'var(--danger)' }} />
-                      )}
-                      <span style={{ color: 'var(--text-muted)' }}>Prev: {formatCurrency(calculateSurplus(previousFlow))}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="glass-panel" style={{ padding: '16px 20px' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Savings Rate</span>
-                  <h3 style={{ fontSize: '20px', fontWeight: 700, margin: '8px 0 4px 0', color: currentSavingsRate >= targetSavingsRate ? 'var(--success)' : 'var(--warning)' }}>
-                    {currentSavingsRate.toFixed(1)}%
-                  </h3>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                    Target: {targetSavingsRate}%
-                  </div>
-                </div>
-              </div>
-
-              {/* Ratios & Health Metrics */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '24px', marginBottom: '24px' }}>
-                <div className="glass-panel" style={{ padding: '24px' }}>
-                  <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '20px' }}>Cash Flow Ratios &amp; Health Matrix</h3>
-                  
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                    {/* Savings Ratio */}
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
-                        <span>Savings Rate (Surplus ÷ Total Income)</span>
-                        <strong>{currentSavingsRate.toFixed(1)}%</strong>
-                      </div>
-                      <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '50px', overflow: 'hidden' }}>
-                        <div style={{ 
-                          width: `${Math.min(currentSavingsRate, 100)}%`, 
-                          height: '100%', 
-                          background: currentSavingsRate >= targetSavingsRate ? 'var(--success)' : 'var(--warning)',
-                          borderRadius: '50px'
-                        }}></div>
-                      </div>
-                    </div>
-
-                    {/* Investment Rate */}
-                    {latestFlow && (() => {
-                      const invRate = (latestFlow.investments / currentTotalIncome) * 100;
-                      return (
-                        <div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
-                            <span>Investment Rate (Investments ÷ Total Income)</span>
-                            <strong>{invRate.toFixed(1)}%</strong>
-                          </div>
-                          <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '50px', overflow: 'hidden' }}>
-                            <div style={{ 
-                              width: `${Math.min(invRate, 100)}%`, 
-                              height: '100%', 
-                              background: 'var(--info)',
-                              borderRadius: '50px'
-                            }}></div>
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {/* Expense Ratio */}
-                    {latestFlow && (() => {
-                      const expRate = (latestFlow.household_expenses / currentTotalIncome) * 100;
-                      return (
-                        <div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
-                            <span>Expense Ratio (Expenses ÷ Total Income)</span>
-                            <strong>{expRate.toFixed(1)}%</strong>
-                          </div>
-                          <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '50px', overflow: 'hidden' }}>
-                            <div style={{ 
-                              width: `${Math.min(expRate, 100)}%`, 
-                              height: '100%', 
-                              background: expRate <= 40 ? 'var(--success)' : 'var(--warning)',
-                              borderRadius: '50px'
-                            }}></div>
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {/* Debt Burden Ratio */}
-                    {latestFlow && (() => {
-                      const debtRate = (latestFlow.emi / currentTotalIncome) * 100;
-                      return (
-                        <div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
-                            <span>Debt Burden Ratio (EMI ÷ Total Income)</span>
-                            <strong style={{ color: debtRate > 40 ? 'var(--danger)' : 'inherit' }}>{debtRate.toFixed(1)}%</strong>
-                          </div>
-                          <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '50px', overflow: 'hidden' }}>
-                            <div style={{ 
-                              width: `${Math.min(debtRate, 100)}%`, 
-                              height: '100%', 
-                              background: debtRate <= 35 ? 'var(--success)' : (debtRate <= 50 ? 'var(--warning)' : 'var(--danger)'),
-                              borderRadius: '50px'
-                            }}></div>
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {/* Liquidity Ratio */}
-                    {latestFlow && (() => {
-                      const monthlyExp = latestFlow.household_expenses + latestFlow.emi;
-                      const liqRatio = monthlyExp > 0 ? (liquidAssets / monthlyExp) : 0;
-                      return (
-                        <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '14px', marginTop: '4px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-                            <span>Liquidity Ratio (Emergency Buffer)</span>
-                            <strong>{liqRatio.toFixed(1)} Months</strong>
-                          </div>
-                          <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                            Your liquid assets ({formatCurrency(liquidAssets)}) can cover approximately <strong>{liqRatio.toFixed(1)} months</strong> of recurring monthly expenses. 
-                            {liqRatio >= 6 ? (
-                              <span style={{ color: 'var(--success)' }}> (Healthy reserve!)</span>
-                            ) : (
-                              <span style={{ color: 'var(--warning)' }}> (Target: 6 months minimum)</span>
-                            )}
-                          </p>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-
-                {/* Annual Projections */}
-                <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column' }}>
-                  <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '20px' }}>12-Month Projections (Current Rate)</h3>
-                  
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flexGrow: 1, justifyContent: 'center' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', borderBottom: '1px dashed var(--border-glass)', paddingBottom: '8px' }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>Projected Annual Income</span>
-                      <strong>{formatCurrency(currentTotalIncome * 12)}</strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', borderBottom: '1px dashed var(--border-glass)', paddingBottom: '8px' }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>Projected Annual Expenses</span>
-                      <strong>{formatCurrency(currentTotalExpenses * 12)}</strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', borderBottom: '1px dashed var(--border-glass)', paddingBottom: '8px' }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>Projected Annual Investments</span>
-                      <strong>{formatCurrency((latestFlow ? latestFlow.investments : 0) * 12)}</strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', borderBottom: '1px dashed var(--border-glass)', paddingBottom: '8px' }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>Projected Annual EMI Obligation</span>
-                      <strong>{formatCurrency((latestFlow ? latestFlow.emi : 0) * 12)}</strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', borderBottom: '1px dashed var(--border-glass)', paddingBottom: '8px' }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>Projected Annual Insurance Costs</span>
-                      <strong>{formatCurrency((latestFlow ? latestFlow.insurance_premium : 0) * 12)}</strong>
-                    </div>
-                    
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', background: 'rgba(16, 185, 129, 0.05)', padding: '10px 14px', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.1)', marginTop: '8px' }}>
-                      <span style={{ fontWeight: 600, color: 'var(--success)' }}>Projected Annual Savings</span>
-                      <strong style={{ fontSize: '16px', color: 'var(--success)' }}>{formatCurrency(currentSurplus * 12)}</strong>
-                    </div>
-                  </div>
-                  
-                  <p style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center', marginTop: '16px', margin: 0 }}>
-                    Adding yearly savings to investments points to an estimated <strong>{formatCurrency((currentSurplus + (latestFlow ? latestFlow.investments : 0)) * 12)}</strong> annual net worth increase.
-                  </p>
-                </div>
-              </div>
-
-              {/* Recommendations Alerts */}
-              {data.recommendations && data.recommendations.length > 0 && (
-                <div className="glass-panel" style={{ padding: '24px' }}>
-                  <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px' }}>Decision Engine Recommendations</h3>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    {/* Render Savings-specific alerts */}
-                    {currentSavingsRate < targetSavingsRate && (
-                      <div style={{ display: 'flex', gap: '12px', padding: '12px 16px', background: 'rgba(245, 158, 11, 0.05)', border: '1px solid rgba(245,158,11,0.15)', borderRadius: '6px', color: 'var(--warning)', fontSize: '13px' }}>
-                        <AlertTriangle size={18} style={{ flexShrink: 0 }} />
-                        <div>
-                          <strong>Savings Rate Alert:</strong> Your current savings rate is <strong>{currentSavingsRate.toFixed(1)}%</strong> which is below your target of {targetSavingsRate}%. Consider reviewing household discretionary expenses inside Money Manager Ex to increase surplus.
-                        </div>
-                      </div>
-                    )}
-                    {currentSurplus > 50000 && (
-                      <div style={{ display: 'flex', gap: '12px', padding: '12px 16px', background: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16,185,129,0.15)', borderRadius: '6px', color: 'var(--success)', fontSize: '13px' }}>
-                        <CheckCircle size={18} style={{ flexShrink: 0 }} />
-                        <div>
-                          <strong>Prepayment/SIP Opportunity:</strong> A healthy monthly surplus of <strong>{formatCurrency(currentSurplus)}</strong> is detected. You can safely deploy ₹20,000 to ₹30,000 toward active loan prepayments or start a new Mutual Fund SIP.
-                        </div>
-                      </div>
-                    )}
-                    {/* General alerts mapped from Recommendations */}
-                    {data.recommendations.slice(0, 3).map((r, i) => (
-                      <div key={i} style={{ display: 'flex', gap: '12px', padding: '12px 16px', background: r.status === 'danger' ? 'rgba(239, 68, 68, 0.05)' : 'rgba(59, 130, 246, 0.05)', border: r.status === 'danger' ? '1px solid rgba(239,68,68,0.15)' : '1px solid rgba(59,130,246,0.15)', borderRadius: '6px', color: r.status === 'danger' ? 'var(--danger)' : 'var(--text-secondary)', fontSize: '13px' }}>
-                        <Shield size={18} style={{ flexShrink: 0, color: r.status === 'danger' ? 'var(--danger)' : 'var(--accent-light)' }} />
-                        <div>
-                          <strong>{r.title}:</strong> {r.message}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* History Table View */}
-      {activeSubTab === 'history' && (
-        <div className="glass-panel" style={{ padding: '24px' }}>
-          <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>Monthly Cash Flow Snapshot History</h3>
-          <div style={{ overflowX: 'auto' }}>
-            <table className="custom-table">
-              <thead>
-                <tr>
-                  <th>Month</th>
-                  <th style={{ textAlign: 'right' }}>Salary</th>
-                  <th style={{ textAlign: 'right' }}>Other Income</th>
-                  <th style={{ textAlign: 'right' }}>Expenses</th>
-                  <th style={{ textAlign: 'right' }}>EMI</th>
-                  <th style={{ textAlign: 'right' }}>Investments</th>
-                  <th style={{ textAlign: 'right' }}>Surplus</th>
-                  <th style={{ textAlign: 'right' }}>Savings Rate</th>
-                  <th style={{ width: '100px', textAlign: 'center' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {cash_flows.map(cf => {
-                  const cfSurplus = calculateSurplus(cf);
-                  const cfIncome = cf.net_salary + cf.other_income;
-                  const cfRate = cfIncome > 0 ? (cfSurplus / cfIncome) * 100 : 0;
-                  return (
-                    <tr key={cf.id}>
-                      <td><strong>{cf.month}</strong></td>
-                      <td style={{ textAlign: 'right' }}>{formatCurrency(cf.net_salary)}</td>
-                      <td style={{ textAlign: 'right' }}>{formatCurrency(cf.other_income)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>{formatCurrency(cf.household_expenses + cf.one_time_expenses)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--danger)' }}>{formatCurrency(cf.emi)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--info)' }}>{formatCurrency(cf.investments)}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, color: cfSurplus >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                        {formatCurrency(cfSurplus)}
-                      </td>
-                      <td style={{ textAlign: 'right', fontWeight: 600 }}>{cfRate.toFixed(1)}%</td>
-                      <td>
-                        {deletingCfId === cf.id ? (
-                          <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', alignItems: 'center' }}>
-                            <button 
-                              className="btn btn-secondary" 
-                              style={{ padding: '2px 6px', fontSize: '10px', minWidth: 'auto', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444' }}
-                              onClick={() => {
-                                handleDelete(cf.id);
-                                setDeletingCfId(null);
-                              }}
-                            >
-                              Yes
-                            </button>
-                            <button 
-                              className="btn btn-secondary" 
-                              style={{ padding: '2px 6px', fontSize: '10px', minWidth: 'auto' }}
-                              onClick={() => setDeletingCfId(null)}
-                            >
-                              No
-                            </button>
-                          </div>
-                        ) : (
-                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
-                            <button className="btn btn-secondary" style={{ padding: '4px' }} onClick={() => openEdit(cf)}>
-                              <Edit2 size={12} />
-                            </button>
-                            <button className="btn btn-danger" style={{ padding: '4px' }} onClick={() => setDeletingCfId(cf.id)}>
-                              <Trash2 size={12} />
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {cash_flows.length === 0 && (
+        <section className="glass-panel db-card">
+          <div className="db-card-head"><h3>Each month</h3></div>
+          {!sim ? <p className="cc-note">Working it out…</p> : (
+            <>
+              <table className="cf-compare">
+                <thead><tr><th /><th>Now</th><th>With changes</th><th>Difference</th></tr></thead>
+                <tbody>
+                  {rows.map(([label, key, higherIsBetter]) => {
+                    const a = sim.current[key]; const b = sim.simulated[key]; const d = b - a;
+                    return (
+                      <tr key={key} className={key === 'surplus' ? 'cf-compare-total' : undefined}>
+                        <th scope="row">{label}</th><td>{formatINR(a)}</td><td>{formatINR(b)}</td>
+                        <td style={{ color: d === 0 ? 'var(--text-muted)' : (d > 0) === higherIsBetter ? 'var(--success)' : '#fca5a5' }}>{d === 0 ? '—' : `${d > 0 ? '+' : '−'}${formatINR(Math.abs(d))}`}</td>
+                      </tr>
+                    );
+                  })}
                   <tr>
-                    <td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
-                      No history recorded. Log a month above to start tracking.
+                    <th scope="row">Savings rate</th><td>{Number(sim.current.savings_rate).toFixed(0)}%</td><td>{Number(sim.simulated.savings_rate).toFixed(0)}%</td>
+                    <td style={{ color: sim.simulated.savings_rate === sim.current.savings_rate ? 'var(--text-muted)' : sim.simulated.savings_rate > sim.current.savings_rate ? 'var(--success)' : '#fca5a5' }}>
+                      {sim.simulated.savings_rate === sim.current.savings_rate ? '—' : `${sim.simulated.savings_rate > sim.current.savings_rate ? '+' : '−'}${Math.abs(sim.simulated.savings_rate - sim.current.savings_rate).toFixed(0)} pts`}
                     </td>
                   </tr>
+                </tbody>
+              </table>
+              {changed && sim.recommendations?.length > 0 && (
+                <ul className="db-facts">{sim.recommendations.map((r: string) => <li key={r}>{r}</li>)}</ul>
+              )}
+            </>
+          )}
+        </section>
+      </div>
+    );
+  };
+
+  const existing = !editing && formOpen ? logged(draft.month) : undefined;
+  return (
+    <div className="db-page">
+      <div className="eg-head">
+        <div>
+          <h1 className="page-title">Cash Flow Planning</h1>
+          <p className="page-subtitle">What actually came in and went out each month, and what-if changes.</p>
+        </div>
+        <button className="btn btn-primary eg-add" onClick={openNew}><Plus size={15} /> Log a month</button>
+      </div>
+
+      <div role="tablist" aria-label="Cash flow views" className="cc-views">
+        {([['latest', 'Latest month'], ['log', `Monthly log${cash_flows.length ? ` (${cash_flows.length})` : ''}`], ['whatif', 'What if']] as [View, string][]).map(([id, label]) => (
+          <button key={id} type="button" role="tab" aria-selected={view === id} className="cc-view" onClick={() => setView(id)}>{label}</button>
+        ))}
+      </div>
+
+      {view === 'latest' && renderLatest()}
+      {view === 'log' && renderLog()}
+      {view === 'whatif' && renderWhatIf()}
+
+      {formOpen && (
+        <div className="db-modal" onMouseDown={(e) => { if (e.target === e.currentTarget) closeForm(); }}>
+          <div ref={formRef} role="dialog" aria-modal="true" aria-label={editing ? `Edit ${monthName(editing.month)}` : 'Log a month'} tabIndex={-1} className="db-modal-body" style={{ maxWidth: '620px' }}>
+            <form className="glass-panel df-form" onSubmit={save}>
+              <div className="df-head">
+                <h3>{editing ? monthName(editing.month) : 'Log a month'}</h3>
+                <button type="button" className="settings-link" onClick={fillFromPlan}>Fill from my plan</button>
+              </div>
+              <div className="df-body">
+                {!editing && (
+                  <div className="df-grid">
+                    <div className="df-field">
+                      <label htmlFor="cf-month" className="df-label">Month</label>
+                      <input id="cf-month" type="month" className="form-control" required value={draft.month} onChange={(e) => setDraft((d) => ({ ...d, month: e.target.value }))} />
+                      {existing && <span className="df-hint" style={{ color: 'var(--warning)' }}>{monthName(existing.month)} is already logged. Saving replaces it.</span>}
+                    </div>
+                  </div>
                 )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Simulation Sandbox View */}
-      {activeSubTab === 'simulation' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: '24px' }}>
-          {/* Controls side */}
-          <div className="glass-panel" style={{ padding: '24px' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Sparkles size={18} style={{ color: 'var(--accent-light)' }} />
-              Adjustment Sandbox
-            </h3>
-            
-            {!latestFlow ? (
-              <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                Please log at least one monthly snapshot before running simulations. The simulator uses the latest month's snapshot as the baseline.
-              </p>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                {/* Salary Change Slider */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
-                    <span>Salary Increment:</span>
-                    <strong style={{ color: 'var(--success)' }}>+{simSalaryChangePct}%</strong>
-                  </div>
-                  <input 
-                    type="range" min={0} max={50} step={2}
-                    value={simSalaryChangePct} 
-                    onChange={e => setSimSalaryChangePct(Number(e.target.value))}
-                    style={{ width: '100%', accentColor: 'var(--success)' }}
-                  />
-                </div>
-
-                {/* Direct Salary Change Amount */}
-                <div>
-                  <label className="form-label" style={{ fontSize: '12px' }}>Direct Salary Change Amount (₹)</label>
-                  <input 
-                    type="number" className="form-input" placeholder="e.g. 15000"
-                    value={simSalaryChangeAbs}
-                    onChange={e => setSimSalaryChangeAbs(parseFloat(e.target.value) || 0)}
-                  />
-                </div>
-
-                {/* Windfall Bonus */}
-                <div>
-                  <label className="form-label" style={{ fontSize: '12px' }}>One-time Windfall Bonus (₹)</label>
-                  <input 
-                    type="number" className="form-input" placeholder="e.g. 500000"
-                    value={simOneTimeBonus}
-                    onChange={e => setSimOneTimeBonus(parseFloat(e.target.value) || 0)}
-                  />
-                </div>
-
-                {/* Expense Reduction Slider */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
-                    <span>Expense Reduction:</span>
-                    <strong style={{ color: 'var(--success)' }}>-{simExpenseReductionPct}%</strong>
-                  </div>
-                  <input 
-                    type="range" min={0} max={40} step={2}
-                    value={simExpenseReductionPct} 
-                    onChange={e => setSimExpenseReductionPct(Number(e.target.value))}
-                    style={{ width: '100%', accentColor: 'var(--success)' }}
-                  />
-                </div>
-
-                {/* Extra Investments */}
-                <div>
-                  <label className="form-label" style={{ fontSize: '12px' }}>Increase Monthly SIPs (₹)</label>
-                  <input 
-                    type="number" className="form-input" placeholder="e.g. 10000"
-                    value={simAdditionalInvestment}
-                    onChange={e => setSimAdditionalInvestment(parseFloat(e.target.value) || 0)}
-                  />
-                </div>
-
-                {/* New Loan EMI */}
-                <div>
-                  <label className="form-label" style={{ fontSize: '12px' }}>New EMI Commitment (₹)</label>
-                  <input 
-                    type="number" className="form-input" placeholder="e.g. 20000"
-                    value={simNewEmi}
-                    onChange={e => setSimNewEmi(parseFloat(e.target.value) || 0)}
-                  />
-                </div>
-
-                {/* EMI Reduction (Loan closure) */}
-                <div>
-                  <label className="form-label" style={{ fontSize: '12px' }}>Closed Loans EMI Reduction (₹)</label>
-                  <input 
-                    type="number" className="form-input" placeholder="e.g. 12000"
-                    value={simEmiReduction}
-                    onChange={e => setSimEmiReduction(parseFloat(e.target.value) || 0)}
-                  />
-                </div>
-
-                {/* Reset button */}
-                <button className="btn btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }} onClick={() => {
-                  setSimSalaryChangePct(0);
-                  setSimSalaryChangeAbs(0);
-                  setSimOneTimeBonus(0);
-                  setSimNewEmi(0);
-                  setSimEmiReduction(0);
-                  setSimAdditionalInvestment(0);
-                  setSimExpenseReductionPct(0);
-                  setSimExpenseReductionAbs(0);
-                }}>
-                  <RefreshCw size={14} /> Reset Sandbox
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Results side */}
-          <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '20px' }}>Simulated Plan Comparison</h3>
-
-            {simLoading ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexGrow: 1 }}>
-                <div className="spin-anim" style={{ width: '32px', height: '32px', border: '3px solid rgba(139,92,246,0.1)', borderTop: '3px solid #8b5cf6', borderRadius: '50%', marginBottom: '16px' }}></div>
-                <p style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Recalculating cash flow matrix...</p>
-              </div>
-            ) : simResult ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', flexGrow: 1 }}>
-                {/* Side by side stats */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', background: 'rgba(255,255,255,0.01)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
-                  <div>
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Baseline State (Latest)</span>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                        <span>Income:</span>
-                        <strong>{formatCurrency(simResult.current.income)}</strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                        <span>Expenses:</span>
-                        <span>{formatCurrency(simResult.current.expenses)}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                        <span>EMI Debt:</span>
-                        <span>{formatCurrency(simResult.current.emi)}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                        <span>Investments:</span>
-                        <span>{formatCurrency(simResult.current.investments)}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', borderTop: '1px solid var(--border-glass)', paddingTop: '6px', marginTop: '4px' }}>
-                        <span>Surplus:</span>
-                        <strong>{formatCurrency(simResult.current.surplus)}</strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                        <span>Savings Rate:</span>
-                        <strong>{simResult.current.savings_rate}%</strong>
-                      </div>
+                {fillNote && <p className="cc-note" role="status" style={{ margin: 0 }}>{fillNote}</p>}
+                {SECTIONS.map((section) => (
+                  <section key={section.title} className="df-section" aria-label={section.title}>
+                    <h4>{section.title}</h4>
+                    <div className="df-grid">
+                      {section.keys.map((k) => {
+                        const f = FIELDS.find((x) => x.key === k)!;
+                        return (
+                          <div key={k} className="df-field">
+                            <label htmlFor={`cf-${k}`} className="df-label">{f.label}</label>
+                            <AmountInput id={`cf-${k}`} label={f.label} prefix="₹" value={Number(draft[k]) || 0} onChange={(v) => setDraft((d) => ({ ...d, [k]: v }))} />
+                            {f.hint && <span className="df-hint">{f.hint}</span>}
+                          </div>
+                        );
+                      })}
                     </div>
-                  </div>
-
-                  <div style={{ borderLeft: '1px solid var(--border-glass)', paddingLeft: '20px' }}>
-                    <span style={{ fontSize: '11px', color: 'var(--accent-light)', textTransform: 'uppercase' }}>Simulated Sandbox State</span>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                        <span>Income:</span>
-                        <strong style={{ color: 'var(--accent-light)' }}>{formatCurrency(simResult.simulated.income)}</strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                        <span>Expenses:</span>
-                        <span>{formatCurrency(simResult.simulated.expenses)}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                        <span>EMI Debt:</span>
-                        <span style={{ color: simResult.simulated.emi > simResult.current.emi ? 'var(--danger)' : 'inherit' }}>{formatCurrency(simResult.simulated.emi)}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                        <span>Investments:</span>
-                        <span style={{ color: simResult.simulated.investments > simResult.current.investments ? 'var(--info)' : 'inherit' }}>{formatCurrency(simResult.simulated.investments)}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', borderTop: '1px solid var(--border-glass)', paddingTop: '6px', marginTop: '4px' }}>
-                        <span>Surplus:</span>
-                        <strong style={{ color: simResult.simulated.surplus >= simResult.current.surplus ? 'var(--success)' : 'var(--danger)' }}>
-                          {formatCurrency(simResult.simulated.surplus)}
-                        </strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                        <span>Savings Rate:</span>
-                        <strong style={{ color: simResult.simulated.savings_rate >= simResult.current.savings_rate ? 'var(--success)' : 'var(--warning)' }}>
-                          {simResult.simulated.savings_rate}%
-                        </strong>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Impact Statement */}
-                <div style={{ background: 'var(--bg-glass)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
-                  <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '6px', color: 'var(--accent-light)' }}>Financial Impact Analysis</h4>
-                  <p style={{ fontSize: '12px', lineHeight: '1.5', margin: 0, color: 'var(--text-secondary)' }}>
-                    {simResult.impact_summary}
-                  </p>
-                </div>
-
-                {/* Recommended Actions */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <h4 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--success)' }}>Sandbox Recommended Actions</h4>
-                  {simResult.recommendations.map((rec: string, index: number) => (
-                    <div key={index} style={{ display: 'flex', gap: '8px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                      <span>▪</span>
-                      <span>{rec}</span>
-                    </div>
-                  ))}
+                  </section>
+                ))}
+                <div className="df-field">
+                  <label htmlFor="cf-notes" className="df-label">Notes</label>
+                  <input id="cf-notes" className="form-control" placeholder="Anything worth remembering about this month" value={draft.notes} onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))} />
                 </div>
               </div>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexGrow: 1, color: 'var(--text-muted)', fontSize: '12px' }}>
-                Simulator is active once a baseline snapshot is loaded.
+              <div className="df-foot">
+                <div className="cf-foot-total">
+                  {editing
+                    ? <ConfirmAction label="Delete this month" confirmLabel="Delete" danger question={`Delete ${monthName(editing.month)}?`} onConfirm={() => remove(editing)} />
+                    : null}
+                  <span className="cc-note">Left over <strong style={{ color: leftOver(draft) < 0 ? '#fca5a5' : 'var(--text-primary)' }}>{formatINR(leftOver(draft))}</strong> · {savingsRate(draft).toFixed(0)}% saved</span>
+                </div>
+                <div className="df-actions">
+                  <button type="button" className="btn btn-secondary" onClick={closeForm}>Cancel</button>
+                  <button type="submit" className="btn btn-primary">{existing ? 'Replace' : 'Save'}</button>
+                </div>
               </div>
-            )}
+            </form>
           </div>
-        </div>
-      )}
-
-      {/* Snapshot Entry Modal */}
-      {modalOpen && (
-        <div className="modal-overlay">
-          <form className="modal-content" onSubmit={handleSave} style={{ maxWidth: '640px' }}>
-            <div className="modal-header">
-              <h3>{editingId ? 'Edit Monthly Cash Flow' : 'Log Monthly Cash Flow Snapshot'}</h3>
-              <button type="button" className="btn btn-secondary" style={{ padding: '6px' }} onClick={() => setModalOpen(false)}>
-                ✕
-              </button>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-              <div className="form-group">
-                <label className="form-label">Snapshot Month</label>
-                <input type="month" className="form-input" required value={month} onChange={e => setMonth(e.target.value)} />
-              </div>
-              <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end', paddingBottom: '2px' }}>
-                <button type="button" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }} onClick={handleAutoFill}>
-                  <RefreshCw size={12} /> Auto-Fill from Portfolio
-                </button>
-              </div>
-            </div>
-            {autoFillNote && (
-              <div role="status" style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5, marginTop: '8px' }}>{autoFillNote}</div>
-            )}
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', borderTop: '1px solid var(--border-glass)', paddingTop: '16px', marginTop: '8px' }}>
-              <div className="form-group">
-                <label className="form-label">Net Salary (Credited ₹)</label>
-                <input type="number" className="form-input" required value={netSalary} onChange={e => setNetSalary(parseFloat(e.target.value) || 0)} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Other Income (Rent, Interest ₹)</label>
-                <input type="number" className="form-input" required value={otherIncome} onChange={e => setOtherIncome(parseFloat(e.target.value) || 0)} />
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-              <div className="form-group">
-                <label className="form-label">Household Expenses (Living ₹)</label>
-                <input type="number" className="form-input" required value={householdExpenses} onChange={e => setHouseholdExpenses(parseFloat(e.target.value) || 0)} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">One-Time / Extra Expenses (₹)</label>
-                <input type="number" className="form-input" required value={oneTimeExpenses} onChange={e => setOneTimeExpenses(parseFloat(e.target.value) || 0)} />
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
-              <div className="form-group">
-                <label className="form-label">EMI Obligations (₹)</label>
-                <input type="number" className="form-input" required value={emi} onChange={e => setEmi(parseFloat(e.target.value) || 0)} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Insurance Premiums (₹)</label>
-                <input type="number" className="form-input" required value={insurancePremium} onChange={e => setInsurancePremium(parseFloat(e.target.value) || 0)} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Investments (SIPs, PPF ₹)</label>
-                <input type="number" className="form-input" required value={investments} onChange={e => setInvestments(parseFloat(e.target.value) || 0)} />
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Remarks / Notes</label>
-              <textarea 
-                className="form-input" 
-                rows={2} 
-                style={{ resize: 'vertical' }}
-                placeholder="Discretionary remarks..." 
-                value={notes} 
-                onChange={e => setNotes(e.target.value)} 
-              />
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
-              <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)}>Cancel</button>
-              <button type="submit" className="btn btn-primary">Save Cash Flow</button>
-            </div>
-          </form>
         </div>
       )}
     </div>

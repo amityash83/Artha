@@ -1030,3 +1030,20 @@ h1, h2, h3, h4, h5 {
 .df-extras { border-top: 1px solid var(--border-glass); padding-top: 18px; }
 .df-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 24px; border-top: 1px solid var(--border-glass); }
 .df-actions { display: flex; gap: 8px; }
+
+/* Cash Flow Planning (components/CashFlowPlanning.tsx); reuses the Dashboard's cards
+   and bars, the add/edit form's df-* layout and the settings rows. */
+.cf-warn { margin: 0; font-size: 12.5px; color: #fca5a5; }
+.cf-year { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 760px) { .cf-year { grid-template-columns: 1fr 1fr; } }
+.cf-whatif { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 22px; align-items: start; }
+@media (max-width: 1000px) { .cf-whatif { grid-template-columns: 1fr; } }
+.cf-range { width: 160px; accent-color: var(--accent); }
+.cf-slider-value { font-weight: 600; color: var(--text-primary); margin-left: 4px; font-variant-numeric: tabular-nums; }
+.cf-compare { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.cf-compare th, .cf-compare td { padding: 8px 6px; text-align: right; border-top: 1px solid var(--border-glass); }
+.cf-compare thead th { border-top: none; font-size: 11.5px; font-weight: 500; color: var(--text-muted); }
+.cf-compare tbody th { text-align: left; font-weight: 400; color: var(--text-secondary); }
+.cf-compare td { color: var(--text-primary); }
+.cf-compare-total th, .cf-compare-total td { font-weight: 600; color: var(--text-primary); }
+.cf-foot-total { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }

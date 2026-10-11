@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from backend.db import get_db_connection, init_db, get_db_path, get_db_dir
 import backend.calculations as calc
+from backend.formatting import inr
 import backend.backups as backups
 import backend.tax.engine as tax_engine
 import backend.tax.rules_loader as tax_rules
@@ -3049,8 +3050,8 @@ def run_simulation(req: SimulationRequestSchema):
                 loan["outstanding"] = 0.0
                 loan["emi"] = 0.0
                 interest_saved = calc.calculate_remaining_interest(outstanding_cost, loan["roi"], loan["emi"])
-                recommendation = (f"Prepaying {loan['name']} loan saves ₹{interest_saved:,.0f} in future interest. "
-                                  f"Your monthly commitments drop by ₹{loan['emi']:,.0f}. Recommended if liquid funds permit.")
+                recommendation = (f"Prepaying {loan['name']} loan saves {inr(interest_saved)} in future interest. "
+                                  f"Your monthly commitments drop by {inr(loan['emi'])}. Recommended if liquid funds permit.")
                 
         elif s_type == "delay_goal":
             goal_id = params.get("goal_id")
@@ -3064,18 +3065,18 @@ def run_simulation(req: SimulationRequestSchema):
                 new_contribution = gap / new_rem_months if new_rem_months > 0 else 0.0
                 goal["monthly_contribution"] = new_contribution
                 recommendation = (f"Delaying the goal '{goal['name']}' by {delay_months} months reduces its "
-                                  f"required monthly contribution to ₹{new_contribution:,.0f} (Saving ₹{goal['monthly_contribution'] - new_contribution:,.0f}/mo).")
+                                  f"required monthly contribution to {inr(new_contribution)} (Saving {inr(goal['monthly_contribution'] - new_contribution)}/mo).")
                 
         elif s_type == "increase_sip":
             increment = params.get("increment_amount", 5000.0)
             sim_investments += (increment * 12.0) # simulation over 1 year
-            recommendation = f"Increasing your SIP by ₹{increment:,.0f}/month yields a portfolio size increase of ₹{increment*12:,.0f} in 1 year (excluding compounding returns)."
+            recommendation = f"Increasing your SIP by {inr(increment)}/month yields a portfolio size increase of {inr(increment*12)} in 1 year (excluding compounding returns)."
             
         elif s_type == "salary_change":
             change = params.get("change_amount", 10000.0)
             sim_liquid += (change * 12.0)
             surplus_msg = "surplus" if change >= 0 else "deficit"
-            recommendation = f"A salary change of ₹{change:,.0f}/month creates a yearly {surplus_msg} of ₹{change*12:,.0f} that can be used for prepayments."
+            recommendation = f"A salary change of {inr(change)}/month creates a yearly {surplus_msg} of {inr(change*12)} that can be used for prepayments."
             
         elif s_type == "receive_bonus":
             bonus = params.get("bonus_amount", 100000.0)
@@ -3083,7 +3084,7 @@ def run_simulation(req: SimulationRequestSchema):
             
             if allocation_target == "liquid":
                 sim_liquid += bonus
-                recommendation = f"Receiving ₹{bonus:,.0f} as bonus increases your cash liquidity instantly."
+                recommendation = f"Receiving {inr(bonus)} as bonus increases your cash liquidity instantly."
             elif allocation_target == "prepay":
                 # Prepay highest interest loan
                 active_loans = [l for l in sim_loans if l["outstanding"] > 0]
@@ -3093,13 +3094,13 @@ def run_simulation(req: SimulationRequestSchema):
                     prepay_amt = min(bonus, target_loan["outstanding"])
                     interest_saved = calc.calculate_interest_saved_after_prepayment(target_loan["outstanding"], target_loan["roi"], target_loan["emi"], prepay_amt)
                     target_loan["outstanding"] -= prepay_amt
-                    recommendation = f"Allocating your bonus of ₹{bonus:,.0f} to prepay {target_loan['name']} saves ₹{interest_saved:,.0f} in remaining interest."
+                    recommendation = f"Allocating your bonus of {inr(bonus)} to prepay {target_loan['name']} saves {inr(interest_saved)} in remaining interest."
                 else:
                     sim_liquid += bonus
                     recommendation = "No active loans to prepay. Bonus added to liquidity."
             elif allocation_target == "invest":
                 sim_investments += bonus
-                recommendation = f"Investing your bonus of ₹{bonus:,.0f} increases compound growth capital."
+                recommendation = f"Investing your bonus of {inr(bonus)} increases compound growth capital."
                 
         elif s_type == "roi_reduction":
             loan_id = params.get("loan_id")
@@ -3110,7 +3111,7 @@ def run_simulation(req: SimulationRequestSchema):
                 new_interest = calc.calculate_remaining_interest(loan["outstanding"], new_roi, loan["emi"])
                 saved = old_interest - new_interest
                 loan["roi"] = new_roi
-                recommendation = f"Refinancing {loan['name']} to {new_roi}% ROI saves ₹{saved:,.0f} in interest."
+                recommendation = f"Refinancing {loan['name']} to {new_roi}% ROI saves {inr(saved)} in interest."
 
         elif s_type in ["brother_property", "large_purchase"]:
             purchase_name = params.get("purchase_name", "Family Property")
@@ -3119,7 +3120,7 @@ def run_simulation(req: SimulationRequestSchema):
             
             if funding_source == "liquid":
                 sim_liquid -= cost
-                recommendation = f"Funding your '{purchase_name}' of ₹{cost:,.0f} directly reduces liquidity, lowering net worth by the same amount."
+                recommendation = f"Funding your '{purchase_name}' of {inr(cost)} directly reduces liquidity, lowering net worth by the same amount."
             else:
                 roi = float(params.get("roi") or 8.5)
                 tenure_months = int(params.get("tenure_months") or 120)
@@ -3135,7 +3136,7 @@ def run_simulation(req: SimulationRequestSchema):
                     "emi": calculated_emi,
                     "tenure": tenure_months
                 })
-                recommendation = f"Taking a loan of ₹{cost:,.0f} at {roi}% ROI to fund '{purchase_name}' increases debt by ₹{cost:,.0f} and adds a monthly EMI commitment of ₹{calculated_emi:,.0f} for {tenure_months} months."
+                recommendation = f"Taking a loan of {inr(cost)} at {roi}% ROI to fund '{purchase_name}' increases debt by {inr(cost)} and adds a monthly EMI commitment of {inr(calculated_emi)} for {tenure_months} months."
 
         # Recalculate simulated outcomes
         sim_assets = sim_liquid + sim_investments + sim_properties
@@ -4051,7 +4052,10 @@ def simulate_cash_flow(req: CashFlowSimulationRequest):
         curr_income = req.net_salary + req.other_income
         curr_expenses = req.household_expenses + req.one_time_expenses
         curr_surplus = curr_income - curr_expenses - req.emi - req.insurance_premium - req.investments
-        curr_savings_rate = (curr_surplus / curr_income * 100.0) if curr_income > 0 else 0.0
+        # Savings rate: the share of income not spent. Money invested is saved, so it
+        # counts (as the target_savings_rate rule's Knowledge article defines it);
+        # EMIs and premiums are commitments, so they don't.
+        curr_savings_rate = ((curr_surplus + req.investments) / curr_income * 100.0) if curr_income > 0 else 0.0
         curr_debt_ratio = (req.emi / curr_income * 100.0) if curr_income > 0 else 0.0
         curr_investment_rate = (req.investments / curr_income * 100.0) if curr_income > 0 else 0.0
         curr_expense_ratio = (req.household_expenses / curr_income * 100.0) if curr_income > 0 else 0.0
@@ -4066,7 +4070,7 @@ def simulate_cash_flow(req: CashFlowSimulationRequest):
         
         sim_surplus = sim_income - sim_expenses - sim_emi - req.insurance_premium - sim_investments
         
-        sim_savings_rate = (sim_surplus / sim_income * 100.0) if sim_income > 0 else 0.0
+        sim_savings_rate = ((sim_surplus + sim_investments) / sim_income * 100.0) if sim_income > 0 else 0.0
         sim_debt_ratio = (sim_emi / sim_income * 100.0) if sim_income > 0 else 0.0
         sim_investment_rate = (sim_investments / sim_income * 100.0) if sim_income > 0 else 0.0
         sim_expense_ratio = (sim_expenses / sim_income * 100.0) if sim_income > 0 else 0.0
@@ -4076,7 +4080,7 @@ def simulate_cash_flow(req: CashFlowSimulationRequest):
         surplus_diff = sim_surplus - curr_surplus
         if surplus_diff != 0:
             direction = "increases" if surplus_diff > 0 else "decreases"
-            impact_parts.append(f"Monthly surplus {direction} by ₹{abs(surplus_diff):,.0f} (from ₹{curr_surplus:,.0f} to ₹{sim_surplus:,.0f}).")
+            impact_parts.append(f"Money left over each month {direction} by {inr(abs(surplus_diff))} (from {inr(curr_surplus)} to {inr(sim_surplus)}).")
             
         sr_diff = sim_savings_rate - curr_savings_rate
         if sr_diff != 0:
@@ -4089,7 +4093,7 @@ def simulate_cash_flow(req: CashFlowSimulationRequest):
             impact_parts.append(f"Debt burden ratio {direction} by {abs(dr_diff):.1f}% (from {curr_debt_ratio:.1f}% to {sim_debt_ratio:.1f}%).")
             
         if req.one_time_bonus > 0:
-            impact_parts.append(f"One-time windfall bonus of ₹{req.one_time_bonus:,.0f} received, raising investable capital.")
+            impact_parts.append(f"A one-time bonus of {inr(req.one_time_bonus)} adds to what you can invest.")
             
         impact_summary = " ".join(impact_parts) if impact_parts else "No cash flow impact observed."
         
@@ -4097,7 +4101,7 @@ def simulate_cash_flow(req: CashFlowSimulationRequest):
         recommendations = []
         if sim_surplus > curr_surplus:
             extra = sim_surplus - curr_surplus
-            recommendations.append(f"Allocate the extra surplus of ₹{extra:,.0f}/month toward increasing your Mutual Fund SIP or prepaying high-interest loans.")
+            recommendations.append(f"Put the extra {inr(extra)} a month towards your SIPs or prepaying a high-interest loan.")
         if sim_debt_ratio > 40:
             recommendations.append("Warning: Debt burden ratio exceeds 40%. Consider deferring new loans and focusing on debt prepayment.")
         elif sim_savings_rate < 20:
@@ -4106,7 +4110,7 @@ def simulate_cash_flow(req: CashFlowSimulationRequest):
             recommendations.append("Your cash flow parameters are healthy. Consider mapping extra savings to long-term goals.")
             
         if req.one_time_bonus > 0:
-            recommendations.append(f"We recommend allocating 70% of the ₹{req.one_time_bonus:,.0f} bonus toward loan prepayments or long-term investments, keeping 30% for emergency liquidity or lifestyle expenses.")
+            recommendations.append(f"A common split for the {inr(req.one_time_bonus)} bonus: about 70% to loan prepayment or long-term investments, 30% kept as cash or for spending.")
             
         return {
             "current": {
