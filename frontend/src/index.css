@@ -992,3 +992,9 @@ h1, h2, h3, h4, h5 {
 .db-goal-line { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
 .db-goal-line strong { font-weight: 500; color: var(--text-primary); }
 .db-goal-line span { color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.db-head-actions { display: flex; align-items: center; gap: 10px; }
+.db-modal { position: fixed; inset: 0; z-index: 1000; background: rgba(7, 9, 14, 0.8); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: flex-start; padding: 40px 20px; overflow-y: auto; }
+.db-modal-body { width: 100%; max-width: 760px; display: flex; flex-direction: column; gap: 14px; outline: none; }
+.db-modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.db-modal-head h2 { margin: 0 0 4px; font-size: 18px; color: var(--text-primary); }
+.db-modal-head p { margin: 0; }

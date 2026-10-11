@@ -31,9 +31,11 @@ interface EmiResult {
 
 interface EmiCalculatorProps {
   showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
+  /** Shown inside the Loan planner, which supplies the page title. */
+  embedded?: boolean;
 }
 
-export const EmiCalculator: React.FC<EmiCalculatorProps> = ({ showToast }) => {
+export const EmiCalculator: React.FC<EmiCalculatorProps> = ({ showToast, embedded }) => {
   // Inputs state
   const [loanAmount, setLoanAmount] = useState<number>(5000000); // 50 Lakhs default
   const [roi, setRoi] = useState<number>(8.5); // 8.5% default
@@ -451,10 +453,12 @@ export const EmiCalculator: React.FC<EmiCalculatorProps> = ({ showToast }) => {
 
   return (
     <div style={{ paddingBottom: '40px' }}>
-      <div className="page-header">
-        <h1 className="page-title">EMI Tool</h1>
-        <p className="page-subtitle">Work out a loan's EMI, and how much interest prepayments save.</p>
-      </div>
+      {!embedded && (
+        <div className="page-header">
+          <h1 className="page-title">EMI Tool</h1>
+          <p className="page-subtitle">Work out a loan's EMI, and how much interest prepayments save.</p>
+        </div>
+      )}
 
       {/* Profiles Selection & Saving Bar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: '24px' }}>

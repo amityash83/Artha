@@ -3,13 +3,11 @@ import { Database, CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 import { InitData } from './types';
 import { Dashboard } from './components/Dashboard';
 import { EntityGrid } from './components/EntityGrid';
-import { Snapshot } from './components/Snapshot';
 import { Simulations } from './components/Simulations';
 import { Reports } from './components/Reports';
 import { Settings } from './components/Settings';
-import { EmiCalculator } from './components/EmiCalculator';
 import { FinancialCalendar } from './components/FinancialCalendar';
-import { LoanOptimizer } from './components/LoanOptimizer';
+import { LoanPlanner } from './components/LoanPlanner';
 import { CashFlowPlanning } from './components/CashFlowPlanning';
 import { IncomeExpenses } from './components/IncomeExpenses';
 import { TransactionsLedger } from './components/TransactionsLedger';
@@ -280,10 +278,7 @@ const App: React.FC = () => {
       <main className="main-content">
         <TopBar data={data} refreshKey={statusTick} onCommand={(c) => { void runCommand(c); }} onNavigate={navigateTo} />
         {activeTab === 'dashboard' && (
-          <Dashboard data={data} onNavigate={handleNavigate} onGo={navigateTo} onCommand={(c) => { void runCommand(c); }} />
-        )}
-        {activeTab === 'snapshot' && (
-          <Snapshot data={data} onRefresh={fetchFinanceData} showToast={showToast} />
+          <Dashboard data={data} onNavigate={handleNavigate} onGo={navigateTo} onCommand={(c) => { void runCommand(c); }} onRefresh={fetchFinanceData} showToast={showToast} />
         )}
         {activeTab === 'cash-flow' && (
           <CashFlowPlanning data={data} onRefresh={fetchFinanceData} showToast={showToast} />
@@ -367,11 +362,8 @@ const App: React.FC = () => {
         {activeTab === 'financial-calendar' && (
           <FinancialCalendar />
         )}
-        {activeTab === 'loan-optimizer' && (
-          <LoanOptimizer data={data} />
-        )}
-        {activeTab === 'emi-calculator' && (
-          <EmiCalculator showToast={showToast} />
+        {activeTab === 'loans' && (
+          <LoanPlanner data={data} showToast={showToast} />
         )}
         {activeTab === 'taxation' && (
           <Taxation data={data} onRefresh={fetchFinanceData} showToast={showToast} />

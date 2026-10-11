@@ -8,9 +8,11 @@ import { API_BASE_URL } from '../config';
 
 interface LoanOptimizerProps {
   data: InitData;
+  /** Shown inside the Loan planner, which supplies the page title. */
+  embedded?: boolean;
 }
 
-export const LoanOptimizer: React.FC<LoanOptimizerProps> = ({ data }) => {
+export const LoanOptimizer: React.FC<LoanOptimizerProps> = ({ data, embedded }) => {
   const loans = React.useMemo(() => {
     return data.liabilities
       .filter((l: any) => l.category_name !== 'Credit Card')
@@ -169,10 +171,12 @@ export const LoanOptimizer: React.FC<LoanOptimizerProps> = ({ data }) => {
 
   return (
     <div style={{ paddingBottom: '40px' }}>
-      <div className="page-header">
-        <h1 className="page-title">Loan Optimizer</h1>
-        <p className="page-subtitle">Compare paying the smallest loan off first (snowball) with the highest-interest loan first (avalanche).</p>
-      </div>
+      {!embedded && (
+        <div className="page-header">
+          <h1 className="page-title">Loan Optimizer</h1>
+          <p className="page-subtitle">Compare paying the smallest loan off first (snowball) with the highest-interest loan first (avalanche).</p>
+        </div>
+      )}
 
       {activeLoans.length === 0 ? (
         <div className="glass-panel" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>

@@ -7,9 +7,12 @@ interface SnapshotProps {
   data: InitData;
   onRefresh: () => void;
   showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
+  /** Shown in a panel over the Dashboard: no page title, and closes once saved. */
+  embedded?: boolean;
+  onDone?: () => void;
 }
 
-export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh, showToast }) => {
+export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh, showToast, embedded, onDone }) => {
   const [month, setMonth] = useState('');
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -89,7 +92,8 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh, showToast }
       if (res.ok) {
         setSuccess(true);
         onRefresh();
-        if (showToast) showToast("Snapshot saved successfully!", "success");
+        if (showToast) showToast(`Snapshot for ${month} saved`, "success");
+        onDone?.();
       } else {
         if (showToast) showToast("Snapshot save failed", "error");
         else alert("Snapshot save failed");
@@ -104,13 +108,15 @@ export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh, showToast }
   };
 
   return (
-    <div style={{ maxWidth: '800px', margin: '0 auto', fontFamily: 'Inter, sans-serif' }}>
-      <div className="page-header">
-        <h1 className="page-title">Monthly Snapshot</h1>
-        <p className="page-subtitle">Record this month's balances so the Dashboard can show your progress over time.</p>
-      </div>
+    <div style={embedded ? undefined : { maxWidth: '800px', margin: '0 auto', fontFamily: 'Inter, sans-serif' }}>
+      {!embedded && (
+        <div className="page-header">
+          <h1 className="page-title">Monthly Snapshot</h1>
+          <p className="page-subtitle">Record this month's balances so the Dashboard can show your progress over time.</p>
+        </div>
+      )}
 
-      <div className="glass-panel" style={{ padding: '32px' }}>
+      <div className="glass-panel" style={{ padding: embedded ? '24px' : '32px' }}>
         <form onSubmit={handleSaveSnapshot}>
           {/* Header Row: Month selection */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '28px', borderBottom: '1px solid var(--border-glass)', paddingBottom: '20px' }}>

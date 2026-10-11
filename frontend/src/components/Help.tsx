@@ -51,12 +51,12 @@ const SECTIONS: HelpSection[] = [
           explicitly export it. Think of Artha less like a bank app and more like a financial command center: it
           doesn't move your money, it helps you track, understand, and plan around it.
         </p>
-        <p>The sidebar is organized into four rough groups, top to bottom:</p>
+        <p>The sidebar is organized into four groups, top to bottom:</p>
         <Bullets items={[
-          <><strong>Daily view</strong> — Dashboard, Monthly Snapshot, Cash Flow Planning, Transactions Ledger, Budget Planner, Financial Calendar</>,
-          <><strong>Your accounts and holdings</strong> — Accounts, Assets, Liabilities, Credit Cards, Goals</>,
-          <><strong>Planning tools</strong> — Simulations, EMI Tool, Loan Optimizer, Taxation, Ask Artha</>,
-          <><strong>Records and configuration</strong> — Reports, Settings, Help</>,
+          <><strong>Day to day</strong> — Dashboard (record each month's balances from its net worth chart), Income &amp; Expenses, Cash Flow Planning, Transactions Ledger, Budget Planner, Financial Calendar</>,
+          <><strong>What you own &amp; owe</strong> — Accounts, Assets, Liabilities, Credit Cards, Goals</>,
+          <><strong>Planning</strong> — Simulations, Loan planner (EMI and prepayments, and which loan to pay first), Taxation, Ask Artha, Reports</>,
+          <><strong>App</strong> — Settings, Help</>,
         ]} />
         <p>The core mental model to understand before anything else:</p>
         <Steps items={[

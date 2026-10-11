@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   ArrowRightLeft, Calculator, Calendar, Compass, CreditCard, FileText, HelpCircle, Landmark, LandmarkIcon,
-  LineChart, Percent, PiggyBank, Sliders, Sparkles, Target, Wallet, Zap,
+  LineChart, Percent, PiggyBank, Sliders, Sparkles, Target, Wallet,
 } from 'lucide-react';
 
 // The app's pages, in sidebar order. The sidebar and the "Go to" search (Ctrl/Cmd+K)
@@ -10,8 +10,7 @@ export interface NavItem { id: string; label: string; icon: React.ReactNode; key
 
 export const NAV_GROUPS: NavItem[][] = [
   [
-    { id: 'dashboard', label: 'Dashboard', icon: <Compass size={16} />, keywords: 'home overview net worth' },
-    { id: 'snapshot', label: 'Monthly Snapshot', icon: <Calendar size={16} /> },
+    { id: 'dashboard', label: 'Dashboard', icon: <Compass size={16} />, keywords: 'home overview net worth monthly snapshot record balances' },
     { id: 'income-expenses', label: 'Income & Expenses', icon: <Wallet size={16} />, keywords: 'salary rent plan recurring' },
     { id: 'cash-flow', label: 'Cash Flow Planning', icon: <LineChart size={16} />, keywords: 'savings rate monthly log' },
     { id: 'transactions', label: 'Transactions Ledger', icon: <ArrowRightLeft size={16} />, keywords: 'spend payment emi' },
@@ -27,8 +26,7 @@ export const NAV_GROUPS: NavItem[][] = [
   ],
   [
     { id: 'simulations', label: 'Simulations', icon: <LineChart size={16} /> },
-    { id: 'emi-calculator', label: 'EMI Tool', icon: <Calculator size={16} /> },
-    { id: 'loan-optimizer', label: 'Loan Optimizer', icon: <Zap size={16} style={{ color: 'var(--accent-light)' }} />, keywords: 'prepayment' },
+    { id: 'loans', label: 'Loan planner', icon: <Calculator size={16} />, keywords: 'emi tool calculator prepayment loan optimizer snowball avalanche' },
     { id: 'taxation', label: 'Taxation', icon: <Percent size={16} />, keywords: 'income tax planner regime nps payslip' },
     { id: 'ask-artha', label: 'Ask Artha', icon: <Sparkles size={16} style={{ color: 'var(--accent-light)' }} />, keywords: 'ai assistant' },
     { id: 'reports', label: 'Reports', icon: <FileText size={16} /> },

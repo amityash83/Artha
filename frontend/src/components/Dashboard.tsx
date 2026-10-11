@@ -12,6 +12,8 @@ import { formatDate, formatINR } from '../format';
 import { monthlyEquivalent } from '../frequency';
 import { InfoTooltip } from './InfoTooltip';
 import { AIExplainButton } from './AIExplainButton';
+import { Snapshot as SnapshotForm } from './Snapshot';
+import { useModalA11y } from '../hooks/useModalA11y';
 import type { NavigateOptions } from './TopBar';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler);
@@ -21,6 +23,8 @@ interface DashboardProps {
   onNavigate: (tab: string, simulationParams?: any) => void;
   onGo: (page: string, opts?: NavigateOptions) => void;
   onCommand: (command: AppCommand) => void;
+  onRefresh: () => void;
+  showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
 
 // Matches decision_engine.py's fallback when the rule is missing.
@@ -41,18 +45,22 @@ const recAction = (rec: any): { label: string; page: string } | null => {
   return { label: 'Try it in Simulations', page: 'simulations' };
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate, onGo, onCommand }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate, onGo, onCommand, onRefresh, showToast }) => {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [personFilter, setPersonFilter] = useState<number | 'all'>('all');
   const [showPassed, setShowPassed] = useState(false);
+  // Monthly Snapshot (record this month's values) opens in a panel over the Dashboard.
+  const [recording, setRecording] = useState(false);
+  const snapshotRef = useModalA11y(recording, () => setRecording(false));
   const { goals, recommendations, rules, people } = data;
 
+  // Re-read after /api/init refreshes, so a snapshot just recorded shows up in the chart.
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/snapshots`)
       .then(res => res.json())
       .then(d => setSnapshots(Array.isArray(d) ? d : []))
       .catch(err => console.error("Failed to fetch snapshots:", err));
-  }, []);
+  }, [data]);
 
   // Per-person filtering is client-side: /api/init's `summary` is a household-wide
   // aggregate, so filtered totals are re-derived here from the same raw entities.
@@ -223,7 +231,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate, onGo, on
           <section className="glass-panel db-card">
             <div className="db-card-head">
               <h3>Net worth over time</h3>
-              {personFilter !== 'all' && snapshots.length > 1 && <span className="cc-note">Whole household</span>}
+              <span className="db-head-actions">
+                {personFilter !== 'all' && snapshots.length > 1 && <span className="cc-note">Whole household</span>}
+                {snapshots.length > 0 && <button type="button" className="settings-link" onClick={() => setRecording(true)}>Record this month</button>}
+              </span>
             </div>
             {snapshots.length > 1 ? (
               <div style={{ height: '220px', position: 'relative' }}><Line data={chartData} options={chartOptions} /></div>
@@ -231,8 +242,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate, onGo, on
               <div className="db-empty">
                 <p>{snapshots.length === 1
                   ? `One month recorded (${snapshots[0].month}, ${formatINR(snapshots[0].net_worth)}). Record next month too and the trend will appear here.`
-                  : 'Record a monthly snapshot of your balances and this will chart how your net worth changes month to month.'}</p>
-                <button type="button" className="settings-btn" onClick={() => onGo('snapshot')}>Open Monthly Snapshot <ArrowRight size={12} /></button>
+                  : "Once a month, record your balances: update what your investments are worth and what you still owe. This chart then shows how your net worth changes month to month."}</p>
+                {snapshots.length === 0 && <button type="button" className="settings-btn" onClick={() => setRecording(true)}><Plus size={12} /> Record this month</button>}
               </div>
             )}
           </section>
@@ -360,6 +371,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate, onGo, on
           </section>
         </div>
       </div>
+
+      {recording && (
+        <div className="db-modal" onMouseDown={(e) => { if (e.target === e.currentTarget) setRecording(false); }}>
+          <div ref={snapshotRef} role="dialog" aria-modal="true" aria-label="Record this month" tabIndex={-1} className="db-modal-body">
+            <div className="db-modal-head">
+              <div>
+                <h2>Record this month</h2>
+                <p className="cc-note">Update what each investment is worth and what you still owe, then save. Account balances come from your transactions.</p>
+              </div>
+              <button type="button" className="settings-link" onClick={() => setRecording(false)}>Close</button>
+            </div>
+            <SnapshotForm data={data} onRefresh={onRefresh} showToast={showToast} embedded onDone={() => setRecording(false)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

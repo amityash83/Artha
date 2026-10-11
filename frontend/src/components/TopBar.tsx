@@ -136,8 +136,11 @@ export const CommandPalette: React.FC<{
 
   const results = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-    const hits = words.length ? entries.filter((e) => words.every((w) => e.haystack.includes(w))) : entries.filter((e) => e.hint === 'Page' || e.hint === 'Action');
-    return hits.slice(0, 40);
+    if (!words.length) return entries.filter((e) => e.hint === 'Page' || e.hint === 'Action').slice(0, 40);
+    // Earlier matches first (a name beats a late keyword); ties keep the list's order.
+    const hits = entries.filter((e) => words.every((w) => e.haystack.includes(w)));
+    const at = (e: (typeof entries)[number]) => e.haystack.indexOf(words[0]);
+    return hits.map((e, i) => ({ e, i, pos: at(e) })).sort((a, b) => a.pos - b.pos || a.i - b.i).map((x) => x.e).slice(0, 40);
   }, [entries, query]);
   useEffect(() => setActive(0), [query]);
 
