@@ -203,7 +203,8 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         // property, physical gold) an institution is legitimately absent.
         defaultData[k] = entityType === 'accounts' ? (institutions[0]?.id || '') : '';
       } else if (type === 'person_select') {
-        defaultData[k] = people[0]?.id || '';
+        // The Primary Owner, not whoever sorts first (people arrive sorted by name).
+        defaultData[k] = (people.find((p) => p.role === 'Primary Owner') ?? people[0])?.id || '';
       } else if (type === 'category_select') {
         defaultData[k] = initialData?.category_id || category?.id || '';
       } else if (type === 'select_status') {
