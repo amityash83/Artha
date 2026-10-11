@@ -280,7 +280,7 @@ const App: React.FC = () => {
       <main className="main-content">
         <TopBar data={data} refreshKey={statusTick} onCommand={(c) => { void runCommand(c); }} onNavigate={navigateTo} />
         {activeTab === 'dashboard' && (
-          <Dashboard data={data} onNavigate={handleNavigate} />
+          <Dashboard data={data} onNavigate={handleNavigate} onGo={navigateTo} onCommand={(c) => { void runCommand(c); }} />
         )}
         {activeTab === 'snapshot' && (
           <Snapshot data={data} onRefresh={fetchFinanceData} showToast={showToast} />
@@ -352,6 +352,7 @@ const App: React.FC = () => {
           <EntityGrid 
             entityType="goals"
             entities={data.goals}
+            addRequest={addRequest?.page === 'goals' ? addRequest.nonce : undefined}
             searchSeed={searchSeed?.page === 'goals' ? searchSeed : null}
             categories={data.categories} 
             institutions={data.institutions} 

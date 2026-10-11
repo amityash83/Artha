@@ -338,6 +338,8 @@ export interface Goal {
   // Computed fields
   gap?: number;
   months_remaining?: number;
+  /** When the goal is reached at the current monthly contribution; "Never" with none. */
+  expected_date?: string;
   status?: string;
 }
 

@@ -46,7 +46,7 @@ export const NAV_ITEMS = NAV_GROUPS.flat();
 
 /** Everything the top bar, the Go-to search and the desktop menu can trigger. */
 export type AppCommand =
-  | 'new-transaction' | 'new-account' | 'new-asset' | 'new-loan' | 'new-credit-card' | 'new-income' | 'new-expense'
+  | 'new-transaction' | 'new-account' | 'new-asset' | 'new-loan' | 'new-credit-card' | 'new-income' | 'new-expense' | 'new-goal'
   | 'open-database' | 'new-database' | 'backup-now' | 'settings' | 'help' | 'goto';
 
 export const NEW_ITEMS: { command: AppCommand; label: string; page: string }[] = [
@@ -57,4 +57,5 @@ export const NEW_ITEMS: { command: AppCommand; label: string; page: string }[] =
   { command: 'new-credit-card', label: 'Credit card', page: 'credit-cards' },
   { command: 'new-income', label: 'Income entry', page: 'income-expenses' },
   { command: 'new-expense', label: 'Expense entry', page: 'income-expenses' },
+  { command: 'new-goal', label: 'Goal', page: 'goals' },
 ];

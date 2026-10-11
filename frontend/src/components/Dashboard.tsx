@@ -1,608 +1,363 @@
 import React, { useEffect, useState } from 'react';
-import { 
-  TrendingUp, TrendingDown, ShieldCheck, 
-  AlertTriangle, CheckCircle, ArrowRight 
-} from 'lucide-react';
-import { Line, Doughnut } from 'react-chartjs-2';
+import { ArrowRight, ChevronDown, ChevronRight, Plus, ShieldCheck } from 'lucide-react';
+import { Line } from 'react-chartjs-2';
 import {
-  Chart as ChartJS, CategoryScale, LinearScale, PointElement, 
-  LineElement, Title, Tooltip, Legend, Filler, ChartData, ArcElement
+  Chart as ChartJS, CategoryScale, LinearScale, PointElement,
+  LineElement, Tooltip, Filler, ChartData
 } from 'chart.js';
 import { InitData, Snapshot } from '../types';
 import { API_BASE_URL } from '../config';
+import { AppCommand } from '../navigation';
+import { formatDate, formatINR } from '../format';
+import { monthlyEquivalent } from '../frequency';
 import { InfoTooltip } from './InfoTooltip';
 import { AIExplainButton } from './AIExplainButton';
+import type { NavigateOptions } from './TopBar';
 
-ChartJS.register(
-  CategoryScale, LinearScale, PointElement, LineElement, 
-  ArcElement, Title, Tooltip, Legend, Filler
-);
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler);
 
 interface DashboardProps {
   data: InitData;
   onNavigate: (tab: string, simulationParams?: any) => void;
+  onGo: (page: string, opts?: NavigateOptions) => void;
+  onCommand: (command: AppCommand) => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate }) => {
+// Matches decision_engine.py's fallback when the rule is missing.
+const DEFAULT_EMERGENCY_TARGET = 1500000;
+const FREQ_PER_YEAR: Record<string, number> = { Monthly: 12, Quarterly: 4, 'Half-Yearly': 2, Yearly: 1 };
+
+const pct = (part: number, whole: number) => (whole > 0 ? (part / whole) * 100 : 0);
+const months = (n: number) => (n < 1 ? 'under a month' : `${n < 10 ? n.toFixed(1).replace(/\.0$/, '') : Math.round(n)} month${n === 1 ? '' : 's'}`);
+const trim = (n: number) => n.toFixed(1).replace(/\.0$/, '');
+const shortINR = (v: number) => (Math.abs(v) >= 1e7 ? `₹${trim(v / 1e7)}Cr` : Math.abs(v) >= 1e5 ? `₹${trim(v / 1e5)}L` : `₹${Math.round(v)}`);
+
+/** Where a recommendation's button goes, worded for what the person will do there. */
+const recAction = (rec: any): { label: string; page: string } | null => {
+  if (rec.action_type === 'info') return null;
+  if (rec.action_type === 'prepay') return { label: 'Plan a prepayment', page: 'simulations' };
+  if (/insurance/i.test(rec.category)) return { label: 'Review policies', page: 'assets' };
+  if (/emergency|liquidity/i.test(rec.category)) return { label: 'Plan your savings', page: 'cash-flow' };
+  return { label: 'Try it in Simulations', page: 'simulations' };
+};
+
+export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate, onGo, onCommand }) => {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [personFilter, setPersonFilter] = useState<number | 'all'>('all');
+  const [showPassed, setShowPassed] = useState(false);
   const { goals, recommendations, rules, people } = data;
 
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/snapshots`)
       .then(res => res.json())
-      .then(d => setSnapshots(d))
+      .then(d => setSnapshots(Array.isArray(d) ? d : []))
       .catch(err => console.error("Failed to fetch snapshots:", err));
   }, []);
 
   // Per-person filtering is client-side: /api/init's `summary` is a household-wide
-  // aggregate, so filtered totals are re-derived here from the same raw entities
-  // rather than adding a new backend aggregation endpoint.
-  const accounts = personFilter === 'all' ? data.accounts : data.accounts.filter(a => a.owner_id === personFilter);
-  const assets = personFilter === 'all' ? data.assets : data.assets.filter(a => a.owner_id === personFilter);
-  const liabilities = personFilter === 'all' ? data.liabilities : data.liabilities.filter(l => l.owner_id === personFilter);
+  // aggregate, so filtered totals are re-derived here from the same raw entities.
+  const mine = <T extends { owner_id?: number | null }>(rows: T[]) => (personFilter === 'all' ? rows : rows.filter((r) => r.owner_id === personFilter));
+  const accounts = mine(data.accounts);
+  const assets = mine(data.assets);
+  const liabilities = mine(data.liabilities);
+  const expenses = mine(data.expenses as any[]);
+  const income = mine(data.income as any[]);
 
-  const summary = personFilter === 'all' ? data.summary : (() => {
-    const liquid = accounts.reduce((sum, a) => sum + (a.current_balance || 0), 0);
-    const assetsVal = assets.reduce((sum, a) => sum + (a.current_value || 0), 0);
-    const debt = liabilities.reduce((sum, l) => sum + (l.outstanding || 0), 0);
-    const totalAssets = liquid + assetsVal;
-    return {
-      net_worth: totalAssets - debt,
-      total_assets: totalAssets,
-      total_debt: debt,
-      total_liquid: liquid,
-      total_investments: data.summary.total_investments,
-      total_properties: data.summary.total_properties,
-      monthly_change: 0,
-      yearly_change: 0,
-    };
-  })();
+  const cash = accounts.reduce((s, a) => s + (a.current_balance || 0), 0);
+  const owned = cash + assets.reduce((s, a) => s + (a.current_value || 0), 0);
+  const owed = liabilities.reduce((s, l) => s + (l.outstanding || 0), 0);
+  const netWorth = owned - owed;
+  const debtShare = pct(owed, owned);
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      maximumFractionDigits: 0
-    }).format(value);
-  };
+  // The recurring plan from Income & Expenses: monthly spend, and what's left over.
+  const active = (e: any) => (e.status ?? 'Active') === 'Active';
+  const monthlySpend = expenses.filter(active).reduce((s, e) => s + monthlyEquivalent(e.amount, e.frequency), 0);
+  const monthlyIn = income.filter(active).reduce((s, e) => s + monthlyEquivalent(e.category_name === 'Salary' && e.net_amount > 0 ? e.net_amount : e.amount, e.frequency), 0);
+  const monthlyEmi = liabilities.filter((l) => l.category_name !== 'Credit Card' && (l.outstanding || 0) > 0).reduce((s, l) => s + (l.emi || 0), 0);
+  const leftOver = monthlyIn - monthlySpend - monthlyEmi;
 
-  // Liquidity Health indicator
-  const minEmergencyRule = rules.find(r => r.rule_key === 'min_emergency_fund');
-  const targetLiquidity = minEmergencyRule ? minEmergencyRule.value : 1500000;
-  const liquidFunds = summary.total_liquid;
-  const liquidityRatio = targetLiquidity > 0 ? (liquidFunds / targetLiquidity) : 1;
+  // Emergency fund: the same reading as the recommendation engine. An "emergency" goal's
+  // saved amount when there is one, else cash in accounts; the target is the planning
+  // rule (or the goal's own target if that's higher).
+  const rule = rules.find((r) => r.rule_key === 'min_emergency_fund');
+  const ruleTarget = rule && rule.is_enabled !== 0 ? rule.value : DEFAULT_EMERGENCY_TARGET;
+  const emergencyGoal = goals.find((g) => /emergency/i.test(g.name));
+  const reserve = emergencyGoal ? emergencyGoal.current_amount : cash;
+  const reserveTarget = Math.max(ruleTarget, emergencyGoal?.target_amount || 0);
+  const reservePct = pct(reserve, reserveTarget);
+  const shortBy = Math.max(reserveTarget - reserve, 0);
+  const reserveState = shortBy <= 0 ? { label: 'Fully funded', tone: 'success' } : reservePct >= 70 ? { label: 'Nearly there', tone: 'warning' } : { label: 'Well short', tone: 'danger' };
 
-  let liquidityHealth = 'green';
-  let liquidityHealthLabel = 'Healthy';
-  if (liquidityRatio < 0.7) {
-    liquidityHealth = 'red';
-    liquidityHealthLabel = 'Critical Deficit';
-  } else if (liquidityRatio < 1.0) {
-    liquidityHealth = 'yellow';
-    liquidityHealthLabel = 'Warning - Near Limit';
-  }
+  // Where the money is: cash plus each asset class, biggest first.
+  const byClass: Record<string, number> = { 'Cash in accounts': cash };
+  assets.forEach((a) => { const c = a.category_name || 'Other'; byClass[c] = (byClass[c] || 0) + (a.current_value || 0); });
+  const allocation = Object.entries(byClass).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
 
-  const totalAssets = summary.total_assets;
-  const liquidPct = totalAssets > 0 ? (liquidFunds / totalAssets) * 100 : 0;
-  const lockedPct = Math.max(0, 100 - liquidPct);
+  const policies = assets.filter((a: any) => a.category_name === 'Insurance').map((a: any) => ({
+    id: a.id, name: a.name, type: a.policy_type || 'Life', cover: a.cover || 0, renewal: a.renewal_date || '',
+    yearly: (a.premium || 0) * (FREQ_PER_YEAR[a.frequency] || 1),
+  }));
+  const daysUntil = (iso: string) => Math.ceil((new Date(`${iso}T00:00:00`).getTime() - Date.now()) / 86400000);
+  const nextRenewal = policies.filter((p) => p.renewal && daysUntil(p.renewal) >= 0).sort((a, b) => a.renewal.localeCompare(b.renewal))[0];
 
-  const debtToAssetRatio = totalAssets > 0 ? (summary.total_debt / totalAssets) * 100 : 0;
-  let leverageHealth = 'green';
-  let leverageLabel = 'Safe Leverage';
-  if (debtToAssetRatio > 50) {
-    leverageHealth = 'red';
-    leverageLabel = 'High Debt Load';
-  } else if (debtToAssetRatio > 30) {
-    leverageHealth = 'yellow';
-    leverageLabel = 'Moderate Leverage';
-  }
+  const todo = recommendations.filter((r) => r.status !== 'success');
+  const passed = recommendations.filter((r) => r.status === 'success');
+  const toneOrder: Record<string, number> = { danger: 0, warning: 1, info: 2 };
+  todo.sort((a, b) => (toneOrder[a.status] ?? 3) - (toneOrder[b.status] ?? 3));
 
-  // Dynamic Asset Allocation for Doughnut Chart
-  const assetAllocation: Record<string, number> = {
-    'Liquid Cash': liquidFunds
-  };
+  const priority: Record<string, number> = { High: 0, Medium: 1, Low: 2 };
+  const topGoals = [...goals].sort((a, b) => (priority[a.priority ?? ''] ?? 3) - (priority[b.priority ?? ''] ?? 3)).slice(0, 4);
 
-  assets.forEach((asset) => {
-    const cat = asset.category_name || 'General Assets';
-    assetAllocation[cat] = (assetAllocation[cat] || 0) + asset.current_value;
-  });
-
-  // Hide zero-value categories (e.g. insurance with no surrender value) — a ₹0 slice
-  // renders invisibly in the doughnut and only adds noise to the legend.
-  const allocationEntries = Object.entries(assetAllocation).filter(([, value]) => value > 0);
-  const doughnutLabels = allocationEntries.map(([label]) => label);
-  const doughnutValues = allocationEntries.map(([, value]) => value);
-
-  // Insurance coverage overview (policies are Insurance-category assets; type-specific
-  // figures come from the insurance_details satellite record attached by /api/init)
-  const FREQ_MULTIPLIER: Record<string, number> = { 'Monthly': 12, 'Quarterly': 4, 'Half-Yearly': 2, 'Yearly': 1 };
-  const insurancePolicies = assets
-    .filter((a: any) => a.category_name === 'Insurance')
-    .map((a: any) => {
-      const det = a.insurance_details || {};
-      const premium = det.premium ?? a.premium ?? 0;
-      const frequency = det.frequency || a.frequency || 'Yearly';
-      return {
-        id: a.id,
-        name: a.name,
-        policyType: det.policy_type || a.policy_type || 'Life',
-        renewalDate: det.renewal_date || a.renewal_date || '',
-        coverage: Math.max(det.sum_assured || 0, det.sum_insured || 0, det.idv || 0, a.coverage || 0),
-        premium,
-        annualPremium: premium * (FREQ_MULTIPLIER[frequency] || 1)
-      };
-    });
-
-  const coverageByType: Record<string, number> = {};
-  insurancePolicies.forEach((p) => {
-    coverageByType[p.policyType] = (coverageByType[p.policyType] || 0) + p.coverage;
-  });
-  const totalCoverage = insurancePolicies.reduce((sum, p) => sum + p.coverage, 0);
-  const annualPremiumOutgo = insurancePolicies.reduce((sum, p) => sum + p.annualPremium, 0);
-
-  const daysUntil = (dateStr: string) => Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86400000);
-  const upcomingRenewals = insurancePolicies
-    .filter((p) => p.renewalDate && daysUntil(p.renewalDate) >= 0)
-    .sort((a, b) => new Date(a.renewalDate).getTime() - new Date(b.renewalDate).getTime())
-    .slice(0, 3);
-
-  const colors = [
-    '#10b981', // green
-    '#8b5cf6', // purple
-    '#3b82f6', // blue
-    '#f59e0b', // orange
-    '#ec4899', // pink
-    '#06b6d4', // cyan
-    '#e11d48'  // rose
-  ];
-
-  const doughnutColors = doughnutLabels.map((_, i) => colors[i % colors.length]);
-
-  const doughnutData = {
-    labels: doughnutLabels,
-    datasets: [
-      {
-        data: doughnutValues,
-        backgroundColor: doughnutColors,
-        borderColor: 'rgba(255,255,255,0.08)',
-        borderWidth: 1,
-        hoverOffset: 6
-      }
-    ]
-  };
-
-  // Chart Configuration
-  const chartData: ChartData<'line'> = {
-    labels: snapshots.length > 0 ? snapshots.map(s => s.month) : ['Current'],
-    datasets: [
-      {
-        fill: true,
-        label: 'Net Worth Growth',
-        data: snapshots.length > 0 ? snapshots.map(s => s.net_worth) : [summary.net_worth],
-        borderColor: '#8b5cf6',
-        backgroundColor: 'rgba(139, 92, 246, 0.1)',
-        tension: 0.4,
-        pointBackgroundColor: '#8b5cf6',
-        pointHoverRadius: 6,
-        borderWidth: 2,
-      }
-    ]
-  };
-
-  const doughnutOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: 'bottom' as const,
-        labels: {
-          color: '#94a3b8',
-          font: { family: 'Inter', size: 11 },
-          padding: 8
-        }
-      },
-      tooltip: {
-        backgroundColor: '#0d111d',
-        titleFont: { family: 'Outfit' },
-        bodyFont: { family: 'Inter' },
-        borderColor: 'rgba(255,255,255,0.08)',
-        borderWidth: 1,
-        callbacks: {
-          label: (context: any) => ` Value: ${formatCurrency(context.parsed)}`
-        }
-      }
+  const runRec = (rec: any) => {
+    const action = recAction(rec);
+    if (!action) return;
+    if (rec.action_type === 'prepay') {
+      const loan = data.liabilities.find((l) => rec.message.includes(l.name) || rec.title.includes(l.name));
+      onNavigate('simulations', { scenario_type: 'close_loan', loan_id: loan?.id || null });
+    } else {
+      onNavigate(action.page);
     }
   };
 
+  const chartData: ChartData<'line'> = {
+    labels: snapshots.map((s) => s.month),
+    datasets: [{
+      fill: true, data: snapshots.map((s) => s.net_worth), borderColor: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.08)',
+      tension: 0.3, pointRadius: 3, pointBackgroundColor: '#8b5cf6', borderWidth: 2,
+    }],
+  };
   const chartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
+    responsive: true, maintainAspectRatio: false,
     plugins: {
       legend: { display: false },
-      tooltip: {
-        backgroundColor: '#0d111d',
-        titleFont: { family: 'Outfit' },
-        bodyFont: { family: 'Inter' },
-        borderColor: 'rgba(255,255,255,0.08)',
-        borderWidth: 1,
-        callbacks: {
-          label: (context: any) => ` Net Worth: ${formatCurrency(context.parsed.y)}`
-        }
-      }
+      tooltip: { backgroundColor: '#0d111d', borderColor: 'rgba(255,255,255,0.08)', borderWidth: 1, callbacks: { label: (c: any) => ` Net worth ${formatINR(c.parsed.y)}` } },
     },
     scales: {
-      x: {
-        grid: { display: false },
-        ticks: { color: '#64748b', font: { family: 'Inter', size: 11 } }
-      },
-      y: {
-        grid: { color: 'rgba(255,255,255,0.04)' },
-        ticks: { 
-          color: '#64748b', 
-          font: { family: 'Inter', size: 11 },
-          callback: (value: any) => {
-            if (value >= 10000000) return `₹${(value/10000000).toFixed(1)}Cr`;
-            if (value >= 100000) return `₹${(value/100000).toFixed(0)}L`;
-            return `₹${value}`;
-          }
-        }
-      }
-    }
+      x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 11 } } },
+      y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b', font: { size: 11 }, maxTicksLimit: 5, callback: (v: any) => shortINR(Number(v)) } },
+    },
   };
-
-  const handleRecommendationAction = (rec: any) => {
-    if (rec.action_type === 'prepay') {
-      const activeLiability = liabilities.find(l => rec.message.includes(l.name));
-      onNavigate('simulations', {
-        scenario_type: 'close_loan',
-        loan_id: activeLiability?.id || null
-      });
-    } else {
-      onNavigate('simulations');
-    }
-  };
+  const lastSnap = snapshots[snapshots.length - 1];
 
   return (
-    <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '12px' }}>
+    <div className="db-page">
+      <div className="eg-head">
         <div>
           <h1 className="page-title">Dashboard</h1>
-          <p className="page-subtitle">Your net worth, your safety margins, and what to do next.</p>
+          <p className="page-subtitle">Where you stand, how safe you are, and what to do next.</p>
         </div>
-        {people.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>View</span>
-            <select
-              className="form-control"
-              style={{ padding: '6px 12px', fontSize: '12px', height: '32px' }}
-              value={personFilter}
-              onChange={(e) => setPersonFilter(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
-            >
-              <option value="all">Household (All)</option>
-              {people.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
+        {people.length > 1 && (
+          <label className="db-view">
+            <span>Showing</span>
+            <select className="form-control" value={personFilter}
+              onChange={(e) => setPersonFilter(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}>
+              <option value="all">Whole household</option>
+              {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
-          </div>
+          </label>
         )}
       </div>
 
-      {/* Top Summaries Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '24px', marginBottom: '32px' }}>
-        {/* Net Worth Card */}
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500 }}>Net Worth</span>
-              {summary.monthly_change >= 0 ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: 'var(--success)', fontWeight: 600 }}>
-                  <TrendingUp size={14} /> +{formatCurrency(summary.monthly_change)}
-                </div>
-              ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: 'var(--danger)', fontWeight: 600 }}>
-                  <TrendingDown size={14} /> {formatCurrency(summary.monthly_change)}
-                </div>
-              )}
-            </div>
-            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 700, margin: '12px 0 6px 0', color: 'var(--text-primary)' }}>
-              {formatCurrency(summary.net_worth)}
-            </h2>
-          </div>
-          <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: 'var(--text-muted)', borderTop: '1px solid var(--border-glass)', paddingTop: '10px', marginTop: '10px' }}>
-            <span>Assets: <strong style={{ color: '#f8fafc' }}>{formatCurrency(summary.total_assets)}</strong></span>
-            <span>Debt: <strong style={{ color: '#f8fafc' }}>{formatCurrency(summary.total_debt)}</strong></span>
-          </div>
-        </div>
-
-        {/* Liquid Reserve Health Indicator */}
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500 }}>Emergency Reserve Status</span>
-              <span className={`badge badge-${liquidityHealth}`} style={{ fontSize: '10px' }}>
-                {liquidityHealthLabel}
-              </span>
-            </div>
-            <h2 style={{ fontSize: '22px', fontWeight: 600, color: '#f8fafc', margin: '4px 0 8px 0' }}>
-              {formatCurrency(liquidFunds)}
-            </h2>
-          </div>
-          
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-              <span>Liquid: <strong style={{ color: '#10b981' }}>{liquidPct.toFixed(0)}%</strong></span>
-              <span>Locked: <strong style={{ color: '#3b82f6' }}>{lockedPct.toFixed(0)}%</strong></span>
-            </div>
-            <div style={{ height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', overflow: 'hidden', display: 'flex', marginBottom: '8px' }}>
-              <div style={{ width: `${liquidPct}%`, height: '100%', background: '#10b981' }} title="Liquid Capital"></div>
-              <div style={{ width: `${lockedPct}%`, height: '100%', background: '#3b82f6' }} title="Locked Capital"></div>
-            </div>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-              Reserve Target: {formatCurrency(targetLiquidity)}
-            </span>
-          </div>
-        </div>
-
-        {/* Leverage Risk Card */}
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500 }}>Leverage Risk (Debt/Assets)</span>
-              <span className={`badge badge-${leverageHealth}`} style={{ fontSize: '10px' }}>
-                {leverageLabel}
-              </span>
-            </div>
-            <h2 style={{ fontSize: '22px', fontWeight: 600, color: '#f8fafc', margin: '4px 0 8px 0' }}>
-              {debtToAssetRatio.toFixed(1)}%
-            </h2>
-          </div>
-          <div>
-            <div style={{ height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', overflow: 'hidden', marginBottom: '8px' }}>
-              <div style={{ 
-                width: `${Math.min(debtToAssetRatio, 100)}%`, 
-                height: '100%', 
-                background: leverageHealth === 'green' ? 'var(--success)' : leverageHealth === 'yellow' ? 'var(--warning)' : 'var(--danger)'
-              }}></div>
-            </div>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-              Risk Threshold Limit: Under 30%
-            </span>
-          </div>
-        </div>
-
-        {/* Target Progress Card */}
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '130px' }}>
-          <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500 }}>Goal Allocations</span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, justifyContent: 'center' }}>
-            {goals.slice(0, 2).map((goal) => {
-              const progress = goal.target_amount > 0 ? (goal.current_amount / goal.target_amount) * 100 : 0;
-              return (
-                <div key={goal.id}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '3px' }}>
-                    <span style={{ color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '140px' }}>{goal.name}</span>
-                    <span style={{ color: 'var(--text-muted)' }}>{progress.toFixed(0)}%</span>
-                  </div>
-                  <div style={{ height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', overflow: 'hidden' }}>
-                    <div style={{ width: `${Math.min(progress, 100)}%`, height: '100%', background: '#8b5cf6' }}></div>
-                  </div>
-                </div>
-              );
-            })}
-            {goals.length === 0 && (
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>No active planning goals.</span>
+      <div className="glass-panel cc-summary db-summary">
+        <div className="cc-summary-main">
+          <div className="cc-label">Net worth</div>
+          <strong className="eg-figure db-networth">{formatINR(netWorth)}</strong>
+          <span className="cc-note">
+            {formatINR(owned)} owned − {formatINR(owed)} owed
+            {personFilter === 'all' && lastSnap && lastSnap.net_worth !== netWorth && (
+              <> · <span style={{ color: netWorth >= lastSnap.net_worth ? 'var(--success)' : '#fca5a5' }}>
+                {netWorth >= lastSnap.net_worth ? '+' : '−'}{formatINR(Math.abs(netWorth - lastSnap.net_worth))}</span> since {lastSnap.month}</>
             )}
-          </div>
+          </span>
+        </div>
+        <div className="cc-summary-stat">
+          <div className="cc-label">Cash in accounts</div>
+          <strong>{formatINR(cash)}</strong>
+          <span className="cc-note">{accounts.length} account{accounts.length === 1 ? '' : 's'}</span>
+        </div>
+        <div className="cc-summary-stat">
+          <div className="cc-label">Debt</div>
+          <strong>{formatINR(owed)}</strong>
+          <span className="cc-note" title="Debt as a share of everything you own. Under 30% is comfortable; over 50% is heavy.">
+            {owed > 0 ? `${debtShare.toFixed(0)}% of what you own · ${debtShare > 50 ? 'heavy' : debtShare > 30 ? 'moderate' : 'comfortable'}` : 'Nothing owed'}
+          </span>
+        </div>
+        <div className="cc-summary-stat">
+          <div className="cc-label">Left over each month</div>
+          <strong style={monthlyIn > 0 && leftOver < 0 ? { color: '#fca5a5' } : undefined}>{monthlyIn > 0 ? formatINR(leftOver) : '—'}</strong>
+          <span className="cc-note">{monthlyIn > 0 ? 'take-home, less expenses and EMIs' : 'add income to see this'}</span>
         </div>
       </div>
 
-      {/* Charts & Recommendations Split */}
-      <div style={{ display: 'grid', gridTemplateColumns: '3.1fr 2fr', gap: '24px', flexWrap: 'wrap' }} className="grid-split">
-        {/* Left Side Charts Panel */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          <div className="glass-panel" style={{ height: '320px', display: 'flex', flexDirection: 'column' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#f8fafc', marginBottom: '16px' }}>
-              Historic Asset Progression {personFilter !== 'all' && <span style={{ fontSize: '11px', fontWeight: 400, color: 'var(--text-muted)' }}>(Household total — per-person trend not yet tracked)</span>}
-            </h3>
-            <div style={{ flex: 1, position: 'relative' }}>
-              <Line data={chartData} options={chartOptions} />
+      <div className="db-grid">
+        <div className="db-col">
+          {/* Emergency fund */}
+          <section className="glass-panel db-card">
+            <div className="db-card-head">
+              <h3>Emergency fund</h3>
+              <span className={`db-pill db-pill--${reserveState.tone}`}>{reserveState.label}</span>
             </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '24px' }} className="sub-charts">
-            {/* Doughnut + Allocation Table */}
-            <div className="glass-panel" style={{ height: '240px', display: 'flex', flexDirection: 'column' }}>
-              <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '12px' }}>Asset Distribution &amp; Allocation</h3>
-              <div style={{ display: 'flex', gap: '16px', flex: 1, alignItems: 'center' }}>
-                <div style={{ flex: 1.1, height: '160px', position: 'relative' }}>
-                  <Doughnut data={doughnutData} options={doughnutOptions} />
-                </div>
-                <div style={{ flex: 1.4, maxHeight: '160px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
-                  {doughnutLabels.map((label, idx) => {
-                    const value = doughnutValues[idx];
-                    const percent = summary.total_assets > 0 ? (value / summary.total_assets) * 100 : 0;
-                    return (
-                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', borderBottom: '1px solid rgba(255,255,255,0.02)', paddingBottom: '4px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
-                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: doughnutColors[idx], flexShrink: 0 }}></span>
-                          <span style={{ color: '#e2e8f0', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '80px' }} title={label}>{label}</span>
-                        </div>
-                        <div style={{ color: '#f1f5f9', textAlign: 'right', flexShrink: 0 }}>
-                          <div>{formatCurrency(value)}</div>
-                          <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{percent.toFixed(1)}%</div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+            <div className="db-reserve">
+              <strong className="eg-figure">{formatINR(reserve)} <span>of {formatINR(reserveTarget)}</span></strong>
+              <div className="cc-meter"><div style={{ width: `${Math.min(reservePct, 100)}%`, background: `var(--${reserveState.tone})` }} /></div>
             </div>
-
-            <div className="glass-panel" style={{ height: '240px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-              <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '12px' }}>Liabilities Distribution</h3>
-              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {liabilities.length === 0 ? (
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center', marginTop: '20px' }}>
-                    No liabilities recorded.
-                  </span>
-                ) : (
-                  liabilities.map((l) => (
-                    <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', background: 'rgba(255,255,255,0.02)', padding: '8px 12px', borderRadius: '8px' }}>
-                      <span style={{ color: '#e2e8f0', fontWeight: 500 }}>{l.name}</span>
-                      <span style={{ color: '#f1f5f9' }}>{formatCurrency(l.outstanding)}</span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Insurance Coverage Overview */}
-          {insurancePolicies.length > 0 && (
-            <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
-                  <ShieldCheck size={16} style={{ color: '#10b981' }} /> Insurance Coverage
-                </h3>
-                <button
-                  className="btn btn-secondary"
-                  style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 12px', fontSize: '11px', borderRadius: '16px' }}
-                  onClick={() => onNavigate('assets')}
-                >
-                  View Policies <ArrowRight size={11} />
-                </button>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px' }}>
-                <div style={{ background: 'rgba(255,255,255,0.02)', borderRadius: '10px', padding: '12px' }}>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Active Policies</div>
-                  <div style={{ fontSize: '18px', fontWeight: 600, color: '#f8fafc' }}>{insurancePolicies.length}</div>
-                </div>
-                <div style={{ background: 'rgba(255,255,255,0.02)', borderRadius: '10px', padding: '12px' }}>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Total Cover</div>
-                  <div style={{ fontSize: '18px', fontWeight: 600, color: '#10b981' }}>{formatCurrency(totalCoverage)}</div>
-                </div>
-                <div style={{ background: 'rgba(255,255,255,0.02)', borderRadius: '10px', padding: '12px' }}>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Annual Premium Outgo</div>
-                  <div style={{ fontSize: '18px', fontWeight: 600, color: '#f8fafc' }}>{formatCurrency(annualPremiumOutgo)}</div>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {Object.entries(coverageByType).map(([type, cover]) => (
-                  <span key={type} style={{
-                    fontSize: '11px',
-                    padding: '4px 10px',
-                    borderRadius: '14px',
-                    background: 'rgba(139, 92, 246, 0.12)',
-                    color: '#c4b5fd',
-                    fontWeight: 500
-                  }}>
-                    {type}: {formatCurrency(cover)}
-                  </span>
-                ))}
-              </div>
-
-              {upcomingRenewals.length > 0 && (
-                <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>Upcoming Renewals</span>
-                  {upcomingRenewals.map((p) => {
-                    const days = daysUntil(p.renewalDate);
-                    const urgent = days <= 30;
-                    return (
-                      <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', background: 'rgba(255,255,255,0.02)', padding: '8px 12px', borderRadius: '8px' }}>
-                        <span style={{ color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }} title={p.name}>
-                          {p.name}
-                        </span>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
-                          <span style={{ color: '#f1f5f9' }}>{formatCurrency(p.premium)}</span>
-                          <span style={{
-                            fontSize: '10px',
-                            fontWeight: 600,
-                            padding: '2px 8px',
-                            borderRadius: '10px',
-                            background: urgent ? 'rgba(245, 158, 11, 0.15)' : 'rgba(255,255,255,0.05)',
-                            color: urgent ? 'var(--warning-light)' : 'var(--text-muted)'
-                          }}>
-                            {days === 0 ? 'Due today' : `${days}d`}
-                          </span>
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
+            <ul className="db-facts">
+              <li>{emergencyGoal ? <>Counting what's saved in your <strong>{emergencyGoal.name}</strong> goal.</> : <>Counting the cash in your accounts. Add a goal named "Emergency fund" to track a dedicated reserve.</>}</li>
+              {monthlySpend > 0
+                ? <li>That covers about <strong>{months(reserve / monthlySpend)}</strong> of your regular expenses ({formatINR(monthlySpend)} a month).</li>
+                : <li>Add your regular expenses on <button type="button" className="db-link" onClick={() => onGo('income-expenses')}>Income &amp; Expenses</button> to see how many months this covers.</li>}
+              {shortBy > 0 && (
+                <li>
+                  {formatINR(shortBy)} to go
+                  {leftOver > 0 && monthlyIn > 0 ? <>: about <strong>{months(shortBy / leftOver)}</strong> if you set aside everything left over each month.</> : '.'}
+                </li>
               )}
+            </ul>
+            <div className="db-card-foot">
+              <span className="cc-note">Target {formatINR(ruleTarget)} from your planning rules{emergencyGoal && emergencyGoal.target_amount > ruleTarget ? `, raised to the goal's ${formatINR(emergencyGoal.target_amount)}` : ''}.</span>
+              <button type="button" className="settings-link" onClick={() => onGo('settings', { settingsSection: 'rules' })}>Change target</button>
             </div>
+          </section>
+
+          {/* Net worth over time */}
+          <section className="glass-panel db-card">
+            <div className="db-card-head">
+              <h3>Net worth over time</h3>
+              {personFilter !== 'all' && snapshots.length > 1 && <span className="cc-note">Whole household</span>}
+            </div>
+            {snapshots.length > 1 ? (
+              <div style={{ height: '220px', position: 'relative' }}><Line data={chartData} options={chartOptions} /></div>
+            ) : (
+              <div className="db-empty">
+                <p>{snapshots.length === 1
+                  ? `One month recorded (${snapshots[0].month}, ${formatINR(snapshots[0].net_worth)}). Record next month too and the trend will appear here.`
+                  : 'Record a monthly snapshot of your balances and this will chart how your net worth changes month to month.'}</p>
+                <button type="button" className="settings-btn" onClick={() => onGo('snapshot')}>Open Monthly Snapshot <ArrowRight size={12} /></button>
+              </div>
+            )}
+          </section>
+
+          {/* Where it is / what's owed */}
+          <div className="db-pair">
+            <section className="glass-panel db-card">
+              <div className="db-card-head"><h3>Where your money is</h3></div>
+              {allocation.length === 0 ? (
+                <div className="db-empty"><p>Nothing recorded yet.</p>
+                  <button type="button" className="settings-btn" onClick={() => onCommand('new-asset')}><Plus size={12} /> Add an asset</button></div>
+              ) : (
+                <ul className="db-bars">
+                  {allocation.map(([label, value]) => (
+                    <li key={label}>
+                      <span className="db-bar-label">{label}<span>{formatINR(value)}</span></span>
+                      <span className="db-bar"><span style={{ width: `${pct(value, owned)}%` }} /></span>
+                      <span className="db-bar-pct">{pct(value, owned).toFixed(0)}%</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+            <section className="glass-panel db-card">
+              <div className="db-card-head"><h3>What you owe</h3></div>
+              {liabilities.filter((l) => (l.outstanding || 0) > 0).length === 0 ? (
+                <div className="db-empty"><p>No debt. Nothing to pay down.</p></div>
+              ) : (
+                <ul className="db-list">
+                  {[...liabilities].filter((l) => (l.outstanding || 0) > 0).sort((a, b) => b.outstanding - a.outstanding).map((l) => (
+                    <li key={l.id}>
+                      <span><strong>{l.name}</strong><span>{l.category_name === 'Credit Card' ? 'Card balance' : [l.interest_rate ? `${l.interest_rate}%` : null, l.emi ? `EMI ${formatINR(l.emi)}` : null].filter(Boolean).join(' · ')}</span></span>
+                      <strong>{formatINR(l.outstanding)}</strong>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </div>
+
+          {policies.length > 0 && (
+            <section className="glass-panel db-card">
+              <div className="db-card-head">
+                <h3>Insurance</h3>
+                <button type="button" className="settings-link" onClick={() => onGo('assets', { search: 'Insurance' })}>See policies</button>
+              </div>
+              <div className="db-mini-stats">
+                <div><span className="cc-label">Total cover</span><strong>{formatINR(policies.reduce((s, p) => s + p.cover, 0))}</strong></div>
+                <div><span className="cc-label">Premiums a year</span><strong>{formatINR(policies.reduce((s, p) => s + p.yearly, 0))}</strong></div>
+                <div><span className="cc-label">Next renewal</span>
+                  <strong>{nextRenewal ? formatDate(nextRenewal.renewal) : '—'}</strong>
+                  {nextRenewal && <span className="cc-note">{nextRenewal.name}, in {daysUntil(nextRenewal.renewal)} days</span>}</div>
+              </div>
+            </section>
           )}
         </div>
 
-        {/* Right Side Actionable Recommendations Rules Panel */}
-        <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column' }}>
-          <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#f8fafc', marginBottom: '16px' }}>Decision Engine Recommendations</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flex: 1, overflowY: 'auto' }}>
-            {recommendations.length === 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', padding: '32px' }}>
-                <ShieldCheck size={36} style={{ color: 'var(--success)', marginBottom: '12px' }} />
-                <span style={{ fontSize: '13px', fontWeight: 500, color: '#f8fafc' }}>All Systems Healthy</span>
-                <span style={{ fontSize: '11px', textAlign: 'center', marginTop: '4px' }}>
-                  No warnings or emergency fund breaches detected.
-                </span>
+        <div className="db-col">
+          {/* What to do next */}
+          <section className="glass-panel db-card">
+            <div className="db-card-head">
+              <h3>What to do next</h3>
+              {personFilter !== 'all' && <span className="cc-note">For the whole household</span>}
+            </div>
+            {todo.length === 0 ? (
+              <div className="db-allgood"><ShieldCheck size={18} /> Nothing needs your attention right now.</div>
+            ) : (
+              <ol className="db-recs">
+                {todo.map((rec) => {
+                  const i = recommendations.indexOf(rec);
+                  const action = recAction(rec);
+                  return (
+                    <li key={i} className={`db-rec db-rec--${rec.status}`}>
+                      <div className="db-rec-title">
+                        <strong>{rec.title}</strong>
+                        {rec.rule_key && <InfoTooltip articles={data.knowledge_articles} ruleKey={rec.rule_key} />}
+                        <AIExplainButton aiConfigured={data.ai_provider !== 'none'} ruleKey={rec.rule_key || undefined}
+                          recommendationIndex={i} contextNote={`Dashboard recommendation: ${rec.category}`} />
+                      </div>
+                      <p>{rec.message}</p>
+                      {action && <button type="button" className="settings-link db-rec-action" onClick={() => runRec(rec)}>{action.label} <ArrowRight size={12} /></button>}
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+            {passed.length > 0 && (
+              <div className="db-passed">
+                <button type="button" className="settings-link" onClick={() => setShowPassed((v) => !v)} aria-expanded={showPassed}>
+                  {showPassed ? <ChevronDown size={12} /> : <ChevronRight size={12} />} {passed.length} check{passed.length === 1 ? '' : 's'} look{passed.length === 1 ? 's' : ''} good
+                </button>
+                {showPassed && <ul>{passed.map((r, k) => <li key={k}><strong>{r.title}.</strong> {r.message}</li>)}</ul>}
+              </div>
+            )}
+          </section>
+
+          {/* Goals */}
+          <section className="glass-panel db-card">
+            <div className="db-card-head">
+              <h3>Goals</h3>
+              {goals.length > 0 && <button type="button" className="settings-link" onClick={() => onGo('goals')}>All goals</button>}
+            </div>
+            {goals.length === 0 ? (
+              <div className="db-empty">
+                <p>Set a goal, such as an emergency fund, a child's education or retirement, to see how far along you are and when you'll get there.</p>
+                <button type="button" className="settings-btn" onClick={() => onCommand('new-goal')}><Plus size={12} /> Add a goal</button>
               </div>
             ) : (
-              recommendations.map((rec, i) => (
-                <div key={i} className={`rec-card border-${rec.status}`} style={{
-                  padding: '16px',
-                  borderRadius: '10px',
-                  background: 'rgba(255, 255, 255, 0.02)',
-                  borderLeft: `3px solid var(--${rec.status})`,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '8px'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: '12px', fontWeight: 600, color: `var(--${rec.status}-light)` }}>
-                      {rec.category.toUpperCase()}
-                    </span>
-                    {rec.status === 'danger' && <AlertTriangle size={14} style={{ color: 'var(--danger)' }} />}
-                    {rec.status === 'success' && <CheckCircle size={14} style={{ color: 'var(--success)' }} />}
-                  </div>
-                  <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    {rec.title}
-                    {rec.rule_key && <InfoTooltip articles={data.knowledge_articles} ruleKey={rec.rule_key} />}
-                    <AIExplainButton
-                      aiConfigured={data.ai_provider !== 'none'}
-                      ruleKey={rec.rule_key || undefined}
-                      recommendationIndex={i}
-                      contextNote={`Dashboard recommendation: ${rec.category}`}
-                    />
-                  </h4>
-                  <p style={{ fontSize: '11.5px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>{rec.message}</p>
-                  
-                  {rec.action_type !== 'info' && (
-                    <button 
-                      className={`btn btn-secondary`} 
-                      style={{ 
-                        alignSelf: 'flex-start', 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        gap: '6px', 
-                        fontSize: '11px', 
-                        padding: '4px 12px',
-                        marginTop: '4px',
-                        borderRadius: '6px',
-                        background: 'rgba(139, 92, 246, 0.1)',
-                        border: '1px solid rgba(139, 92, 246, 0.2)',
-                        color: '#a78bfa'
-                      }}
-                      onClick={() => handleRecommendationAction(rec)}
-                    >
-                      Optimize Now <ArrowRight size={12} />
-                    </button>
-                  )}
-                </div>
-              ))
+              <ul className="db-goals">
+                {topGoals.map((g) => {
+                  const p = Math.min(pct(g.current_amount, g.target_amount), 100);
+                  const never = !g.expected_date || g.expected_date === 'Never';
+                  return (
+                    <li key={g.id}>
+                      <div className="db-goal-line"><strong>{g.name}</strong><span>{formatINR(g.current_amount)} of {formatINR(g.target_amount)}</span></div>
+                      <div className="cc-meter"><div style={{ width: `${p}%`, background: p >= 100 ? 'var(--success)' : 'var(--accent)' }} /></div>
+                      <span className="cc-note" style={never && p < 100 ? { color: 'var(--warning)' } : undefined}>
+                        {p >= 100 ? 'Reached' : never ? 'Nothing going in each month yet' : `${p.toFixed(0)}% · on course for ${new Date(`${g.expected_date}T00:00:00`).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}`}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
-          </div>
+          </section>
         </div>
       </div>
     </div>

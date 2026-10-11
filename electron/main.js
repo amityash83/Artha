@@ -157,6 +157,7 @@ function buildMenu(isDev) {
             { label: 'Credit Card', click: send('new-credit-card') },
             { label: 'Income Entry', click: send('new-income') },
             { label: 'Expense Entry', click: send('new-expense') },
+            { label: 'Goal', click: send('new-goal') },
           ],
         },
         { type: 'separator' },

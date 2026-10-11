@@ -924,3 +924,71 @@ h1, h2, h3, h4, h5 {
 .eg-goal .cc-meter { width: 100%; display: block; }
 .eg-goal .cc-meter > span { display: block; height: 100%; border-radius: 3px; }
 .eg-form-foot { display: flex; justify-content: flex-end; margin-top: 10px; padding: 0 4px; }
+
+/* ---------------------------------------------------------------------------
+   Dashboard (components/Dashboard.tsx); reuses the cc-summary strip, eg-head and
+   settings links/buttons.
+   --------------------------------------------------------------------------- */
+.db-page { display: flex; flex-direction: column; gap: 22px; }
+.db-view { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); }
+.db-view select { font-size: 13px; padding: 6px 10px; }
+.db-summary { grid-template-columns: minmax(260px, 2fr) repeat(3, minmax(150px, 1fr)); margin-bottom: 0; }
+@media (max-width: 1000px) { .db-summary { grid-template-columns: 1fr 1fr; } }
+.db-networth { font-size: 26px; }
+.db-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr); gap: 22px; align-items: start; }
+@media (max-width: 1100px) { .db-grid { grid-template-columns: 1fr; } }
+.db-col { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+.db-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 22px; align-items: start; }
+.db-card { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+.db-card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.db-card-head h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.db-card-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--border-glass); padding-top: 10px; }
+.db-pill { font-size: 11.5px; padding: 2px 9px; border-radius: 10px; font-weight: 500; }
+.db-pill--success { background: var(--success-bg); color: var(--success); }
+.db-pill--warning { background: var(--warning-bg); color: var(--warning); }
+.db-pill--danger { background: var(--danger-bg); color: #fca5a5; }
+.db-reserve { display: flex; flex-direction: column; gap: 8px; }
+.db-facts { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+.db-facts strong { color: var(--text-primary); font-weight: 500; }
+.db-link { background: none; border: none; padding: 0; color: var(--accent-light); font: inherit; cursor: pointer; }
+.db-link:hover { text-decoration: underline; }
+.db-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.db-empty p { margin: 0; font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+.db-bars, .db-list, .db-goals, .db-recs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.db-bars { gap: 10px; }
+.db-bars li { display: grid; grid-template-columns: minmax(0, 1fr) 40px; grid-template-areas: "label pct" "bar bar"; gap: 4px 8px; }
+.db-bar-label { grid-area: label; display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--text-primary); min-width: 0; }
+.db-bar-label span { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.db-bar-pct { grid-area: pct; text-align: right; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.db-bar { grid-area: bar; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.06); overflow: hidden; }
+.db-bar > span { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.db-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border-glass); font-size: 13px; }
+.db-list li:first-child { border-top: none; padding-top: 0; }
+.db-list li > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.db-list li > span strong { font-weight: 500; color: var(--text-primary); }
+.db-list li > span span { font-size: 12px; color: var(--text-muted); }
+.db-list li > strong { font-weight: 500; color: var(--text-primary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.db-mini-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.db-mini-stats > div { display: flex; flex-direction: column; gap: 2px; }
+.db-mini-stats strong { font-size: 16px; color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+.db-allgood { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); }
+.db-allgood svg { color: var(--success); }
+.db-recs { gap: 0; }
+.db-rec { padding: 12px 0 12px 14px; border-left: 3px solid var(--text-muted); border-top: 1px solid var(--border-glass); }
+.db-rec:first-child { border-top: none; padding-top: 2px; }
+.db-rec--danger { border-left-color: var(--danger); }
+.db-rec--warning { border-left-color: var(--warning); }
+.db-rec--info { border-left-color: var(--info); }
+.db-rec-title { display: flex; align-items: center; gap: 6px; }
+.db-rec-title strong { font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
+.db-rec p { margin: 4px 0 0; font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; }
+.db-rec-action { margin-top: 6px; display: inline-flex; align-items: center; gap: 4px; padding-left: 0; }
+.db-passed { border-top: 1px solid var(--border-glass); padding-top: 10px; }
+.db-passed > button { display: inline-flex; align-items: center; gap: 4px; padding-left: 0; }
+.db-passed ul { margin: 8px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; display: flex; flex-direction: column; gap: 4px; }
+.db-passed strong { color: var(--text-primary); font-weight: 500; }
+.db-goals { gap: 14px; }
+.db-goals li { display: flex; flex-direction: column; gap: 6px; }
+.db-goal-line { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+.db-goal-line strong { font-weight: 500; color: var(--text-primary); }
+.db-goal-line span { color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
