@@ -5,6 +5,7 @@ import json
 import re
 import math
 import uuid
+import calendar
 from datetime import datetime, date
 from typing import List, Optional
 from contextlib import asynccontextmanager
@@ -250,6 +251,16 @@ class NetWorthForecastRequest(BaseModel):
 def get_init_data():
     conn = get_db_connection()
     cursor = conn.cursor()
+    # Post any automatic EMIs that have come due (cheap when there are none). Never lets a
+    # posting problem stop the app from loading.
+    try:
+        if post_due_emis(cursor):
+            conn.commit()
+        else:
+            conn.commit()  # may have stamped auto_emi_since
+    except Exception as e:
+        conn.rollback()
+        print("[Auto EMI] Posting skipped:", e)
     try:
         # Accounts (derived balances computed on the fly)
         cursor.execute("""
@@ -683,6 +694,77 @@ def adjust_double_entry_balances(cursor, t_type: str, amount: float, source_type
                        ((-amount if paid_from_own_money else amount) * factor, dest_id))
     if source_type == 'Liability' and source_id:
         cursor.execute("UPDATE liabilities SET outstanding = outstanding + ? WHERE id = ?", (amount * factor, source_id))
+
+AUTO_POSTED_NOTE = "posted automatically"
+
+
+def _loan_due_dates(day: int, after: date, upto: date) -> list:
+    """The EMI dates (day clamped to short months) strictly after `after`, up to `upto`."""
+    out, y, m = [], after.year, after.month
+    while date(y, m, 1) <= upto:
+        due = date(y, m, min(day, calendar.monthrange(y, m)[1]))
+        if after < due <= upto:
+            out.append(due)
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return out
+
+
+def post_due_emis(cursor, today: Optional[date] = None) -> list:
+    """Automatic EMIs, MMEX-style: for each loan with "Post EMI automatically" on (loan
+    metadata: auto_emi, emi_account_id, emi_day), post every EMI date that has come since
+    it was switched on: an Interest charge on the loan (the balance at the time x the
+    loan's rate / 12) and the EMI as a transfer from the chosen account, so the balance
+    falls by the principal. auto_emi_since (stamped the first time a loan is seen with it
+    on) means nothing before switching on is ever posted; auto_emi_last means nothing is
+    posted twice. Entries are ordinary ledger rows, labelled, editable and deletable.
+    Returns what was posted."""
+    today = today or date.today()
+    posted = []
+    cursor.execute("""SELECT l.id, l.name, l.outstanding, l.interest_rate, l.emi, l.metadata_json, c.name AS category
+                      FROM liabilities l LEFT JOIN categories c ON c.id = l.category_id""")
+    for loan in cursor.fetchall():
+        try:
+            meta = json.loads(loan["metadata_json"] or "{}")
+        except ValueError:
+            continue
+        if not meta.get("auto_emi") or loan["category"] == "Credit Card":
+            continue
+        if not meta.get("auto_emi_since"):
+            meta["auto_emi_since"] = today.isoformat()  # switched on: start from today
+            cursor.execute("UPDATE liabilities SET metadata_json = ? WHERE id = ?", (json.dumps(meta), loan["id"]))
+            continue
+        try:
+            day = int(meta.get("emi_day") or 0)
+            account_id = int(meta.get("emi_account_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not (1 <= day <= 31 and account_id and (loan["emi"] or 0) > 0):
+            continue
+        since = date.fromisoformat(meta["auto_emi_since"])
+        last = date.fromisoformat(meta["auto_emi_last"]) if meta.get("auto_emi_last") else None
+        after = max(date.fromordinal(since.toordinal() - 1), last) if last else date.fromordinal(since.toordinal() - 1)
+        for due in _loan_due_dates(day, after, today):
+            owed = cursor.execute("SELECT outstanding FROM liabilities WHERE id = ?", (loan["id"],)).fetchone()["outstanding"] or 0.0
+            if owed <= 0:
+                break
+            rate = float(loan["interest_rate"] or 0.0)
+            interest = round(owed * rate / 1200.0, 2)
+            month = due.strftime("%b %Y")
+            if interest > 0:
+                cursor.execute("""INSERT INTO transactions (source_ref_type, source_ref_id, dest_ref_type, dest_ref_id, type, amount, transaction_date, notes)
+                                  VALUES ('None', NULL, 'Liability', ?, 'Interest', ?, ?, ?)""",
+                               (loan["id"], interest, due.isoformat(), f"Interest for {month} at {rate:g}% ({AUTO_POSTED_NOTE})"))
+                adjust_double_entry_balances(cursor, "Interest", interest, "None", None, "Liability", loan["id"], "add")
+            emi = round(min(float(loan["emi"]), owed + interest), 2)  # the last EMI clears what's left
+            cursor.execute("""INSERT INTO transactions (source_ref_type, source_ref_id, dest_ref_type, dest_ref_id, type, amount, transaction_date, notes)
+                              VALUES ('Account', ?, 'Liability', ?, 'EMI', ?, ?, ?)""",
+                           (account_id, loan["id"], emi, due.isoformat(), f"EMI for {month} ({AUTO_POSTED_NOTE})"))
+            adjust_double_entry_balances(cursor, "EMI", emi, "Account", account_id, "Liability", loan["id"], "add")
+            meta["auto_emi_last"] = due.isoformat()
+            cursor.execute("UPDATE liabilities SET metadata_json = ? WHERE id = ?", (json.dumps(meta), loan["id"]))
+            posted.append({"loan": loan["name"], "date": due.isoformat(), "interest": interest, "emi": emi})
+    return posted
+
 
 def compute_real_cycle_spend_total(cursor, liability_id: int, statement_date) -> dict:
     """

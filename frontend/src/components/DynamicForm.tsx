@@ -20,6 +20,7 @@ interface DynamicFormProps {
   initialData?: any;
   liabilities?: Liability[];
   properties?: any[];
+  accounts?: { id: number; name: string }[];
   onSubmit: (data: any) => void;
   onCancel: () => void;
   /** Shown at the left of the footer, e.g. a delete action when editing. */
@@ -62,6 +63,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
   initialData,
   liabilities = [],
   properties = [],
+  accounts = [],
   onSubmit,
   onCancel,
   footerStart,
@@ -167,6 +169,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         standardFields['interest_rate'] = 'number';
         standardFields['emi'] = 'number';
         standardFields['emi_day'] = 'number'; // debit day, for the Financial Calendar
+        // Automatic EMIs (backend post_due_emis): interest charged + EMI transferred each debit day.
+        standardFields['auto_emi'] = 'checkbox';
+        standardFields['emi_account_id'] = 'account_select';
         standardFields['tenure_months'] = 'number';
         standardFields['status'] = 'select_status';
         standardFields['owner_id'] = 'person_select';
@@ -254,7 +259,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       } else if (type === 'select_frequency') {
         defaultData[k] = isInsurance ? 'Yearly' : 'Monthly';
       } else if (type === 'checkbox') {
-        defaultData[k] = k === 'low_risk_only' ? 0 : 1;
+        defaultData[k] = k === 'low_risk_only' || k === 'auto_emi' ? 0 : 1;
       } else if (type === 'select_fund_type') {
         defaultData[k] = '';
       } else if (type === 'select_epf_status') {
@@ -354,6 +359,10 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
     if (entityType === 'goals') {
       payload.funding_constraints = fundingConstraints;
     }
+    if (entityType === 'liabilities' && !Number(payload.auto_emi)) {
+      // Switched off: forget the start date, so switching on again starts from that day.
+      delete payload.auto_emi_since;
+    }
     if (isEpf) {
       // EPF balance = your share + the employer's; the pension (EPS) part isn't counted.
       // A transferred account's money now sits in the current one, so it counts as nil.
@@ -401,6 +410,8 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       interest_rate: 'Interest rate',
       emi: 'Monthly EMI',
       emi_day: 'EMI debit day',
+      auto_emi: 'Post EMI automatically',
+      emi_account_id: 'Paid from',
       tenure_months: 'Original tenure',
       premium: 'Premium',
       frequency: entityType === 'assets' ? 'Paid' : 'How often',
@@ -443,6 +454,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
     statement_balance: 'The amount on your most recent statement.',
     tenure_months: 'The full term when the loan began.',
     emi_day: 'The day the EMI leaves your account (ECS/NACH). The Financial Calendar uses it.',
+    auto_emi: 'On each EMI day, Artha records the month\'s interest on the loan and the EMI from "Paid from", like your bank\'s loan statement. It starts from the day you switch this on; entries can be edited or deleted in the Transactions Ledger.',
     goal_mapping: 'Counts this asset towards one of your goals.',
     linked_asset_id: 'A property can carry more than one loan, such as a home loan and a top-up.',
     surrender_value: 'What the insurer would pay if you surrendered the policy today.',
@@ -536,6 +548,11 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         </div>
       );
       return HINTS[k] ? <div key={k} className="df-field df-wide">{toggle}<span className="df-hint">{HINTS[k]}</span></div> : toggle;
+    }
+    if (type === 'account_select') {
+      return field(k, select(k, formData[k] || '', (v) => handleChange(k, toId(v)), [
+        { value: '', label: accounts.length ? 'Choose an account' : 'Add a bank account first' }, ...accounts.map((a) => ({ value: a.id, label: a.name })),
+      ]));
     }
     if (type === 'goal_select') {
       return field(k, select(k, formData[k] || '', (v) => handleChange(k, v), [

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Category, Institution, Asset, Liability, Goal, Person } from '../types';
+import { Account, Category, Institution, Asset, Liability, Goal, Person } from '../types';
 import { DynamicForm } from './DynamicForm';
 import { Plus, Search } from 'lucide-react';
 import { ConfirmAction } from './settings/ui';
@@ -16,6 +16,8 @@ interface EntityGridProps {
   goals?: Goal[];
   liabilities?: Liability[];
   properties?: Asset[];
+  /** Bank accounts, for a loan's "Paid from" (automatic EMIs). */
+  accounts?: Account[];
   onRefresh: () => void;
   showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
   /** Open the add form (from "+ New", Go-to search or the desktop menu); each new value re-opens it. */
@@ -177,6 +179,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
   goals,
   liabilities = [],
   properties = [],
+  accounts = [],
   onRefresh,
   showToast,
   addRequest,
@@ -608,6 +611,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
               initialData={editingEntity}
               liabilities={liabilities}
               properties={properties}
+              accounts={accounts}
               onSubmit={handleFormSubmit}
               onCancel={closeForm}
               footerStart={editingEntity && (

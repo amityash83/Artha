@@ -100,8 +100,10 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
         related_entity_id = t.dest_ref_id;
         break;
       case 'Spend':
-        // No account is involved (source_ref_type='None') — a card charge isn't
-        // paid from a cash account at the moment it's made.
+      case 'Interest':
+      case 'Fee':
+        // No account is involved (source_ref_type='None'): a card charge, or interest or a
+        // fee charged to a loan, raises what's owed without moving cash.
         related_entity_type = 'Liability';
         related_entity_id = t.dest_ref_id;
         break;
@@ -155,14 +157,15 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
     e.preventDefault();
     // Spend has no account (a card charge doesn't touch a cash account) — every
     // other type still requires one.
-    if ((type !== 'Spend' && !accountId) || !amount || !date) {
+    const isCharge = type === 'Spend' || type === 'Interest' || type === 'Fee'; // no account involved
+    if ((!isCharge && !accountId) || !amount || !date) {
       if (showToast) showToast("Please fill in all required fields.", "error");
       else alert("Please fill in all required fields.");
       return;
     }
-    if (type === 'Spend' && !counterpartId) {
-      if (showToast) showToast("Please select a card.", "error");
-      else alert("Please select a card.");
+    if (isCharge && !counterpartId) {
+      if (showToast) showToast(type === 'Spend' ? "Please select a card." : "Please select the loan or card.", "error");
+      else alert("Please select a loan or card.");
       return;
     }
 
@@ -179,7 +182,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
     } else if (type === 'Investment' || type === 'Redemption') {
       relatedEntityType = 'Asset';
       relatedEntityId = parsedCounterpartId;
-    } else if (type === 'EMI' || type === 'Prepayment') {
+    } else if (type === 'EMI' || type === 'Prepayment' || type === 'Interest' || type === 'Fee') {
       relatedEntityType = 'Liability';
       relatedEntityId = parsedCounterpartId;
     } else if (type === 'Spend') {
@@ -193,7 +196,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
     }
 
     const payload = {
-      account_id: type === 'Spend' ? null : parseInt(accountId),
+      account_id: isCharge ? null : parseInt(accountId),
       type,
       amount: parseFloat(amount),
       transaction_date: date,
@@ -252,7 +255,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
     if (tx.type === 'Spend') {
       setCounterpartId(tx.related_entity_id?.toString() || '');
       setSpendCategoryId(tx.category_id?.toString() || '');
-    } else if (tx.type === 'Transfer' || tx.type === 'Investment' || tx.type === 'Redemption' || tx.type === 'EMI' || tx.type === 'Prepayment') {
+    } else if (['Transfer', 'Investment', 'Redemption', 'EMI', 'Prepayment', 'Interest', 'Fee'].includes(tx.type)) {
       setCounterpartId(tx.related_entity_id?.toString() || '');
     } else {
       setCounterpartId(tx.category_id?.toString() || '');
@@ -299,9 +302,11 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
   const TYPE_LABELS: Record<string, string> = {
     Debit: 'Money out', Credit: 'Money in', Transfer: 'Transfer between accounts', Investment: 'Invest in an asset',
     Redemption: 'Sell or redeem an asset', EMI: 'Loan EMI', Prepayment: 'Loan prepayment or card bill', Spend: 'Card spend',
+    Interest: 'Loan interest', Fee: 'Loan or card charge',
   };
   const MONEY_IN = ['Credit', 'Redemption'];
-  const NEUTRAL = ['Transfer'];
+  // Not cash in or out: a transfer between your own accounts, or a charge on a loan/card.
+  const NEUTRAL = ['Transfer', 'Interest', 'Fee'];
 
   const accountName = (id: number) => data.accounts.find((a) => a.id === id)?.name;
   const categoryName = (id?: number) => (id ? data.categories.find((c) => c.id === id)?.name : undefined);
@@ -317,11 +322,13 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
       case 'EMI': return `EMI: ${debt()}`;
       case 'Prepayment': return `Paid off ${debt()}`;
       case 'Spend': return categoryName(tx.category_id) ?? 'Card spend';
+      case 'Interest': return `Interest: ${debt()}`;
+      case 'Fee': return `Charge: ${debt()}`;
       default: return categoryName(tx.category_id) ?? tx.notes ?? (tx.type === 'Credit' ? 'Money in' : 'Money out');
     }
   };
   /** Which account (or card) it touched. */
-  const where = (tx: Transaction) => (tx.type === 'Spend'
+  const where = (tx: Transaction) => (['Spend', 'Interest', 'Fee'].includes(tx.type)
     ? data.liabilities.find((l) => l.id === tx.related_entity_id)?.name ?? 'A card'
     : accountName(tx.account_id) ?? 'An account');
 
@@ -441,7 +448,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
                     </select>
                   </div>
 
-                  {type !== 'Spend' && (
+                  {!['Spend', 'Interest', 'Fee'].includes(type) && (
                     <div className="df-field">
                       <label htmlFor="tx-account" className="df-label">{type === 'Credit' || type === 'Redemption' ? 'Into account' : 'From account'}</label>
                       <select id="tx-account" className="form-control" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
@@ -470,7 +477,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
                     </div>
                   )}
 
-                  {(type === 'EMI' || type === 'Prepayment') && (
+                  {['EMI', 'Prepayment', 'Interest', 'Fee'].includes(type) && (
                     <div className="df-field">
                       <label htmlFor="tx-debt" className="df-label">Loan or card</label>
                       <select id="tx-debt" className="form-control" required value={counterpartId} onChange={(e) => setCounterpartId(e.target.value)}>

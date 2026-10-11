@@ -335,6 +335,7 @@ const App: React.FC = () => {
             people={data.people}
             goals={data.goals}
             liabilities={data.liabilities}
+            accounts={data.accounts}
             properties={data.assets.filter((a) => a.category_name === 'Property')}
             onRefresh={fetchFinanceData}
             showToast={showToast}
