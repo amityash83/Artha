@@ -24,8 +24,8 @@ const formatCurrency = (val: number) => new Intl.NumberFormat('en-IN', { style: 
 
 export const CompareCardsTab: React.FC<CompareCardsTabProps> = ({ ownedCards, cardVariants, showToast, preselectLiabilityId }) => {
   const items: SelectableItem[] = [
-    ...ownedCards.map((c) => ({ key: `owned-${c.id}`, id: c.id, source: 'owned' as const, label: `My Cards: ${c.name}` })),
-    ...cardVariants.map((v) => ({ key: `library-${v.id}`, id: v.id, source: 'library' as const, label: `Card Library: ${v.name}` })),
+    ...ownedCards.map((c) => ({ key: `owned-${c.id}`, id: c.id, source: 'owned' as const, label: c.name })),
+    ...cardVariants.map((v) => ({ key: `library-${v.id}`, id: v.id, source: 'library' as const, label: v.name })),
   ];
 
   const [selectedKeys, setSelectedKeys] = useState<string[]>(
@@ -81,12 +81,16 @@ export const CompareCardsTab: React.FC<CompareCardsTabProps> = ({ ownedCards, ca
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <div className="glass-panel" style={{ padding: '20px' }}>
-        <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '12px' }}>Select 2-5 Cards</h3>
+        <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '12px' }}>Choose 2 to 5 cards to compare</h3>
         {items.length === 0 ? (
           <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>No cards available — register a card or add a Card Library entry first.</div>
         ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {(['owned', 'library'] as const).filter((src) => items.some((it) => it.source === src)).map((src) => (
+          <div key={src}>
+          <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.5px', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '6px' }}>{src === 'owned' ? 'Your cards' : 'Card library'}</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-            {items.map((item) => {
+            {items.filter((it) => it.source === src).map((item) => {
               const selected = selectedKeys.includes(item.key);
               return (
                 <button
@@ -105,11 +109,14 @@ export const CompareCardsTab: React.FC<CompareCardsTabProps> = ({ ownedCards, ca
               );
             })}
           </div>
+          </div>
+          ))}
+          </div>
         )}
       </div>
 
       <div className="glass-panel" style={{ padding: '20px' }}>
-        <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '12px' }}>Scoring Weights &amp; Assumptions</h3>
+        <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '12px' }}>What matters most to you</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px' }}>
           {WEIGHT_KEYS.map(({ key, label }) => (
             <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>

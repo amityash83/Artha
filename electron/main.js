@@ -154,6 +154,7 @@ function buildMenu(isDev) {
             { label: 'Account', click: send('new-account') },
             { label: 'Asset or Investment', click: send('new-asset') },
             { label: 'Loan', click: send('new-loan') },
+            { label: 'Credit Card', click: send('new-credit-card') },
             { label: 'Income Entry', click: send('new-income') },
             { label: 'Expense Entry', click: send('new-expense') },
           ],

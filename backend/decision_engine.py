@@ -357,6 +357,6 @@ def generate_credit_card_annual_reviews(conn, liability_id: int = None) -> list:
             "lounge_utilization": round(lounge_utilization, 2) if lounge_utilization is not None else None,
             "reason": reason,
             "next_review_date": renewal_dt.isoformat() if renewal_dt else None,
-            "caveat": "Based on manually-entered aggregate fields (points balance, statement spend, fee); a per-transaction spend ledger now exists in Artha but this review doesn't yet incorporate it.",
+            "caveat": "Based on the card's points balance, fee and the spend figures entered on the card, not on individual transactions.",
         })
     return reviews

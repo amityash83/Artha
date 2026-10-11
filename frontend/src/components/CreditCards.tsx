@@ -1,19 +1,18 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import {
-  CreditCard as CardIcon, Plus, Edit2, Trash2, ShieldAlert,
-  X, Sparkles
-} from 'lucide-react';
-import { InitData, CategoryMultiplierRule, MilestoneThresholdRule, RedemptionPartnerRatio, CapRule, SpendBreakdown } from '../types';
+import { Plus, X } from 'lucide-react';
+import { InitData, CategoryMultiplierRule, MilestoneThresholdRule, RedemptionPartnerRatio, CapRule, SpendBreakdown, CreditCardAnnualReview } from '../types';
 import { API_BASE_URL } from '../config';
 import { useModalA11y } from '../hooks/useModalA11y';
 import { CardLibraryTab } from './creditcards/CardLibraryTab';
 import { CompareCardsTab } from './creditcards/CompareCardsTab';
-import { AnnualReviewTab } from './creditcards/AnnualReviewTab';
+import { CardRow, CardsSummary } from './creditcards/MyCards';
 
 interface CreditCardsProps {
   data: InitData;
   onRefresh: () => void;
   showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
+  /** Open the "Add card" form (from "+ New", Go-to search or the desktop menu). */
+  addRequest?: number;
 }
 
 const CAP_PERIODS: CapRule['period'][] = ['daily', 'monthly', 'quarterly', 'statement_cycle', 'annual'];
@@ -109,7 +108,7 @@ const PRESETS = [
   }
 ];
 
-export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showToast }) => {
+export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showToast, addRequest }) => {
   const { liabilities = [], categories = [], institutions = [], people = [] } = data;
   const primaryOwnerId = (people.find((p) => p.role === 'Primary Owner') ?? people[0])?.id;
 
@@ -134,14 +133,21 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
     });
   }, [creditCards]);
 
-  const [activeSubTab, setActiveSubTab] = useState<
-    'inventory' | 'milestones' | 'calculator' | 'library' | 'compare' | 'annual-review'
-  >('inventory');
+  const [view, setView] = useState<'mine' | 'research'>('mine');
+  const [researchTab, setResearchTab] = useState<'which' | 'compare' | 'library'>('which');
+  const [expandedId, setExpandedId] = useState<number | null>(null);
   const [comparePreselect, setComparePreselect] = useState<number | null>(null);
+  // "Worth the fee?" verdicts, shown inside each card's details.
+  const [reviews, setReviews] = useState<CreditCardAnnualReview[]>([]);
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/api/credit-cards/annual-review`).then((r) => r.json()).then(setReviews).catch(() => setReviews([]));
+  }, [creditCards]);
+  useEffect(() => { if (addRequest) handleOpenAdd(); }, [addRequest]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCompareAlternatives = (liabilityId: number) => {
     setComparePreselect(liabilityId);
-    setActiveSubTab('compare');
+    setView('research');
+    setResearchTab('compare');
   };
   
   // Modals & Overlay forms
@@ -149,7 +155,6 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
   const [editingCard, setEditingCard] = useState<any | null>(null);
   const [spendBreakdown, setSpendBreakdown] = useState<SpendBreakdown | null>(null);
   const modalRef = useModalA11y(modalOpen, () => setModalOpen(false));
-  const [deletingCardId, setDeletingCardId] = useState<number | null>(null);
   
   // Overlay Tab navigation
   const [activeModalTab, setActiveModalTab] = useState<'general' | 'rates' | 'categories' | 'milestones' | 'partners'>('general');
@@ -359,8 +364,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
       });
       if (res.ok) {
         onRefresh();
-        setDeletingCardId(null);
-        if (showToast) showToast("Credit Card deleted successfully", "success");
+        if (showToast) showToast("Card removed", "success");
       }
     } catch (err) {
       console.error(err);
@@ -438,7 +442,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
         });
         setModalOpen(false);
         onRefresh();
-        if (showToast) showToast(isEdit ? "Card configuration saved" : "Credit Card registered", "success");
+        if (showToast) showToast(isEdit ? "Card saved" : "Card added", "success");
       }
     } catch (err) {
       console.error(err);
@@ -497,36 +501,6 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
     setNewPartnerRatio(1.0);
     setNewPartnerPointValue('');
   };
-
-  // Summary Metrics calculations
-  const metrics = useMemo(() => {
-    let totalLimit = 0;
-    let totalOutstanding = 0;
-    let totalRewardValue = 0;
-    let totalFees = 0;
-
-    creditCards.forEach((c: any) => {
-      totalOutstanding += c.outstanding || 0;
-      // credit_card_details columns are flattened directly onto the liability object
-      // by /api/init — no metadata_json parsing needed.
-      const meta = c;
-      totalLimit += Number(meta.credit_limit || 0);
-      
-      const pts = Number(meta.reward_points || 0);
-      const val = Number(meta.point_value || 0.25);
-      totalRewardValue += pts * val;
-      
-      totalFees += Number(meta.annual_fee || 0);
-    });
-
-    return {
-      totalLimit,
-      totalOutstanding,
-      totalRewardValue,
-      totalFees,
-      utilizationRate: totalLimit > 0 ? (totalOutstanding / totalLimit) * 100 : 0
-    };
-  }, [creditCards]);
 
   // --- MATHEMATICAL REWARD CALCULATOR SIMULATOR ENGINE ---
   const calculatorRecommendations = useMemo(() => {
@@ -700,16 +674,6 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
     }).sort((a, b) => b.rewardValueInr - a.rewardValueInr);
   }, [creditCards, calcCategory, calcAmount, redemptionStrategy, spendBreakdownsByCard]);
 
-  const getNetworkIconText = (networkStr: string) => {
-    const net = networkStr.toLowerCase();
-    if (net.includes('visa')) return 'VISA';
-    if (net.includes('master') || net.includes('mc')) return 'mastercard';
-    if (net.includes('rupay')) return 'RuPay';
-    if (net.includes('amex') || net.includes('american')) return 'AMEX';
-    if (net.includes('diner')) return 'Diners Club';
-    return networkStr;
-  };
-
   const getInstitutionName = (id: number) => {
     const inst = institutions.find(i => i.id === id);
     return inst ? inst.name : 'Unknown Bank';
@@ -723,561 +687,118 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
     }).format(val);
   };
 
-  const getCardTheme = (networkStr: string, index: number) => {
-    const themes = [
-      { bg: 'linear-gradient(135deg, #1e1b4b 0%, #311042 50%, #090514 100%)', border: 'rgba(168, 85, 247, 0.45)', glow: 'rgba(168, 85, 247, 0.2)' },
-      { bg: 'linear-gradient(135deg, #090d16 0%, #152238 60%, #020509 100%)', border: 'rgba(56, 189, 248, 0.4)', glow: 'rgba(56, 189, 248, 0.15)' },
-      { bg: 'linear-gradient(135deg, #1c1917 0%, #2e2a24 60%, #0c0a09 100%)', border: 'rgba(251, 191, 36, 0.45)', glow: 'rgba(251, 191, 36, 0.15)' },
-      { bg: 'linear-gradient(135deg, #022c22 0%, #064e3b 60%, #020617 100%)', border: 'rgba(16, 185, 129, 0.4)', glow: 'rgba(16, 185, 129, 0.15)' }
-    ];
-
-    if (networkStr.toLowerCase() === 'amex') {
-      return { bg: 'linear-gradient(135deg, #113c4c 0%, #1c5e73 60%, #041217 100%)', border: 'rgba(34, 211, 238, 0.45)', glow: 'rgba(34, 211, 238, 0.2)' };
-    }
-    if (networkStr.toLowerCase() === 'diners') {
-      return { bg: 'linear-gradient(135deg, #2e0854 0%, #171544 70%, #03001e 100%)', border: 'rgba(236, 72, 153, 0.45)', glow: 'rgba(236, 72, 153, 0.2)' };
-    }
-
-    return themes[index % themes.length];
-  };
+  const bankName = (card: any) => card.lender_name || getInstitutionName(card.lender_institution_id);
+  const reviewFor = (id: number) => reviews.find((r) => r.liability_id === id);
 
   return (
-    <div style={{ paddingBottom: '40px', fontFamily: 'Inter, sans-serif' }}>
-      {/* Page Header */}
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div style={{ paddingBottom: '40px' }}>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '16px', flexWrap: 'wrap' }}>
         <div>
-          <h1 className="page-title">Credit Card Earning &amp; Optimization Engine</h1>
-          <p className="page-subtitle">Simulate incremental spending, evaluate step-up milestone thresholds, and optimize reward yield rates.</p>
+          <h1 className="page-title">Credit Cards</h1>
+          <p className="page-subtitle">What you owe on each card, the rewards you hold, and which card earns the most for a purchase.</p>
         </div>
-        <button 
-          className="btn btn-primary" 
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '8px 16px' }}
-          onClick={handleOpenAdd}
-        >
-          <Plus size={16} />
-          Register Credit Card
+        <button className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '8px 14px' }} onClick={handleOpenAdd}>
+          <Plus size={15} /> Add card
         </button>
       </div>
 
-      {/* Top Indicators Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px', marginBottom: '24px' }}>
-        <div className="glass-card" style={{ padding: '16px 20px' }}>
-          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Combined Credit Limit</span>
-          <h3 style={{ fontSize: '22px', fontWeight: 700, margin: '6px 0 2px 0', color: 'var(--text-primary)' }}>
-            {formatCurrency(metrics.totalLimit)}
-          </h3>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Aggregate purchase capacity</span>
-        </div>
-
-        <div className="glass-card" style={{ padding: '16px 20px' }}>
-          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Total Outstanding Balance</span>
-          <h3 style={{ fontSize: '22px', fontWeight: 700, margin: '6px 0 2px 0', color: '#f87171' }}>
-            {formatCurrency(metrics.totalOutstanding)}
-          </h3>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-            Combined Utilization: <strong style={{ color: metrics.utilizationRate > 30 ? 'var(--warning-light)' : 'var(--success-light)' }}>{metrics.utilizationRate.toFixed(1)}%</strong>
-          </span>
-        </div>
-
-        <div className="glass-card" style={{ padding: '16px 20px' }}>
-          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Points Cash Value (INR)</span>
-          <h3 style={{ fontSize: '22px', fontWeight: 700, margin: '6px 0 2px 0', color: 'var(--success-light)' }}>
-            {formatCurrency(metrics.totalRewardValue)}
-          </h3>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Total unredeemed rewards value</span>
-        </div>
-
-        <div className="glass-card" style={{ padding: '16px 20px' }}>
-          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Total Annual Fees</span>
-          <h3 style={{ fontSize: '22px', fontWeight: 700, margin: '6px 0 2px 0', color: 'var(--warning-light)' }}>
-            {formatCurrency(metrics.totalFees)}
-          </h3>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Yearly card maintenance cost</span>
-        </div>
+      <div role="tablist" aria-label="Credit card views" className="cc-views">
+        {([['mine', 'My cards'], ['research', 'Find the best card']] as const).map(([id, label]) => (
+          <button key={id} type="button" role="tab" aria-selected={view === id} className="cc-view" onClick={() => setView(id)}>{label}</button>
+        ))}
       </div>
 
-      {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border-glass)', marginBottom: '24px', gap: '8px' }}>
-        <button 
-          className={`tab-btn ${activeSubTab === 'inventory' ? 'active' : ''}`}
-          onClick={() => setActiveSubTab('inventory')}
-          style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === 'inventory' ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === 'inventory' ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
-        >
-          Card Inventory
-        </button>
-        <button 
-          className={`tab-btn ${activeSubTab === 'milestones' ? 'active' : ''}`}
-          onClick={() => setActiveSubTab('milestones')}
-          style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === 'milestones' ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === 'milestones' ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
-        >
-          Waivers &amp; Milestones
-        </button>
-        <button
-          className={`tab-btn ${activeSubTab === 'calculator' ? 'active' : ''}`}
-          onClick={() => setActiveSubTab('calculator')}
-          style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === 'calculator' ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === 'calculator' ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
-        >
-          Smart Rewards Simulator
-        </button>
-        <button
-          className={`tab-btn ${activeSubTab === 'library' ? 'active' : ''}`}
-          onClick={() => setActiveSubTab('library')}
-          style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === 'library' ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === 'library' ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
-        >
-          Card Library
-        </button>
-        <button
-          className={`tab-btn ${activeSubTab === 'compare' ? 'active' : ''}`}
-          onClick={() => setActiveSubTab('compare')}
-          style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === 'compare' ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === 'compare' ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
-        >
-          Compare Cards
-        </button>
-        <button
-          className={`tab-btn ${activeSubTab === 'annual-review' ? 'active' : ''}`}
-          onClick={() => setActiveSubTab('annual-review')}
-          style={{ padding: '10px 16px', background: 'none', border: 'none', color: activeSubTab === 'annual-review' ? '#fff' : 'var(--text-muted)', borderBottom: activeSubTab === 'annual-review' ? '2px solid var(--accent)' : 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
-        >
-          Annual Review
-        </button>
-      </div>
-
-      {/* --- INVENTORY --- */}
-      {activeSubTab === 'inventory' && (
-        <div>
-          {creditCards.length === 0 ? (
-            <div style={{ padding: '48px', textAlign: 'center', background: 'rgba(255,255,255,0.01)', border: '1px dashed var(--border-glass)', borderRadius: '12px', color: 'var(--text-muted)' }}>
-              <CardIcon size={36} style={{ marginBottom: '12px', opacity: 0.5 }} />
-              <h4>No Credit Cards Registered</h4>
-              <p style={{ fontSize: '13px', margin: '4px 0 16px 0' }}>Configure card reward rates and step-ups to simulate incremental spending optimizations.</p>
-              <button className="btn btn-primary" onClick={handleOpenAdd}>Add Credit Card</button>
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px' }}>
-              {creditCards.map((card: any, idx) => {
-                const meta = card;
-                const limit = Number(meta.credit_limit || 0);
-                const fee = Number(meta.annual_fee || 0);
-                const pts = Number(meta.reward_points || 0);
-                const ptVal = Number(meta.point_value || 0.25);
-                const theme = getCardTheme(meta.network || 'Visa', idx);
-                
-                const rewardVal = pts * ptVal;
-                const netYield = fee > 0 ? rewardVal - fee : rewardVal;
-                const isLowYield = fee > 0 && rewardVal < fee;
-                const isDeleting = deletingCardId === card.id;
-
-                const domLimit = Number(meta.lounge_visits_limit || 0);
-                const domUsed = Number(meta.lounge_visits_used || 0);
-                const intLimit = Number(meta.lounge_int_limit || 0);
-                const intUsed = Number(meta.lounge_int_used || 0);
-
-                return (
-                  <div key={card.id} style={{ display: 'flex', flexDirection: 'column', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border-glass)', background: 'rgba(255,255,255,0.015)' }}>
-                    
-                    {/* SECTION 1: PHYSICAL CREDIT CARD FACE */}
-                    <div 
-                      style={{ 
-                        height: '190px', 
-                        background: theme.bg, 
-                        borderBottom: `1px solid ${theme.border}`,
-                        boxShadow: `inset 0 0 20px rgba(255,255,255,0.05)`,
-                        padding: '20px', 
-                        display: 'flex', 
-                        flexDirection: 'column', 
-                        justifyContent: 'space-between',
-                        position: 'relative',
-                        overflow: 'hidden',
-                        transition: 'transform 0.3s ease, box-shadow 0.3s ease',
-                        cursor: 'pointer'
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.transform = 'translateY(-4px)';
-                        e.currentTarget.style.boxShadow = `0 12px 24px -8px ${theme.border}`;
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.transform = 'none';
-                        e.currentTarget.style.boxShadow = `inset 0 0 20px rgba(255,255,255,0.05)`;
-                      }}
-                    >
-                      {/* Holographic light reflection diagonal overlay */}
-                      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.05) 45%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.05) 55%, transparent 70%)', pointerEvents: 'none', transform: 'scale(1.5)' }}></div>
-
-                      {/* Card Top: Bank Name & Network Badge */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 1 }}>
-                        <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.7)', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
-                          {getInstitutionName(card.lender_institution_id)}
-                        </span>
-                        {isLowYield && (
-                          <div style={{ background: 'rgba(239, 68, 68, 0.85)', padding: '2px 8px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '9px', color: '#fff', fontWeight: 700 }}>
-                            <ShieldAlert size={10} />
-                            Low Yield
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Card Middle: Chip & Contactless logo */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 1, marginTop: '10px' }}>
-                        <div style={{ width: '40px', height: '30px', background: 'linear-gradient(135deg, #e5c060 0%, #f9e8a2 50%, #d4af37 100%)', borderRadius: '6px', border: '1px solid rgba(0,0,0,0.2)', position: 'relative', boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.3)' }}>
-                          <div style={{ position: 'absolute', top: 0, left: '13px', right: '13px', bottom: 0, borderLeft: '1px solid rgba(0,0,0,0.15)', borderRight: '1px solid rgba(0,0,0,0.15)' }}></div>
-                          <div style={{ position: 'absolute', top: '10px', left: 0, right: 0, bottom: '10px', borderTop: '1px solid rgba(0,0,0,0.15)', borderBottom: '1px solid rgba(0,0,0,0.15)' }}></div>
-                        </div>
-                        {/* Spaced card number suffix */}
-                        <div style={{ fontSize: '16px', fontWeight: 600, letterSpacing: '2px', color: 'rgba(255,255,255,0.85)', fontFamily: 'monospace', textShadow: '1px 1px 2px rgba(0,0,0,0.6)' }}>
-                          •••• &nbsp; •••• &nbsp; •••• &nbsp; {card.name.match(/\d{4}$/) ? card.name.match(/\d{4}$/)[0] : card.id.toString().padStart(4, '0')}
-                        </div>
-                      </div>
-
-                      {/* Card Bottom: Holder Name & Network Logo */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', zIndex: 1 }}>
-                        <div style={{ display: 'flex', flexDirection: 'column' }}>
-                          <span style={{ fontSize: '7px', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Cardholder Name</span>
-                          <span style={{ fontSize: '13px', fontWeight: 600, color: '#fff', textTransform: 'uppercase', letterSpacing: '1px', textShadow: '0 1px 1px rgba(0,0,0,0.5)' }}>
-                            {card.remarks && card.remarks.length < 20 ? card.remarks : "VALUED CUSTOMER"}
-                          </span>
-                        </div>
-                        <span style={{ color: '#fff', fontSize: '13px', fontWeight: 900, letterSpacing: '0.5px', textTransform: 'uppercase', fontFamily: 'monospace', opacity: 0.8, textShadow: '0 1px 2px rgba(0,0,0,0.4)' }}>
-                          {getNetworkIconText(meta.network || 'Visa')}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* SECTION 2: DETAILED STATS PANEL */}
-                    <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px', background: 'rgba(255,255,255,0.015)' }}>
-                      {/* Outstanding vs Available Limit */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                        <div>
-                          <span style={{ fontSize: '9px', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '2px' }}>Outstanding</span>
-                          <span style={{ fontSize: '15px', fontWeight: 700, color: card.outstanding > 0 ? '#f87171' : 'var(--text-primary)' }}>
-                            {formatCurrency(card.outstanding)}
-                          </span>
-                        </div>
-                        <div>
-                          <span style={{ fontSize: '9px', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '2px' }}>Available Limit</span>
-                          <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--success-light)' }}>
-                            {formatCurrency(Math.max(limit - card.outstanding, 0))}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Limit Progress Bar */}
-                      <div>
-                        <div style={{ height: '5px', background: 'rgba(255,255,255,0.04)', borderRadius: '2.5px', overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${Math.min((card.outstanding / (limit || 1)) * 100, 100)}%`, background: card.outstanding / limit > 0.4 ? 'var(--danger)' : 'var(--accent)' }}></div>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                          <span>Total Limit: {formatCurrency(limit)}</span>
-                          <span>Bill Cycle Day: {meta.statement_date || 15}th</span>
-                        </div>
-                      </div>
-
-                      {/* Statement Spend & Statement Day Info */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', borderTop: '1px solid var(--border-glass)', paddingTop: '10px' }}>
-                        <span style={{ color: 'var(--text-secondary)' }}>Current Statement Spend</span>
-                        <strong style={{ color: '#60a5fa' }}>{formatCurrency(meta.has_spend_transactions ? meta.real_cycle_spend_total : (meta.current_statement_spend || 0))}</strong>
-                      </div>
-
-                      {/* Reward Points and Yield Calculation */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', borderTop: '1px solid var(--border-glass)', paddingTop: '10px' }}>
-                        <div>
-                          <span style={{ color: 'var(--text-secondary)', display: 'block' }}>Reward Points Balance</span>
-                          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>({pts.toLocaleString()} points @ ₹{ptVal})</span>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <span style={{ fontWeight: 600, color: '#fcd34d' }}>{formatCurrency(rewardVal)} Value</span>
-                          <span style={{ display: 'block', fontSize: '9px', color: netYield >= 0 ? 'var(--success-light)' : '#f87171' }}>
-                            Net Yield: {formatCurrency(netYield)}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Lounge Quick Status */}
-                      {(domLimit > 0 || intLimit > 0) && (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10px', borderTop: '1px solid var(--border-glass)', paddingTop: '10px', color: 'var(--text-muted)' }}>
-                          <span>Lounges Left:</span>
-                          <div style={{ display: 'flex', gap: '8px' }}>
-                            {domLimit > 0 && <span>Dom: <strong>{Math.max(domLimit - domUsed, 0)}</strong></span>}
-                            {intLimit > 0 && <span>Intl: <strong>{Math.max(intLimit - intUsed, 0)}</strong></span>}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Actions Footer */}
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border-glass)', paddingTop: '12px', marginTop: '4px' }}>
-                        {isDeleting ? (
-                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', width: '100%', justifyContent: 'space-between' }}>
-                            <span style={{ color: 'var(--danger-light)', fontSize: '11px', fontWeight: 500 }}>Confirm Deletion?</span>
-                            <div style={{ display: 'flex', gap: '6px' }}>
-                              <button type="button" className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '11px', background: 'rgba(239,68,68,0.2)', color: '#ef4444' }} onClick={() => handleDeleteCard(card.id)}>Delete</button>
-                              <button type="button" className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '11px' }} onClick={() => setDeletingCardId(null)}>Cancel</button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div style={{ display: 'flex', gap: '8px' }}>
-                            <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.03)' }} onClick={() => handleOpenEdit(card)}>
-                              <Edit2 size={12} /> Edit
-                            </button>
-                            <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--danger-light)', background: 'rgba(255,255,255,0.03)' }} onClick={() => setDeletingCardId(card.id)}>
-                              <Trash2 size={12} /> Remove
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+      {view === 'mine' && (
+        creditCards.length === 0 ? (
+          <div className="glass-panel cc-empty">
+            <h3>No cards yet</h3>
+            <p>Add a card to track what you owe, when it's due, its rewards and whether it's worth its annual fee.</p>
+            <button className="btn btn-primary" onClick={handleOpenAdd}>Add card</button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <CardsSummary cards={creditCards} />
+            {creditCards.map((card: any) => (
+              <CardRow key={card.id} card={card} bank={bankName(card)} review={reviewFor(card.id)}
+                expanded={expandedId === card.id || creditCards.length === 1}
+                onToggle={() => setExpandedId(expandedId === card.id ? null : card.id)}
+                onEdit={() => handleOpenEdit(card)}
+                onRemove={() => handleDeleteCard(card.id)}
+                onCompare={() => handleCompareAlternatives(card.id)} />
+            ))}
+          </div>
+        )
       )}
 
-      {/* --- MILESTONES --- */}
-      {activeSubTab === 'milestones' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '24px' }}>
-          {/* Spend Milestones list */}
-          <div className="glass-panel" style={{ padding: '20px' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text-primary)' }}>Fee Waivers &amp; Milestones</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              {creditCards.map((card: any) => {
-                const meta = card;
-                const target = Number(meta.milestone_spend_target || 0);
-                const current = Number(meta.milestone_spend_current || 0);
-                const renewalStr = meta.renewal_date || '';
-
-                if (target <= 0) return null;
-
-                const percent = Math.min((current / target) * 100, 100);
-                const remaining = Math.max(target - current, 0);
-
-                let dailyRateMsg = 'Milestone reached!';
-                let isOverdue = false;
-                if (remaining > 0) {
-                  if (renewalStr) {
-                    const today = new Date();
-                    const renewal = new Date(renewalStr);
-                    const diffDays = Math.ceil((renewal.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                    if (diffDays > 0) {
-                      dailyRateMsg = `${formatCurrency(remaining / diffDays)}/day for the next ${diffDays} days`;
-                    } else {
-                      isOverdue = true;
-                      dailyRateMsg = 'Renewal date has passed.';
-                    }
-                  } else {
-                    dailyRateMsg = 'Renewal date not set.';
-                  }
-                }
-
-                return (
-                  <div key={card.id} style={{ padding: '16px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: '10px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                      <div>
-                        <strong style={{ fontSize: '13px', color: '#fff' }}>{card.name}</strong>
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '8px' }}>Renewal: {renewalStr || 'N/A'}</span>
-                      </div>
-                      <span style={{ fontSize: '12px', fontWeight: 600 }}>{formatCurrency(current)} / {formatCurrency(target)}</span>
-                    </div>
-
-                    <div style={{ height: '8px', background: 'rgba(255,255,255,0.04)', borderRadius: '4px', overflow: 'hidden', marginBottom: '10px' }}>
-                      <div style={{ height: '100%', width: `${percent}%`, background: percent >= 100 ? 'var(--success)' : 'var(--accent)' }}></div>
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
-                      <span style={{ color: 'var(--text-muted)' }}>
-                        {remaining > 0 ? <>Remaining: <strong style={{ color: '#fff' }}>{formatCurrency(remaining)}</strong></> : <strong style={{ color: 'var(--success-light)' }}>Waiver Target Cleared!</strong>}
-                      </span>
-                      <span style={{ color: isOverdue ? 'var(--danger-light)' : 'var(--text-secondary)' }}>{remaining > 0 && `Required Rate: ${dailyRateMsg}`}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+      {view === 'research' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div role="tablist" aria-label="Find the best card" className="cc-subviews">
+            {([['which', 'Which card to use?'], ['compare', 'Compare cards'], ['library', 'Card library']] as const).map(([id, label]) => (
+              <button key={id} type="button" role="tab" aria-selected={researchTab === id} className="cc-subview" onClick={() => setResearchTab(id)}>{label}</button>
+            ))}
           </div>
 
-          {/* Lounge quota tracker */}
-          <div className="glass-panel" style={{ padding: '20px' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text-primary)' }}>Lounge Access Trackers</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {creditCards.map((card: any) => {
-                const meta = card;
-                const domLimit = Number(meta.lounge_visits_limit || 0);
-                const domUsed = Number(meta.lounge_visits_used || 0);
-                const intLimit = Number(meta.lounge_int_limit || 0);
-                const intUsed = Number(meta.lounge_int_used || 0);
-
-                if (domLimit <= 0 && intLimit <= 0) return null;
-
-                return (
-                  <div key={card.id} style={{ padding: '14px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: '10px' }}>
-                    <strong style={{ fontSize: '13px', color: '#fff', display: 'block', marginBottom: '10px' }}>{card.name}</strong>
-                    
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      {domLimit > 0 && (
-                        <div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                            <span>Domestic lounge visits</span>
-                            <span>{Math.max(domLimit - domUsed, 0)} Left of {domLimit}</span>
-                          </div>
-                          <div style={{ height: '6px', background: 'rgba(255,255,255,0.04)', borderRadius: '3px', overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${(domUsed / domLimit) * 100}%`, background: 'var(--accent)' }}></div>
-                          </div>
-                        </div>
-                      )}
-
-                      {intLimit > 0 && (
-                        <div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                            <span>International lounge visits</span>
-                            <span>{Math.max(intLimit - intUsed, 0)} Left of {intLimit}</span>
-                          </div>
-                          <div style={{ height: '6px', background: 'rgba(255,255,255,0.04)', borderRadius: '3px', overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${(intUsed / intLimit) * 100}%`, background: 'var(--success)' }}></div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* --- SMART REWARDS SIMULATOR --- */}
-      {activeSubTab === 'calculator' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '24px' }}>
-          {/* Simulator Panel Inputs */}
-          <div className="glass-panel" style={{ padding: '20px', height: 'fit-content' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text-primary)' }}>Spend Calculator</h3>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div>
-                <label className="form-label" htmlFor="cc-calc-category">Merchant Category</label>
-                <select
-                  id="cc-calc-category"
-                  className="form-input"
-                  value={calcCategory}
-                  onChange={e => setCalcCategory(e.target.value)}
-                >
-                  {categories.filter(c => c.entity_type === 'Expense').map(c => (
-                    <option key={c.id} value={c.name}>{CATEGORY_DISPLAY_LABELS[c.name] || c.name}</option>
-                  ))}
-                </select>
+          {researchTab === 'which' && (
+            <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <p className="cc-note" style={{ margin: 0 }}>Enter a purchase to see which of your cards earns the most for it, using each card's reward rules, caps and milestones.</p>
+              <div className="cc-which-inputs">
+                <label>
+                  <span className="cc-label">Amount</span>
+                  <span className="settings-affix"><span aria-hidden>₹</span>
+                    <input aria-label="Purchase amount" inputMode="decimal" value={calcAmount || ''} onChange={(e) => setCalcAmount(Math.max(parseFloat(e.target.value.replace(/,/g, '')) || 0, 0))} />
+                  </span>
+                </label>
+                <label>
+                  <span className="cc-label">Where</span>
+                  <select className="settings-input" value={calcCategory} onChange={(e) => setCalcCategory(e.target.value)} aria-label="Merchant type">
+                    {categories.filter((c) => c.entity_type === 'Expense').map((c) => (
+                      <option key={c.id} value={c.name}>{CATEGORY_DISPLAY_LABELS[c.name] || c.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span className="cc-label">Value points as</span>
+                  <select className="settings-input" value={redemptionStrategy} onChange={(e) => setRedemptionStrategy(e.target.value as 'cash' | 'miles')} aria-label="How you redeem points">
+                    <option value="cash">Cash or statement credit</option>
+                    <option value="miles">Air miles or hotel points (best partner)</option>
+                  </select>
+                </label>
               </div>
-
-              <div>
-                <label className="form-label" htmlFor="cc-calc-amount">Transaction Amount (INR)</label>
-                <input
-                  id="cc-calc-amount"
-                  type="number"
-                  className="form-input"
-                  value={calcAmount}
-                  onChange={e => setCalcAmount(Math.max(Number(e.target.value), 0))}
-                />
-              </div>
-
-              <div>
-                <label className="form-label">Redemption Yield Strategy</label>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button 
-                    className={`btn ${redemptionStrategy === 'cash' ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ flex: 1, padding: '8px', fontSize: '12px' }}
-                    onClick={() => setRedemptionStrategy('cash')}
-                  >
-                    Cash / Statement Credit
-                  </button>
-                  <button 
-                    className={`btn ${redemptionStrategy === 'miles' ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ flex: 1, padding: '8px', fontSize: '12px' }}
-                    onClick={() => setRedemptionStrategy('miles')}
-                  >
-                    Air Miles / Hotels (Best Partner)
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Rank Results */}
-          <div className="glass-panel" style={{ padding: '20px' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text-primary)' }}>Ranked Best Card Recommendations</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               {calculatorRecommendations.length === 0 ? (
-                <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Configure credit cards to simulate rewards yield optimizations.</span>
+                <p className="cc-note">Add a card first.</p>
               ) : (
-                calculatorRecommendations.map((rec, index) => (
-                  <div 
-                    key={rec.cardId}
-                    style={{ 
-                      padding: '14px 18px', 
-                      background: index === 0 ? 'rgba(16,185,129,0.06)' : 'rgba(255,255,255,0.01)', 
-                      border: index === 0 ? '1px solid rgba(16,185,129,0.25)' : '1px solid var(--border-glass)', 
-                      borderRadius: '10px',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center'
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <div style={{ fontSize: '18px', fontWeight: 800, color: index === 0 ? '#34d399' : 'var(--text-muted)' }}>
-                        #{index + 1}
-                      </div>
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <strong style={{ fontSize: '13px', color: '#fff' }}>{rec.cardName}</strong>
-                          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>({rec.network})</span>
-                        </div>
-                        <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '4px 0 0 0', maxWidth: '340px', lineHeight: '1.4' }}>
-                          {rec.details}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '16px', fontWeight: 700, color: index === 0 ? '#34d399' : '#fff' }}>
-                        {formatCurrency(rec.rewardValueInr)}
-                      </div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 500 }}>
-                        Rate: {rec.effectiveRate}% Yield
-                      </div>
-                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                        +{rec.pointsEarned} Points
-                      </div>
-                    </div>
-                  </div>
-                ))
+                <ol className="cc-ranking">
+                  {calculatorRecommendations.map((rec, i) => (
+                    <li key={rec.cardId} className={i === 0 ? 'cc-best' : undefined}>
+                      <span className="cc-rank">{i + 1}</span>
+                      <span className="cc-rank-text">
+                        <strong>{rec.cardName}</strong>
+                        <span>{rec.details}</span>
+                      </span>
+                      <span className="cc-rank-value">
+                        <strong>{formatCurrency(rec.rewardValueInr)}</strong>
+                        <span>{rec.effectiveRate}% back · {rec.pointsEarned.toLocaleString('en-IN')} points</span>
+                      </span>
+                    </li>
+                  ))}
+                </ol>
               )}
             </div>
-          </div>
+          )}
+          {researchTab === 'compare' && (
+            <CompareCardsTab ownedCards={creditCards} cardVariants={data.card_variants || []} showToast={showToast} preselectLiabilityId={comparePreselect} />
+          )}
+          {researchTab === 'library' && (
+            <CardLibraryTab cardVariants={data.card_variants || []} onRefresh={onRefresh} showToast={showToast} />
+          )}
         </div>
-      )}
-
-      {/* --- CARD LIBRARY --- */}
-      {activeSubTab === 'library' && (
-        <CardLibraryTab cardVariants={data.card_variants || []} onRefresh={onRefresh} showToast={showToast} />
-      )}
-
-      {/* --- COMPARE CARDS --- */}
-      {activeSubTab === 'compare' && (
-        <CompareCardsTab
-          ownedCards={creditCards}
-          cardVariants={data.card_variants || []}
-          showToast={showToast}
-          preselectLiabilityId={comparePreselect}
-        />
-      )}
-
-      {/* --- ANNUAL REVIEW --- */}
-      {activeSubTab === 'annual-review' && (
-        <AnnualReviewTab onCompareAlternatives={handleCompareAlternatives} />
       )}
 
       {/* --- ADD/EDIT TABBED MODAL OVERLAY --- */}
       {modalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' }}>
           <div
-            className="glass-panel"
+            className="glass-panel cc-form"
             style={{ width: '100%', maxWidth: '680px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', position: 'relative' }}
             ref={modalRef}
             role="dialog"
@@ -1294,42 +815,25 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
             </button>
 
             <h3 id="card-config-title" style={{ fontSize: '16px', fontWeight: 600, color: '#fff', marginBottom: '18px' }}>
-              {editingCard ? `Configure Card: ${editingCard.name}` : 'Register Credit Card'}
+              {editingCard ? `Edit ${editingCard.name}` : 'Add a credit card'}
             </h3>
 
-            {/* Card Library Quick Fill (Only show when adding new card) */}
+            {/* Start from the Card Library (new cards only) */}
             {!editingCard && (
-              <div style={{ background: 'rgba(139,92,246,0.04)', border: '1px solid rgba(139,92,246,0.12)', padding: '12px 16px', borderRadius: '10px', marginBottom: '20px' }}>
-                <span style={{ fontSize: '11px', color: '#a78bfa', fontWeight: 600, display: 'block', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  Quick Fill From Card Library
-                </span>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  {(data.card_variants && data.card_variants.length > 0 ? data.card_variants : []).map((v: any) => (
-                    <button
-                      key={v.id}
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ padding: '6px 12px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-glass)' }}
-                      onClick={() => applyCardVariant(v)}
-                    >
-                      <Sparkles size={11} style={{ color: '#fcd34d' }} />
-                      {v.name}
-                    </button>
-                  ))}
-                  {(!data.card_variants || data.card_variants.length === 0) && PRESETS.map((p, pIdx) => (
-                    <button
-                      key={pIdx}
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ padding: '6px 12px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-glass)' }}
-                      onClick={() => applyPreset(p)}
-                    >
-                      <Sparkles size={11} style={{ color: '#fcd34d' }} />
-                      {p.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <label className="cc-quickfill">
+                <span className="cc-label">Start from the Card Library (optional)</span>
+                <select className="settings-input" value="" aria-label="Start from the Card Library"
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!v) return;
+                    if (v.startsWith('preset-')) applyPreset(PRESETS[Number(v.slice(7))]);
+                    else { const found = (data.card_variants || []).find((x: any) => String(x.id) === v); if (found) applyCardVariant(found); }
+                  }}>
+                  <option value="">Choose a card to fill in its published rates and fees…</option>
+                  {(data.card_variants || []).map((v: any) => <option key={v.id} value={String(v.id)}>{v.name}</option>)}
+                  {(!data.card_variants || data.card_variants.length === 0) && PRESETS.map((pr, k) => <option key={pr.name} value={`preset-${k}`}>{pr.name}</option>)}
+                </select>
+              </label>
             )}
 
             {/* Tabbed Navigation inside configurator modal */}
@@ -1350,7 +854,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                     borderBottom: activeModalTab === mTab ? '2px solid var(--accent)' : 'none'
                   }}
                 >
-                  {mTab.toUpperCase()}
+                  {({ general: 'Basics', rates: 'Reward rate', categories: 'Spend categories', milestones: 'Milestones & lounges', partners: 'Transfer partners' } as Record<string, string>)[mTab]}
                 </button>
               ))}
             </div>
@@ -1705,7 +1209,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
               {/* Form Actions footer */}
               <div style={{ borderTop: '1px solid var(--border-glass)', padding: '16px 0 0 0', marginTop: '20px', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Save Configuration</button>
+                <button type="submit" className="btn btn-primary">Save card</button>
               </div>
             </form>
           </div>

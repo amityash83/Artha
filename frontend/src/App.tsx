@@ -346,7 +346,7 @@ const App: React.FC = () => {
           />
         )}
         {activeTab === 'credit-cards' && (
-          <CreditCards data={data} onRefresh={fetchFinanceData} showToast={showToast} />
+          <CreditCards data={data} onRefresh={fetchFinanceData} showToast={showToast} addRequest={addRequest?.page === 'credit-cards' ? addRequest.nonce : undefined} />
         )}
         {activeTab === 'goals' && (
           <EntityGrid 
