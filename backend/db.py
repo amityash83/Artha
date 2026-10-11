@@ -673,7 +673,7 @@ def init_db():
         source_ref_id INTEGER,
         dest_ref_type TEXT CHECK(dest_ref_type IN ('Account', 'Asset', 'Liability', 'None')),
         dest_ref_id INTEGER,
-        type TEXT NOT NULL CHECK(type IN ('Credit', 'Debit', 'Transfer', 'Buy', 'Sell', 'Investment', 'Redemption', 'EMI', 'Prepayment', 'Spend')),
+        type TEXT NOT NULL CHECK(type IN ('Credit', 'Debit', 'Transfer', 'Buy', 'Sell', 'Investment', 'Redemption', 'EMI', 'Prepayment', 'Spend', 'Interest', 'Fee')),
         amount REAL NOT NULL CHECK(amount > 0.0),
         transaction_date TEXT NOT NULL,
         notes TEXT,
@@ -1068,6 +1068,44 @@ def init_db():
             print("[Migration] transactions Spend/Liability CHECK expansion complete.")
     except Exception as e:
         print("[Migration Warning] transactions Spend/Liability CHECK expansion failed:", e)
+
+    # Expand transactions.type for the loan charge labels 'Interest' and 'Fee' (MMEX-style
+    # loan accounts: interest is charged to the loan each month, the EMI is a transfer that
+    # pays it down). Behaviour comes from direction, not type (adjust_double_entry_balances),
+    # so this only widens the allowed labels. Same rebuild pattern as above.
+    try:
+        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='transactions'")
+        tx_sql_row = cursor.fetchone()
+        if tx_sql_row and "'Interest'" not in tx_sql_row['sql']:
+            print("[Migration] Expanding transactions.type CHECK for Interest/Fee...")
+            cursor.execute("DROP TABLE IF EXISTS transactions_checkfix3")  # incomplete copy from a failed run
+            cursor.execute("""
+            CREATE TABLE transactions_checkfix3 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_ref_type TEXT CHECK(source_ref_type IN ('Account', 'Asset', 'Liability', 'None')),
+                source_ref_id INTEGER,
+                dest_ref_type TEXT CHECK(dest_ref_type IN ('Account', 'Asset', 'Liability', 'None')),
+                dest_ref_id INTEGER,
+                type TEXT NOT NULL CHECK(type IN ('Credit', 'Debit', 'Transfer', 'Buy', 'Sell', 'Investment', 'Redemption', 'EMI', 'Prepayment', 'Spend', 'Interest', 'Fee')),
+                amount REAL NOT NULL CHECK(amount > 0.0),
+                transaction_date TEXT NOT NULL,
+                notes TEXT,
+                linked_goal_id INTEGER REFERENCES goals(id),
+                category_id INTEGER REFERENCES categories(id),
+                is_balance_exempt INTEGER NOT NULL DEFAULT 0
+            )
+            """)
+            cursor.execute("""
+            INSERT INTO transactions_checkfix3
+                (id, source_ref_type, source_ref_id, dest_ref_type, dest_ref_id, type, amount, transaction_date, notes, linked_goal_id, category_id, is_balance_exempt)
+            SELECT id, source_ref_type, source_ref_id, dest_ref_type, dest_ref_id, type, amount, transaction_date, notes, linked_goal_id, category_id, is_balance_exempt
+            FROM transactions
+            """)
+            cursor.execute("DROP TABLE transactions")
+            cursor.execute("ALTER TABLE transactions_checkfix3 RENAME TO transactions")
+            print("[Migration] transactions Interest/Fee CHECK expansion complete.")
+    except Exception as e:
+        print("[Migration Warning] transactions Interest/Fee CHECK expansion failed:", e)
 
     cursor.execute("PRAGMA foreign_keys = ON")
 

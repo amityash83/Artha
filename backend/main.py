@@ -606,6 +606,14 @@ def normalize_legacy_transaction_payload(payload: dict):
         dest_type = 'Liability'
         dest_id = rel_id
         new_type = ttype
+    elif ttype in ('Interest', 'Fee'):
+        # A charge on a loan or card (interest for the month, a processing fee or a
+        # penalty): it raises what's owed and moves no cash; the EMI pays it off.
+        source_type = 'None'
+        source_id = None
+        dest_type = 'Liability'
+        dest_id = rel_id
+        new_type = ttype
     elif ttype == 'Spend':
         # A credit card charge: no cash account is touched at the moment of a
         # swipe (unlike EMI/Prepayment, which pay down the card from a real
@@ -650,7 +658,6 @@ def adjust_double_entry_balances(cursor, t_type: str, amount: float, source_type
         return
 
     factor = 1.0 if operation == "add" else -1.0
-    t_type_lower = t_type.lower()
 
     # 1. Update Asset values
     if source_type == 'Asset' and source_id:
@@ -658,17 +665,24 @@ def adjust_double_entry_balances(cursor, t_type: str, amount: float, source_type
     if dest_type == 'Asset' and dest_id:
         cursor.execute("UPDATE assets SET current_value = current_value + ? WHERE id = ?", (amount * factor, dest_id))
 
-    # 2. Update Liability outstanding. EMI/Prepayment pay it down; Spend (a new
-    # charge) is the only transaction type that increases it — except a row
-    # flagged is_balance_exempt (the statement-spend-adjustment marker; see its
-    # constant's docstring above), which is permanently exempt.
-    if dest_type == 'Liability' and dest_id and not is_balance_exempt:
-        cursor.execute("SELECT id FROM liabilities WHERE id = ?", (dest_id,))
-        if cursor.fetchone():
-            if t_type_lower in ('emi', 'prepayment'):
-                cursor.execute("UPDATE liabilities SET outstanding = outstanding - ? WHERE id = ?", (amount * factor, dest_id))
-            elif t_type_lower == 'spend':
-                cursor.execute("UPDATE liabilities SET outstanding = outstanding + ? WHERE id = ?", (amount * factor, dest_id))
+    # 2. Update Liability outstanding by the direction of the money, like accounts and
+    # assets (the type is only a label: EMI, Prepayment, Spend, Interest, Fee...):
+    #   account/asset -> liability  pays it down        (EMI, prepayment, card bill)
+    #   outside       -> liability  is a charge on it   (card spend, loan interest, fees)
+    #   liability     -> anywhere   is borrowing more   (a disbursal or top-up)
+    # Every entry that existed before this rule had one of the first two shapes with the
+    # same effect (EMI/Prepayment came from an account, Spend from outside), so existing
+    # balances are unchanged (test_ledger_direction.py). A row flagged is_balance_exempt
+    # (the statement-spend-adjustment marker; see its constant's docstring above) never
+    # moves a balance.
+    if is_balance_exempt:
+        return
+    if dest_type == 'Liability' and dest_id:
+        paid_from_own_money = source_type in ('Account', 'Asset')
+        cursor.execute("UPDATE liabilities SET outstanding = outstanding + ? WHERE id = ?",
+                       ((-amount if paid_from_own_money else amount) * factor, dest_id))
+    if source_type == 'Liability' and source_id:
+        cursor.execute("UPDATE liabilities SET outstanding = outstanding + ? WHERE id = ?", (amount * factor, source_id))
 
 def compute_real_cycle_spend_total(cursor, liability_id: int, statement_date) -> dict:
     """
