@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Calendar as CalendarIcon, Filter, RefreshCw } from 'lucide-react';
-
 import { API_BASE_URL } from '../config';
+import { formatINR } from '../format';
 
 interface CalendarEvent {
   title: string;
@@ -11,192 +10,121 @@ interface CalendarEvent {
   details: string;
 }
 
+const FILTERS: { id: string; label: string }[] = [
+  { id: 'all', label: 'Everything' }, { id: 'EMI', label: 'EMIs' }, { id: 'SIP', label: 'SIPs' },
+  { id: 'Insurance', label: 'Insurance' }, { id: 'Credit Card', label: 'Card bills' }, { id: 'Tax', label: 'Tax' },
+];
+const TYPE_TONE: Record<string, string> = { EMI: 'danger', SIP: 'success', Insurance: 'info', 'Credit Card': 'warning', Tax: 'accent' };
+
+// "2026-10-15" as a local date (new Date("2026-10-15") is UTC midnight, which can land on
+// the previous day west of UTC).
+const day = (iso: string) => new Date(`${iso.slice(0, 10)}T00:00:00`);
+const daysFromToday = (iso: string) => Math.round((day(iso).getTime() - new Date(new Date().toDateString()).getTime()) / 86400000);
+
 export const FinancialCalendar: React.FC = () => {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
-  const [filterType, setFilterType] = useState<string>('all');
-  const [loading, setLoading] = useState<boolean>(true);
-
-  const fetchEvents = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/calendar`);
-      if (res.ok) {
-        const d = await res.json();
-        setEvents(d);
-      }
-    } catch (err) {
-      console.error("Failed to fetch calendar events:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [filter, setFilter] = useState('all');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchEvents();
+    fetch(`${API_BASE_URL}/api/calendar`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setEvents(Array.isArray(d) ? d : []))
+      .catch(() => null)
+      .finally(() => setLoading(false));
   }, []);
 
-  const formatCurrency = (val: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      maximumFractionDigits: 0
-    }).format(val);
+  const shown = events.filter((e) => filter === 'all' || e.type === filter).sort((a, b) => a.date.localeCompare(b.date));
+  const sum = (list: CalendarEvent[]) => list.reduce((s, e) => s + (e.amount || 0), 0);
+  const next30 = shown.filter((e) => daysFromToday(e.date) <= 30);
+  const thisMonth = new Date().toISOString().slice(0, 7);
+  const next = shown[0];
+
+  const months: { key: string; items: CalendarEvent[] }[] = [];
+  for (const e of shown) {
+    const key = e.date.slice(0, 7);
+    const last = months[months.length - 1];
+    if (last && last.key === key) last.items.push(e); else months.push({ key, items: [e] });
+  }
+  const monthLabel = (ym: string) => day(`${ym}-01`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+  const when = (iso: string) => {
+    const n = daysFromToday(iso);
+    return n === 0 ? 'today' : n === 1 ? 'tomorrow' : n > 1 && n <= 14 ? `in ${n} days` : null;
   };
 
-  const filteredEvents = events.filter(e => {
-    if (filterType === 'all') return true;
-    return e.type.toLowerCase() === filterType.toLowerCase();
-  });
-
-  const groupedEvents: { [key: string]: CalendarEvent[] } = {};
-  filteredEvents.forEach(e => {
-    const d = new Date(e.date);
-    const monthYear = d.toLocaleString('default', { month: 'long', year: 'numeric' });
-    if (!groupedEvents[monthYear]) {
-      groupedEvents[monthYear] = [];
-    }
-    groupedEvents[monthYear].push(e);
-  });
-
-  const totalOutlay = filteredEvents.reduce((sum, e) => sum + e.amount, 0);
-
   return (
-    <div style={{ paddingBottom: '40px' }}>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div className="db-page">
+      <div className="eg-head">
         <div>
           <h1 className="page-title">Financial Calendar</h1>
           <p className="page-subtitle">Payments coming up in the next 12 months: EMIs, SIPs, premiums, card bills and advance tax.</p>
         </div>
-        <button 
-          onClick={fetchEvents}
-          className="btn btn-secondary" 
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '8px 14px' }}
-          disabled={loading}
-        >
-          <RefreshCw size={14} className={loading ? 'spin-anim' : ''} />
-          Refresh
-        </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
-        <div className="glass-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px' }}>
-          <div>
-            <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Projected Outlay (12-Month Total)</span>
-            <h2 style={{ fontSize: '24px', fontWeight: 700, margin: '4px 0 0 0', color: 'var(--text-primary)' }}>
-              {formatCurrency(totalOutlay)}
-            </h2>
-          </div>
-          <div style={{ background: 'rgba(139, 92, 246, 0.1)', color: 'var(--accent-light)', padding: '12px', borderRadius: '50%' }}>
-            <CalendarIcon size={24} />
-          </div>
+      <div className="glass-panel cc-summary db-summary">
+        <div className="cc-summary-main">
+          <div className="cc-label">Due in the next 30 days</div>
+          <strong className="eg-figure db-networth">{formatINR(sum(next30))}</strong>
+          <span className="cc-note">{next30.length} payment{next30.length === 1 ? '' : 's'}</span>
         </div>
-
-        <div className="glass-panel" style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '16px 20px' }}>
-          <Filter size={18} style={{ color: 'var(--text-muted)' }} />
-          <div style={{ flexGrow: 1 }}>
-            <label className="form-label" style={{ fontSize: '11px', marginBottom: '4px' }}>Filter Event Category</label>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {['all', 'emi', 'sip', 'insurance', 'credit card', 'tax'].map(type => (
-                <button
-                  key={type}
-                  className={`btn ${filterType === type ? 'btn-primary' : 'btn-secondary'}`}
-                  style={{ padding: '6px 12px', fontSize: '12px', textTransform: 'capitalize' }}
-                  onClick={() => setFilterType(type)}
-                >
-                  {type === 'all' ? 'All Events' : type === 'emi' ? 'EMIs' : type === 'sip' ? 'SIPs' : type === 'insurance' ? 'Insurance' : type === 'tax' ? 'Tax' : 'Credit Cards'}
-                </button>
-              ))}
-            </div>
-          </div>
+        <div className="cc-summary-stat">
+          <div className="cc-label">Next</div>
+          <strong>{next ? formatINR(next.amount) : '—'}</strong>
+          <span className="cc-note">{next ? `${next.title}, ${day(next.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : 'nothing due'}</span>
+        </div>
+        <div className="cc-summary-stat">
+          <div className="cc-label">This month</div>
+          <strong>{formatINR(sum(shown.filter((e) => e.date.startsWith(thisMonth))))}</strong>
+          <span className="cc-note">still to pay</span>
+        </div>
+        <div className="cc-summary-stat">
+          <div className="cc-label">Next 12 months</div>
+          <strong>{formatINR(sum(shown))}</strong>
+          <span className="cc-note">{shown.length} payments</span>
         </div>
       </div>
 
-      {loading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
-          <div className="spin-anim" style={{ width: '30px', height: '30px', border: '3px solid rgba(139, 92, 246, 0.1)', borderTop: '3px solid #8b5cf6', borderRadius: '50%' }}></div>
-        </div>
-      ) : Object.keys(groupedEvents).length > 0 ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          {Object.entries(groupedEvents).map(([monthYear, monthEvents]) => (
-            <div key={monthYear} className="glass-panel" style={{ padding: '24px' }}>
-              <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--accent-light)', borderBottom: '1px solid var(--border-glass)', paddingBottom: '10px', marginBottom: '16px' }}>
-                {monthYear}
-              </h3>
-              
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {monthEvents.map((e, idx) => {
-                  const day = new Date(e.date).getDate();
-                  const weekday = new Date(e.date).toLocaleDateString('default', { weekday: 'short' });
-                  
+      <div role="tablist" aria-label="Kinds of payment" className="cc-views">
+        {FILTERS.map((f) => (
+          <button key={f.id} type="button" role="tab" aria-selected={filter === f.id} className="cc-view" onClick={() => setFilter(f.id)}>{f.label}</button>
+        ))}
+      </div>
+
+      {loading ? <p className="cc-note">Loading…</p> : months.length === 0 ? (
+        <div className="settings-group"><div className="ie-empty">
+          <p>{filter === 'all'
+            ? 'Nothing scheduled. Loans with an EMI, SIPs, insurance renewals, card due dates and saved tax plans show up here.'
+            : 'Nothing of this kind in the next 12 months.'}</p>
+        </div></div>
+      ) : (
+        <div className="eg-groups">
+          {months.map((m) => (
+            <section key={m.key} aria-label={monthLabel(m.key)}>
+              <div className="settings-group-head">
+                <h3 className="settings-group-title">{monthLabel(m.key)}</h3>
+                <span className="eg-group-total">{formatINR(sum(m.items))}</span>
+              </div>
+              <div className="settings-group">
+                {m.items.map((e, i) => {
+                  const d = day(e.date);
+                  const soon = when(e.date);
                   return (
-                    <div 
-                      key={idx} 
-                      style={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        justifyContent: 'space-between',
-                        padding: '12px 16px',
-                        background: 'rgba(255,255,255,0.01)',
-                        border: '1px solid var(--border-glass)',
-                        borderRadius: 'var(--radius-sm)'
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                        <div style={{ 
-                          textAlign: 'center', 
-                          minWidth: '50px', 
-                          background: 'rgba(139, 92, 246, 0.05)', 
-                          border: '1px solid var(--border-glass)', 
-                          borderRadius: 'var(--radius-sm)',
-                          padding: '6px'
-                        }}>
-                          <span style={{ fontSize: '16px', fontWeight: 700, display: 'block', color: 'var(--text-primary)' }}>{day}</span>
-                          <span style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{weekday}</span>
-                        </div>
-                        
-                        <div>
-                          <strong style={{ fontSize: '14px', color: 'var(--text-primary)', display: 'block' }}>{e.title}</strong>
-                          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{e.details}</span>
-                        </div>
-                      </div>
-                      
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                        <span style={{ 
-                          fontSize: '10px', 
-                          padding: '3px 8px', 
-                          borderRadius: '20px', 
-                          fontWeight: 600,
-                          background: e.type === 'EMI' ? 'rgba(239, 68, 68, 0.1)' : e.type === 'SIP' ? 'rgba(16, 185, 129, 0.1)' : e.type === 'Insurance' ? 'rgba(59, 130, 246, 0.1)' : e.type === 'Tax' ? 'rgba(167, 139, 250, 0.12)' : 'rgba(245, 158, 11, 0.1)',
-                          color: e.type === 'EMI' ? 'var(--danger)' : e.type === 'SIP' ? 'var(--success)' : e.type === 'Insurance' ? 'var(--info)' : e.type === 'Tax' ? 'var(--accent-light)' : 'var(--warning)'
-                        }}>
-                          {e.type}
-                        </span>
-                        <strong style={{ fontSize: '16px', color: '#ffffff' }}>
-                          {formatCurrency(e.amount)}
-                        </strong>
-                      </div>
+                    <div key={`${e.date}-${e.title}-${i}`} className="ie-row fc-row">
+                      <span className="fc-date"><strong>{d.getDate()}</strong><span>{d.toLocaleDateString('en-IN', { weekday: 'short' })}</span></span>
+                      <span className="ie-row-text">
+                        <strong>{e.title}</strong>
+                        <span>{[e.details, soon].filter(Boolean).join(' · ')}</span>
+                      </span>
+                      <span className={`fc-type fc-type--${TYPE_TONE[e.type] || 'accent'}`}>{e.type === 'Credit Card' ? 'Card bill' : e.type}</span>
+                      <span className="ie-row-amount"><strong>{formatINR(e.amount)}</strong></span>
                     </div>
                   );
                 })}
               </div>
-            </div>
+            </section>
           ))}
         </div>
-      ) : (
-        <div className="glass-panel" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
-          No upcoming scheduled outlays for this category filter.
-        </div>
       )}
-      
-      <style>{`
-        .spin-anim {
-          animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-      `}</style>
     </div>
   );
 };

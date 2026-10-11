@@ -1092,3 +1092,17 @@ h1, h2, h3, h4, h5 {
 .bp-month { width: auto; font-size: 13px; padding: 7px 10px; }
 .bp-row .settings-row-text { display: flex; flex-direction: column; gap: 3px; }
 .bp-meter { max-width: 420px; margin-top: 4px; }
+
+/* Financial Calendar (components/FinancialCalendar.tsx). */
+.fc-row { cursor: default; }
+.fc-row:hover { background: none; }
+.fc-row .ie-row-text { flex: 1; }
+.fc-date { display: flex; flex-direction: column; align-items: center; min-width: 40px; line-height: 1.1; }
+.fc-date strong { font-size: 16px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.fc-date span { font-size: 10.5px; color: var(--text-muted); }
+.fc-type { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500; white-space: nowrap; }
+.fc-type--danger { background: var(--danger-bg); color: #fca5a5; }
+.fc-type--success { background: var(--success-bg); color: var(--success); }
+.fc-type--info { background: var(--info-bg); color: #93c5fd; }
+.fc-type--warning { background: var(--warning-bg); color: var(--warning); }
+.fc-type--accent { background: rgba(139, 92, 246, 0.12); color: var(--accent-light); }
