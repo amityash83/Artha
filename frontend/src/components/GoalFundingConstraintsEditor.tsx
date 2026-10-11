@@ -28,33 +28,23 @@ export const GoalFundingConstraintsEditor: React.FC<GoalFundingConstraintsEditor
     }
   };
 
+  // Checkboxes, not toggle pills: a highlighted pill didn't read as "excluded".
   return (
-    <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-      <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-        Never count these kinds of asset towards this goal
-      </label>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+    <div className="df-field df-wide">
+      <span className="df-label">Never count these kinds of asset towards this goal</span>
+      <div className="df-check-grid">
         {assetCategories.map((cat) => (
-          <button
-            key={cat.id}
-            type="button"
-            className={`btn ${excludedIds.has(cat.id) ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ padding: '6px 14px', fontSize: '12px', borderRadius: '20px' }}
-            onClick={() => toggleCategory(cat.id, cat.name)}
-          >
-            {cat.name}
-          </button>
+          <label key={cat.id} className="df-check">
+            <input type="checkbox" checked={excludedIds.has(cat.id)} onChange={() => toggleCategory(cat.id, cat.name)} />
+            <span>{cat.name}</span>
+          </label>
         ))}
       </div>
-      {constraints.length === 0 ? (
-        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-          No restrictions — this goal can be funded from any asset category.
-        </div>
-      ) : (
-        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-          Excluded: {constraints.map((c) => c.category_name).join(', ')}
-        </div>
-      )}
+      <span className="df-hint">
+        {constraints.length === 0
+          ? 'None ticked: any kind of asset can count towards this goal.'
+          : `Ticked kinds never count, whatever else is set. To keep only safe holdings, "Only low-risk holdings" above is usually the better rule.`}
+      </span>
     </div>
   );
 };

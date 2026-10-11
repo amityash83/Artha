@@ -661,7 +661,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
   };
 
   const hasDocuments = (entityType === 'accounts' || entityType === 'assets' || entityType === 'liabilities' || entityType === 'goals') && !!initialData?.id;
-  const hasExtras = isHolding || isProperty || isInsurance || entityType === 'goals' || hasDocuments;
+  const hasExtras = isHolding || isProperty || isInsurance || hasDocuments;
 
   return (
     <form onSubmit={handleSubmit} className="glass-panel df-form">
@@ -672,7 +672,13 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
 
       <div className="df-body">
         <section className="df-section" aria-label="Details">
-          <div className="df-grid">{detailKeys.map(renderField)}</div>
+          <div className="df-grid">
+            {detailKeys.map(renderField)}
+            {/* A goal's funding rules sit together: "Only low-risk holdings" and the kinds it never uses. */}
+            {entityType === 'goals' && categories && (
+              <GoalFundingConstraintsEditor categories={categories} constraints={fundingConstraints} onChange={setFundingConstraints} />
+            )}
+          </div>
         </section>
 
         {figureKeys.length > 0 && (
@@ -697,14 +703,6 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
                 <InsuranceClaimsEditor claims={insuranceClaims} onChange={setInsuranceClaims} />
                 <InsurancePremiumPaymentsEditor payments={premiumPayments} onChange={setPremiumPayments} />
               </>
-            )}
-
-            {entityType === 'goals' && categories && (
-              <GoalFundingConstraintsEditor
-                categories={categories}
-                constraints={fundingConstraints}
-                onChange={setFundingConstraints}
-              />
             )}
 
             {/* Documents apply generically at the entity-type level (not per-category, unlike
