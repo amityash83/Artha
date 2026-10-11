@@ -1056,6 +1056,22 @@ def init_db():
     cursor.execute("PRAGMA foreign_keys = ON")
 
 
+    # EMI Tool saved profiles (/api/settings/emi-profiles). Dropped from init_db() by the
+    # metadata-driven refactor while the routes still used it, so saving a profile failed
+    # on every database; restored with its original columns.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS emi_profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        loan_amount REAL NOT NULL,
+        roi REAL NOT NULL,
+        tenure_value INTEGER NOT NULL,
+        tenure_unit TEXT NOT NULL,
+        start_date TEXT NOT NULL,
+        prepayments TEXT NOT NULL
+    )
+    """)
+
     # Keep snapshots & monthly_cash_flows for backward compatibility / historical logs
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS snapshots (

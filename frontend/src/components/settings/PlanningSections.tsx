@@ -52,7 +52,7 @@ export const RulesSection: React.FC<SectionProps> = ({ onRefresh }) => {
   const groups = Array.from(new Set(active.map((r) => r.category)));
   return (
     <>
-      <SectionHeader title="Planning rules" intro="The thresholds Artha's recommendations use. Changes save as you type; switch a rule off to stop Artha checking it." />
+      <SectionHeader title="Planning rules" intro="The thresholds Artha's recommendations use. Changes save as you type. A rule switched off falls back to Artha's built-in default value." />
       {groups.map((g) => (
         <Group key={g} title={g}>
           {active.filter((r) => r.category === g).map((r) => <RuleRow key={r.rule_key} rule={r} articles={articles} onSaved={onRefresh} />)}
