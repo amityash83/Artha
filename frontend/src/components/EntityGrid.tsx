@@ -71,6 +71,9 @@ const metaOf = (kind: Kind, e: any, showOwner: boolean): string => {
         e.renewal_date ? `renews ${formatDate(e.renewal_date)}` : null);
     } else if (cat === 'Property') {
       parts.push(num(e.rental_income) > 0 ? `rent ${formatINR(e.rental_income)}/mo` : null);
+    } else if (cat === 'EPF') {
+      parts.push(e.employer_name, e.transfer_status === 'Unmerged' ? 'not merged yet' : e.transfer_status === 'Transferred' ? 'transferred' : null,
+        e.member_id ? `member ${e.member_id}` : null, e.balance_as_of ? `as of ${formatDate(e.balance_as_of)}` : null);
     } else {
       parts.push(e.institution_name);
     }
@@ -479,6 +482,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
       if (entityType === 'liabilities' && cat !== 'Credit Card' && num(e.remaining_interest) > 0) sub = `${formatINR(e.remaining_interest)} interest to go`;
       if (entityType === 'liabilities' && cat === 'Credit Card' && num(e.credit_limit) > 0) sub = `${Math.round((value / num(e.credit_limit)) * 100)}% of limit used`;
       if (entityType === 'assets' && cat === 'Insurance' && num(e.premiums_paid) > 0) sub = `${formatINR(e.premiums_paid)} paid in`;
+      if (entityType === 'assets' && cat === 'EPF' && e.transfer_status !== 'Transferred' && num(e.pension_share) > 0) sub = `+ ${formatINR(e.pension_share)} pension, not counted`;
       if (entityType === 'assets' && cat === 'Property') {
         const loansOn = liabilities.filter((l) => l.linked_asset_id === e.id && num(l.outstanding) > 0);
         if (loansOn.length) sub = `${formatINR(loansOn.reduce((t, l) => t + num(l.outstanding), 0))} owed on ${loansOn.length === 1 ? 'its loan' : `${loansOn.length} loans`}`;

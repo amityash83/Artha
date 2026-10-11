@@ -11,6 +11,22 @@ SETTINGS_PATH = os.path.join(SETTINGS_DIR, "settings.json")
 # Prefixed onto the legacy Taxation financial_rules rows' descriptions by init_db().
 SALARY_FIELDS_DEFINITION = [{"name": "net_amount", "type": "number", "label": "Take-home per period (after tax and deductions)"}]
 
+# One EPF asset per PF member account (each employer gets its own member ID under the one
+# UAN). The asset's value is the employee + employer shares (the form sets current_value
+# from them); the pension (EPS) share is recorded but not counted in net worth, since it's
+# a pension entitlement rather than a withdrawable balance. Figures come from the EPFO
+# passbook; Artha keeps balances, not a copy of the monthly ledger.
+EPF_FIELDS_DEFINITION = [
+    {"name": "employer_name", "type": "text", "label": "Employer"},
+    {"name": "uan", "type": "text", "label": "UAN"},
+    {"name": "member_id", "type": "text", "label": "Member ID"},
+    {"name": "transfer_status", "type": "select_epf_status", "label": "Account"},
+    {"name": "employee_share", "type": "number", "label": "Your share"},
+    {"name": "employer_share", "type": "number", "label": "Employer's share"},
+    {"name": "pension_share", "type": "number", "label": "Pension (EPS)"},
+    {"name": "balance_as_of", "type": "date", "label": "Passbook checked on"},
+]
+
 TAX_RULE_SUPERSEDED_PREFIX = "[Not used: tax figures now come from the versioned tax rule set for each financial year] "
 
 def load_settings():
@@ -1115,7 +1131,7 @@ def init_db():
         ('Asset', 'Mutual Fund', json.dumps([{"name": "ticker", "type": "text", "label": "Scheme Code"}])),
         ('Asset', 'Stock', json.dumps([{"name": "ticker", "type": "text", "label": "Ticker Symbol"}])),
         ('Asset', 'Gold', None),
-        ('Asset', 'EPF', None),
+        ('Asset', 'EPF', json.dumps(EPF_FIELDS_DEFINITION)),
         ('Asset', 'PPF', None),
         ('Asset', 'NPS', None),
         ('Asset', 'Fixed Deposit', json.dumps([{"name": "duration_months", "type": "number", "label": "Duration (Months)"}])),
@@ -2247,6 +2263,9 @@ def init_db():
         # Salary's take-home field, for databases seeded before it existed.
         cursor.execute("UPDATE categories SET fields_definition = ? WHERE entity_type = 'Income' AND name = 'Salary' "
                        "AND (fields_definition IS NULL OR fields_definition = '')", (json.dumps(SALARY_FIELDS_DEFINITION),))
+        # EPF account fields, likewise.
+        cursor.execute("UPDATE categories SET fields_definition = ? WHERE entity_type = 'Asset' AND name = 'EPF' "
+                       "AND (fields_definition IS NULL OR fields_definition = '')", (json.dumps(EPF_FIELDS_DEFINITION),))
     except Exception as e:
         print("[Migration Warning] income/expenses owner migration error:", e)
 

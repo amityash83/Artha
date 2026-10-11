@@ -76,6 +76,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
   const isInsurance = entityType === 'assets' && categoryName === 'Insurance';
   const isProperty = entityType === 'assets' && categoryName === 'Property';
   const isHolding = entityType === 'assets' && HOLDING_CATEGORIES.includes(categoryName || '');
+  const isEpf = entityType === 'assets' && categoryName === 'EPF';
 
   const buildFieldSet = (policyType?: string) => {
     const standardFields: Record<string, string> = {
@@ -111,6 +112,10 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           standardFields[f] = f === 'vehicle_registration' ? 'text' : 'number';
         });
         standardFields['status'] = 'select_status';
+        standardFields['owner_id'] = 'person_select';
+      } else if (isEpf) {
+        // Employer, UAN, member ID, status and the three shares come from the EPF
+        // category's fields_definition; the value is derived from the shares on save.
         standardFields['owner_id'] = 'person_select';
       } else if (isHolding) {
         standardFields['institution_id'] = 'institution_select';
@@ -236,6 +241,8 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         defaultData[k] = isInsurance ? 'Yearly' : 'Monthly';
       } else if (type === 'checkbox') {
         defaultData[k] = 1;
+      } else if (type === 'select_epf_status') {
+        defaultData[k] = 'Active';
       } else if (type === 'select_loan_use') {
         defaultData[k] = 'purchase';
       } else if (type === 'loan_share') {
@@ -326,6 +333,13 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
     if (entityType === 'goals') {
       payload.funding_constraints = fundingConstraints;
     }
+    if (isEpf) {
+      // EPF balance = your share + the employer's; the pension (EPS) part isn't counted.
+      // A transferred account's money now sits in the current one, so it counts as nil.
+      const transferred = payload.transfer_status === 'Transferred';
+      payload.current_value = transferred ? 0 : (Number(payload.employee_share) || 0) + (Number(payload.employer_share) || 0);
+      payload.status = transferred ? 'Closed' : 'Active';
+    }
     onSubmit(payload);
   };
 
@@ -407,13 +421,16 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
     goal_mapping: 'Counts this asset towards one of your goals.',
     linked_asset_id: 'A property can carry more than one loan, such as a home loan and a top-up.',
     surrender_value: 'What the insurer would pay if you surrendered the policy today.',
+    employee_share: 'From your EPFO passbook, including interest. This and the employer\'s share make up the account\'s value.',
+    pension_share: 'Recorded for reference only: a pension entitlement, not a balance you can withdraw, so it isn\'t counted in net worth.',
+    uan: 'Your one UAN covers every employer; each employer gets its own member ID.',
   };
 
   // How each field is entered: money with ₹ and Indian grouping, rates as %, terms in months.
   const MONEY = new Set([
     'current_balance', 'opening_balance', 'current_value', 'invested_amount', 'outstanding', 'credit_limit', 'statement_balance',
     'annual_fee', 'emi', 'premium', 'sum_assured', 'surrender_value', 'sum_insured', 'claims_amount', 'idv',
-    'target_amount', 'current_amount', 'monthly_contribution', 'amount',
+    'target_amount', 'current_amount', 'monthly_contribution', 'amount', 'employee_share', 'employer_share', 'pension_share',
   ]);
   const SUFFIX: Record<string, string> = { interest_rate: '%', tenure_months: 'months' };
   const DAY_OF_MONTH = new Set(['statement_date', 'due_date']);
@@ -530,6 +547,21 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       const current = formData[k] || 'Active';
       return field(k, select(k, current, (v) => handleChange(k, v), (options.includes(current) ? options : [current, ...options]).map((o) => ({ value: o, label: o }))));
     }
+    if (type === 'select_epf_status') {
+      const status = formData[k] || 'Active';
+      return field(k, (
+        <>
+          {select(k, status, (v) => handleChange(k, v), [
+            { value: 'Active', label: 'Current employer' },
+            { value: 'Unmerged', label: 'Previous employer, not merged yet' },
+            { value: 'Transferred', label: 'Transferred to my current account' },
+          ])}
+          <span className="df-hint">{status === 'Unmerged'
+            ? 'Merge it online with Form 13 on the EPFO member portal, so your service stays continuous.'
+            : status === 'Transferred' ? 'Counts as nil: its money is now in your current account.' : 'Contributions are still going in.'}</span>
+        </>
+      ));
+    }
     if (type === 'loan_share') return null; // shown inside "Used for"
     if (type === 'select_loan_use') {
       const share = Number(formData.house_share_pct ?? 100);
@@ -598,7 +630,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
   return (
     <form onSubmit={handleSubmit} className="glass-panel df-form">
       <div className="df-head">
-        <h3>{initialData ? `Edit ${initialData.name || getLabel(entityType).toLowerCase()}` : `Add ${(currentCategory?.name || getLabel(entityType)).toLowerCase()}`}</h3>
+        <h3>{initialData ? `Edit ${initialData.name || getLabel(entityType).toLowerCase()}` : `Add ${((n: string) => (n === n.toUpperCase() ? n : n.toLowerCase()))(currentCategory?.name || getLabel(entityType))}`}</h3>
         {initialData && currentCategory && <span className="cc-note">{currentCategory.name}</span>}
       </div>
 
