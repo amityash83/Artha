@@ -288,3 +288,36 @@ def test_money_used_elsewhere_is_left_out_with_a_note(data):
     items, notes = _with_rules(data)
     assert not any(t.startswith("deductions.home_loan") or "home_loan_principal" in t for t in items)
     assert any("SBI Home Loan is left out" in n for n in notes)
+
+
+# --- Recorded interest (MMEX-style loan entries) ----------------------------------------
+
+def _monthly_entries(conn, months, interest=30000.0, emi=43391.0):
+    loan = conn.execute("SELECT id FROM liabilities WHERE name = 'SBI Home Loan'").fetchone()["id"]
+    for m in months:
+        conn.execute("""INSERT INTO transactions (source_ref_type, dest_ref_type, dest_ref_id, type, amount, transaction_date)
+                        VALUES ('None', 'Liability', ?, 'Interest', ?, ?)""", (loan, interest, f"{m}-05"))
+        conn.execute("""INSERT INTO transactions (source_ref_type, source_ref_id, dest_ref_type, dest_ref_id, type, amount, transaction_date)
+                        VALUES ('Account', 1, 'Liability', ?, 'EMI', ?, ?)""", (loan, emi, f"{m}-05"))
+    conn.commit()
+
+
+def test_interest_recorded_every_month_is_used(data):
+    from backend.tax.prefill import _recorded_split, fy_bounds
+    start, end = fy_bounds(FY)
+    months = [f"2026-{m:02d}" for m in range(4, 13)] + [f"2027-{m:02d}" for m in (1, 2, 3)]
+    _monthly_entries(data, months)
+    loan = data.execute("SELECT * FROM liabilities WHERE name = 'SBI Home Loan'").fetchone()
+    split = _recorded_split(data.cursor(), loan, start, end, date(2027, 4, 20))
+    paid = data.execute("""SELECT SUM(amount) FROM transactions WHERE dest_ref_id = ? AND type IN ('EMI', 'Prepayment')
+                           AND transaction_date >= '2026-04-01' AND transaction_date < '2027-04-01'""", (loan["id"],)).fetchone()[0]
+    assert split["basis"] == "recorded"
+    assert split["interest"] == 12 * 30000
+    assert split["principal"] == paid - 12 * 30000  # everything paid in, less the interest charged
+
+
+def test_a_gap_falls_back_to_the_estimate_and_says_so(data):
+    _monthly_entries(data, ["2026-10"])  # switched on in October: April-September missing
+    items, _ = _with_rules(data)
+    interest = items["deductions.home_loan_interest_self_occupied"]
+    assert interest["basis"] == "estimate" and "don't cover every month" in interest["explanation"]

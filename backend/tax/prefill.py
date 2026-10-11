@@ -239,6 +239,53 @@ def _loan_use(loan) -> tuple:
     return use, share_pct
 
 
+def _recorded_split(cur, loan, start, end, today) -> Optional[dict]:
+    """Interest and principal from the loan's own ledger entries (MMEX-style: a "Loan
+    interest" entry each month, EMIs and prepayments paying it down), when interest entries
+    cover every month of the year so far. Months still to come are projected from today's
+    balance, rate and EMI. None when there's a gap (e.g. automatic EMIs switched on mid-year),
+    so the caller falls back to the amortisation estimate."""
+    last_day = date.fromordinal(min(end, date.fromordinal(today.toordinal() + 1)).toordinal() - 1)
+    if last_day < start:
+        return None  # a future year: nothing recorded yet
+    rows = cur.execute("""SELECT type, amount, transaction_date FROM transactions
+                          WHERE dest_ref_type = 'Liability' AND dest_ref_id = ? AND type IN ('Interest', 'EMI', 'Prepayment')
+                            AND transaction_date >= ? AND transaction_date <= ?""",
+                       (loan["id"], start.isoformat(), last_day.isoformat())).fetchall()
+    interest_months = {r["transaction_date"][:7] for r in rows if r["type"] == "Interest"}
+    if not interest_months:
+        return None
+    # Every month from April to the last month with an EMI date passed must have its interest.
+    due_months, y, m = [], start.year, start.month
+    while date(y, m, 1) <= last_day:
+        due_months.append(f"{y:04d}-{m:02d}")
+        y, m = (y + 1, 1) if m == MONTHS_PER_YEAR else (y, m + 1)
+    if today.day < 28 and due_months and due_months[-1] == today.strftime("%Y-%m") and due_months[-1] not in interest_months:
+        due_months.pop()  # this month's EMI may simply not be due yet
+    if any(mo not in interest_months for mo in due_months):
+        return {"gap": True}
+    interest = sum(float(r["amount"]) for r in rows if r["type"] == "Interest")
+    paid = sum(float(r["amount"]) for r in rows if r["type"] in ("EMI", "Prepayment"))
+    principal = max(paid - interest, 0.0)
+    # Project the rest of the year from today's balance.
+    rate = float(loan["interest_rate"] or 0) / 100.0 / MONTHS_PER_YEAR
+    emi, b = float(loan["emi"] or 0), float(loan["outstanding"] or 0)
+    projected_months = MONTHS_PER_YEAR - len(due_months)
+    p_interest = p_principal = 0.0
+    for _ in range(projected_months):
+        if b <= 0 or emi <= 0:
+            break
+        i = b * rate
+        p = min(max(emi - i, 0.0), b)
+        p_interest, p_principal, b = p_interest + i, p_principal + p, b - p
+    how = (f"from {len(due_months)} month(s) of interest and payments recorded on the loan this year "
+           f"({_inr(interest)} interest, {_inr(principal)} principal)")
+    if projected_months:
+        how += f", plus {projected_months} month(s) to come at {loan['interest_rate']}% on today's balance"
+    return {"interest": interest + p_interest, "principal": principal + p_principal, "explanation": how,
+            "basis": "recorded" if not projected_months else "estimate"}
+
+
 def _loan_items(cur, person_id, start, end, today, rules: Optional[dict] = None) -> tuple:
     cur.execute("""SELECT l.id, l.name, l.interest_rate, l.emi, l.outstanding, l.metadata_json, c.name AS category FROM liabilities l
                    JOIN categories c ON c.id = l.category_id WHERE l.owner_id = ? ORDER BY l.name""", (person_id,))
@@ -254,7 +301,10 @@ def _loan_items(cur, person_id, start, end, today, rules: Optional[dict] = None)
             if use == "other" or share_pct <= 0:
                 notes.append(f"{loan['name']} is left out: its money wasn't used for the house, so its interest and principal don't count as home-loan deductions.")
                 continue
-        split = _loan_split(cur, loan, start, end, today)
+        recorded = _recorded_split(cur, loan, start, end, today)
+        split = recorded if recorded and not recorded.get("gap") else _loan_split(cur, loan, start, end, today)
+        if split and recorded and recorded.get("gap"):
+            split["explanation"] += "; interest entries this year don't cover every month yet, so this is the estimate"
         if not split:
             continue
         source = {"type": "liability", "id": loan["id"]}
@@ -269,11 +319,11 @@ def _loan_items(cur, person_id, start, end, today, rules: Optional[dict] = None)
                     interest = repair_cap
                 elif repair_cap is None:
                     note += " This rule set has no cap for repair loans, so the full interest is shown."
-                items.append(_item("deductions.home_loan_interest_self_occupied", interest, loan["name"], "estimate", how, source,
+                items.append(_item("deductions.home_loan_interest_self_occupied", interest, loan["name"], split.get("basis", "estimate"), how, source,
                                    note=note + " Used for repairs or renovation: the principal doesn't count under 80C."))
             else:
-                items.append(_item("deductions.home_loan_interest_self_occupied", interest, loan["name"], "estimate", how, source, note=note))
-                items.append(_item("deductions.80C.home_loan_principal", split["principal"] * share, loan["name"], "estimate", how, source, note=note))
+                items.append(_item("deductions.home_loan_interest_self_occupied", interest, loan["name"], split.get("basis", "estimate"), how, source, note=note))
+                items.append(_item("deductions.80C.home_loan_principal", split["principal"] * share, loan["name"], split.get("basis", "estimate"), how, source, note=note))
         else:
             items.append(_item("deductions.80E", split["interest"], loan["name"], "estimate", split["explanation"], source))
     return items, notes
