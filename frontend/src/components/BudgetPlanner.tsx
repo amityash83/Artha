@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Sliders, Check, Edit2, X
-} from 'lucide-react';
+import React, { useEffect, useState } from 'react';
 import { InitData, Category } from '../types';
 import { API_BASE_URL } from '../config';
+import { formatINR } from '../format';
+import { AmountInput, SaveStatus, useAutoSave } from './settings/ui';
 
 interface BudgetPlannerProps {
   data: InitData;
@@ -11,272 +10,149 @@ interface BudgetPlannerProps {
   showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
 
-interface MonthSpent {
-  [categoryName: string]: number;
-}
+// Spending is what left a bank account ("Money out") or went on a card ("Card spend"),
+// by expense category, in the chosen month. Loan EMIs carry no category, so they count
+// towards an expense category named "EMI" when there is one.
+const SPENDING_TYPES = ['Debit', 'Spend', 'EMI'];
 
-export const BudgetPlanner: React.FC<BudgetPlannerProps> = ({ data, onRefresh, showToast }) => {
-  const categories = data.categories.filter(c => c.entity_type === 'Expense');
-  
-  // Selected Month (YYYY-MM)
-  const [selectedMonth, setSelectedMonth] = useState<string>('');
-  const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
-  const [tempBudget, setTempBudget] = useState<string>('');
-  const [saving, setSaving] = useState<boolean>(false);
-  const [spentData, setSpentData] = useState<MonthSpent>({});
-  const [loadingSpent, setLoadingSpent] = useState<boolean>(false);
+const thisMonth = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+};
+
+/** One category: what was spent, against its monthly limit, which saves as you type. */
+const BudgetRow: React.FC<{ cat: Category; spent: number; onSaved: () => void }> = ({ cat, spent, onSaved }) => {
+  const [limit, setLimit] = useState(cat.monthly_budget || 0);
+  useEffect(() => setLimit(cat.monthly_budget || 0), [cat.monthly_budget]);
+  const save = useAutoSave(async (value: number) => {
+    const res = await fetch(`${API_BASE_URL}/api/metadata/categories/${cat.id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: cat.name, entity_type: cat.entity_type, fields_definition: cat.fields_definition, monthly_budget: value }),
+    });
+    if (!res.ok) throw new Error('could not save');
+    onSaved();
+  });
+  const pct = limit > 0 ? (spent / limit) * 100 : 0;
+  const tone = limit <= 0 ? null : spent > limit ? 'danger' : pct >= 80 ? 'warning' : 'success';
+  return (
+    <div className="settings-row bp-row">
+      <div className="settings-row-text">
+        <div className="settings-row-label">{cat.name}</div>
+        <div className="settings-row-desc">
+          {limit > 0
+            ? spent > limit ? <span style={{ color: '#fca5a5' }}>{formatINR(spent)} spent, {formatINR(spent - limit)} over</span>
+              : `${formatINR(spent)} spent, ${formatINR(limit - spent)} left`
+            : spent > 0 ? `${formatINR(spent)} spent, no limit set` : 'No limit set'}
+        </div>
+        {tone && <div className="cc-meter bp-meter"><div style={{ width: `${Math.min(pct, 100)}%`, background: `var(--${tone})` }} /></div>}
+      </div>
+      <div className="settings-row-control">
+        <SaveStatus state={save.state} error={save.error} />
+        <AmountInput label={`${cat.name} monthly limit`} prefix="₹" width={100} value={limit}
+          onChange={(v) => { setLimit(v); save.schedule(v); }} />
+      </div>
+    </div>
+  );
+};
+
+export const BudgetPlanner: React.FC<BudgetPlannerProps> = ({ data, onRefresh }) => {
+  const categories = data.categories.filter((c) => c.entity_type === 'Expense');
+  const [month, setMonth] = useState(thisMonth);
+  const [spent, setSpent] = useState<Record<number, number>>({});
+  const [uncategorised, setUncategorised] = useState(0);
+  const [loading, setLoading] = useState(true);
+  // Row order is fixed when a month loads, so a row doesn't jump while its limit is typed.
+  const [order, setOrder] = useState<number[]>([]);
 
   useEffect(() => {
-    const today = new Date();
-    const yearStr = today.getFullYear();
-    const monthStr = String(today.getMonth() + 1).padStart(2, '0');
-    setSelectedMonth(`${yearStr}-${monthStr}`);
-  }, []);
+    setLoading(true);
+    fetch(`${API_BASE_URL}/api/entities/transactions`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((txs: any[]) => {
+        const byCat: Record<number, number> = {};
+        let none = 0;
+        const emiCategory = categories.find((c) => c.name.toLowerCase() === 'emi');
+        for (const tx of txs) {
+          if (!SPENDING_TYPES.includes(tx.type) || !String(tx.transaction_date || '').startsWith(month)) continue;
+          if (tx.type === 'EMI' && !tx.category_id && !emiCategory) continue; // nowhere to count it
+          const cat = categories.find((c) => c.id === (tx.type === 'EMI' && !tx.category_id ? emiCategory?.id : tx.category_id));
+          if (cat) byCat[cat.id] = (byCat[cat.id] || 0) + tx.amount; else none += tx.amount;
+        }
+        setSpent(byCat);
+        setUncategorised(none);
+        // Categories with a limit first (most used first), then ones with spending, then the rest.
+        const usage = (c: Category) => ((c.monthly_budget || 0) > 0 ? (byCat[c.id] || 0) / (c.monthly_budget || 1) : -1);
+        setOrder([...categories].sort((a, b) => usage(b) - usage(a) || (byCat[b.id] || 0) - (byCat[a.id] || 0) || a.name.localeCompare(b.name)).map((c) => c.id));
+      })
+      .catch(() => null)
+      .finally(() => setLoading(false));
+  }, [month]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fetchMonthSpent = async () => {
-    if (!selectedMonth) return;
-    setLoadingSpent(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/entities/transactions`);
-      if (res.ok) {
-        const txs = await res.json();
-        const monthlySpent: MonthSpent = {};
-        
-        txs.forEach((tx: any) => {
-          if (tx.type === 'Debit' && tx.transaction_date && tx.category_id) {
-            if (tx.transaction_date.startsWith(selectedMonth)) {
-              const cat = data.categories.find(c => c.id === tx.category_id);
-              if (cat && cat.entity_type === 'Expense') {
-                monthlySpent[cat.name] = (monthlySpent[cat.name] || 0) + tx.amount;
-              }
-            }
-          }
-        });
+  const budgeted = categories.filter((c) => (c.monthly_budget || 0) > 0);
+  const limits = budgeted.reduce((s, c) => s + (c.monthly_budget || 0), 0);
+  const spentBudgeted = budgeted.reduce((s, c) => s + (spent[c.id] || 0), 0);
+  const spentElsewhere = categories.filter((c) => !((c.monthly_budget || 0) > 0)).reduce((s, c) => s + (spent[c.id] || 0), 0) + uncategorised;
+  const over = budgeted.filter((c) => (spent[c.id] || 0) > (c.monthly_budget || 0));
 
-        setSpentData(monthlySpent);
-      }
-    } catch (err) {
-      console.error("Failed to fetch spent data:", err);
-    } finally {
-      setLoadingSpent(false);
-    }
-  };
+  const rank = (c: Category) => { const i = order.indexOf(c.id); return i < 0 ? order.length : i; };
+  const ordered = [...categories].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 
-  useEffect(() => {
-    fetchMonthSpent();
-  }, [selectedMonth, data.categories]);
-
-  const handleEditClick = (cat: Category) => {
-    setEditingCategoryId(cat.id);
-    setTempBudget(String(cat.monthly_budget || 0));
-  };
-
-  const handleSaveBudget = async (cat: Category) => {
-    setSaving(true);
-    try {
-      const budgetVal = parseFloat(tempBudget) || 0;
-      
-      const payload = {
-        name: cat.name,
-        entity_type: cat.entity_type,
-        fields_definition: cat.fields_definition,
-        monthly_budget: budgetVal
-      };
-
-      const res = await fetch(`${API_BASE_URL}/api/metadata/categories/${cat.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (res.ok) {
-        setEditingCategoryId(null);
-        onRefresh();
-        if (showToast) showToast("Budget updated successfully!", "success");
-      } else {
-        if (showToast) showToast("Failed to update budget.", "error");
-        else alert("Failed to update budget.");
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const formatCurrency = (val: number) => {
-    return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(val);
-  };
-
-  const totalBudget = categories.reduce((sum, c) => sum + (c.monthly_budget || 0), 0);
-  const totalSpent = Object.values(spentData).reduce((sum, v) => sum + v, 0);
-  const budgetRemaining = totalBudget - totalSpent;
-  const isOverBudget = budgetRemaining < 0;
-
-  const getMonthOptions = () => {
-    const options = [];
-    const today = new Date();
-    for (let i = 0; i < 6; i++) {
-      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-      const yearStr = d.getFullYear();
-      const monthStr = String(d.getMonth() + 1).padStart(2, '0');
-      const val = `${yearStr}-${monthStr}`;
-      const label = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      options.push({ val, label });
-    }
-    return options;
-  };
+  const months = Array.from({ length: 12 }, (_, i) => {
+    const d = new Date(new Date().getFullYear(), new Date().getMonth() - i, 1);
+    return { value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, label: d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }) };
+  });
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div className="db-page">
+      <div className="eg-head">
         <div>
           <h1 className="page-title">Budget Planner</h1>
-          <p className="page-subtitle">A monthly limit for each spending category, against what you've actually spent.</p>
+          <p className="page-subtitle">A monthly limit for each spending category, against what you actually spent from your accounts and cards.</p>
         </div>
-        <div>
-          <select 
-            className="form-input" 
-            style={{ width: '200px', background: 'rgba(15,23,42,0.8)', color: '#fff', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px' }}
-            value={selectedMonth} 
-            onChange={(e) => setSelectedMonth(e.target.value)}
-          >
-            {getMonthOptions().map(opt => (
-              <option key={opt.val} value={opt.val}>{opt.label}</option>
-            ))}
-          </select>
+        <select className="form-control bp-month" aria-label="Month" value={month} onChange={(e) => setMonth(e.target.value)}>
+          {months.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+        </select>
+      </div>
+
+      <div className="glass-panel cc-summary db-summary">
+        <div className="cc-summary-main">
+          <div className="cc-label">{limits > 0 ? (spentBudgeted > limits ? 'Over your limits' : 'Left within your limits') : 'No limits set yet'}</div>
+          <strong className="eg-figure db-networth" style={spentBudgeted > limits && limits > 0 ? { color: '#fca5a5' } : undefined}>
+            {limits > 0 ? formatINR(Math.abs(limits - spentBudgeted)) : '—'}
+          </strong>
+          {limits > 0 && <div className="cc-meter"><div style={{ width: `${Math.min((spentBudgeted / limits) * 100, 100)}%`, background: spentBudgeted > limits ? 'var(--danger)' : 'var(--accent)' }} /></div>}
+          <span className="cc-note">{limits > 0 ? `${formatINR(spentBudgeted)} of ${formatINR(limits)} across ${budgeted.length} categor${budgeted.length === 1 ? 'y' : 'ies'}` : 'Type a limit next to any category below.'}</span>
+        </div>
+        <div className="cc-summary-stat">
+          <div className="cc-label">Categories over</div>
+          <strong style={over.length ? { color: '#fca5a5' } : undefined}>{over.length}</strong>
+          <span className="cc-note">{over.length ? over.map((c) => c.name).join(', ') : 'none'}</span>
+        </div>
+        <div className="cc-summary-stat">
+          <div className="cc-label">Spent without a limit</div>
+          <strong>{formatINR(spentElsewhere)}</strong>
+          <span className="cc-note">{uncategorised > 0 ? `incl. ${formatINR(uncategorised)} uncategorised` : 'in other categories'}</span>
+        </div>
+        <div className="cc-summary-stat">
+          <div className="cc-label">Total spent</div>
+          <strong>{formatINR(spentBudgeted + spentElsewhere)}</strong>
+          <span className="cc-note">accounts and cards</span>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '24px' }}>
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Total Allocated Budget</span>
-          <h2 style={{ fontSize: '24px', fontWeight: 700, color: '#f8fafc', margin: '4px 0' }}>{formatCurrency(totalBudget)}</h2>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Target monthly ceiling limits</span>
-        </div>
-
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Total Actual Spend</span>
-          <h2 style={{ fontSize: '24px', fontWeight: 700, color: totalSpent > totalBudget ? 'var(--danger-light)' : 'var(--success-light)', margin: '4px 0' }}>{formatCurrency(totalSpent)}</h2>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Accumulated debits for chosen month</span>
-        </div>
-
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{isOverBudget ? 'Budget Overrun' : 'Budget Remaining'}</span>
-          <h2 style={{ fontSize: '24px', fontWeight: 700, color: isOverBudget ? 'var(--danger)' : '#10b981', margin: '4px 0' }}>
-            {isOverBudget ? `-${formatCurrency(Math.abs(budgetRemaining))}` : formatCurrency(budgetRemaining)}
-          </h2>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-            {isOverBudget ? 'Spent over limit!' : 'Under budget allowance'}
-          </span>
-        </div>
-      </div>
-
-      <div className="glass-panel" style={{ padding: '24px' }}>
-        <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#f8fafc', marginBottom: '20px' }}>Expense Budgets &amp; Comparison</h3>
-        
-        {loadingSpent ? (
-          <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>Calculating real-time category spends...</div>
-        ) : categories.length === 0 ? (
-          <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
-            <Sliders size={32} style={{ marginBottom: '12px', opacity: 0.5 }} />
-            <div>No Expense categories registered. Please create categories first in Settings.</div>
+      {categories.length === 0 ? (
+        <div className="settings-group"><div className="ie-empty"><p>No spending categories yet. Add them in Settings › Categories.</p></div></div>
+      ) : (
+        <section aria-label="Categories">
+          <div className="settings-group-head">
+            <h3 className="settings-group-title">Categories</h3>
+            {loading && <span className="cc-note">Adding up…</span>}
           </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {categories.map((cat) => {
-              const spent = spentData[cat.name] || 0;
-              const budget = cat.monthly_budget || 0;
-              const ratio = budget > 0 ? (spent / budget) * 100 : 0;
-              const isOver = spent > budget && budget > 0;
-              const progressColor = isOver ? 'var(--danger)' : ratio >= 75 ? 'var(--warning)' : '#10b981';
-
-              const isEditing = editingCategoryId === cat.id;
-
-              return (
-                <div key={cat.id} style={{ display: 'grid', gridTemplateColumns: '1.2fr 2fr 1fr auto', gap: '24px', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.02)', paddingBottom: '16px' }} className="grid-split">
-                  <div>
-                    <h4 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', margin: 0 }}>{cat.name}</h4>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
-                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                        Spent: <strong>{formatCurrency(spent)}</strong>
-                      </span>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)' }}>
-                      <span>Usage: {ratio.toFixed(0)}%</span>
-                      {budget === 0 && <span style={{ color: 'var(--text-muted)' }}>No Budget Set</span>}
-                    </div>
-                    {budget > 0 && (
-                      <div style={{ height: '8px', background: 'rgba(255,255,255,0.04)', borderRadius: '10px', overflow: 'hidden' }}>
-                        <div style={{
-                          width: `${Math.min(ratio, 100)}%`,
-                          height: '100%',
-                          background: progressColor,
-                          boxShadow: `0 0 8px ${progressColor}33`
-                        }}></div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
-                    {isEditing ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>₹</span>
-                        <input 
-                          type="number" 
-                          className="form-input" 
-                          style={{ width: '90px', padding: '4px 8px', fontSize: '13px' }}
-                          value={tempBudget}
-                          onChange={(e) => setTempBudget(e.target.value)}
-                          disabled={saving}
-                        />
-                      </div>
-                    ) : (
-                      <div style={{ fontSize: '14px', fontWeight: 600, color: '#f1f5f9' }}>
-                        {budget > 0 ? formatCurrency(budget) : '₹0'}
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
-                    {isEditing ? (
-                      <div style={{ display: 'flex', gap: '6px' }}>
-                        <button 
-                          className="btn btn-secondary" 
-                          style={{ padding: '6px', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', color: '#10b981' }}
-                          onClick={() => handleSaveBudget(cat)}
-                          disabled={saving}
-                        >
-                          <Check size={14} />
-                        </button>
-                        <button 
-                          className="btn btn-secondary" 
-                          style={{ padding: '6px' }}
-                          onClick={() => setEditingCategoryId(null)}
-                          disabled={saving}
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ) : (
-                      <button 
-                        className="btn btn-secondary" 
-                        style={{ padding: '6px 12px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}
-                        onClick={() => handleEditClick(cat)}
-                      >
-                        <Edit2 size={11} /> Edit Limit
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+          <div className="settings-group">
+            {ordered.map((c) => <BudgetRow key={c.id} cat={c} spent={spent[c.id] || 0} onSaved={onRefresh} />)}
           </div>
-        )}
-      </div>
+        </section>
+      )}
     </div>
   );
 };
