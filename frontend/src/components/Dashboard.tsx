@@ -375,14 +375,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onNavigate, onGo, on
       {recording && (
         <div className="db-modal" onMouseDown={(e) => { if (e.target === e.currentTarget) setRecording(false); }}>
           <div ref={snapshotRef} role="dialog" aria-modal="true" aria-label="Record this month" tabIndex={-1} className="db-modal-body">
-            <div className="db-modal-head">
-              <div>
-                <h2>Record this month</h2>
-                <p className="cc-note">Update what each investment is worth and what you still owe, then save. Account balances come from your transactions.</p>
-              </div>
-              <button type="button" className="settings-link" onClick={() => setRecording(false)}>Close</button>
-            </div>
-            <SnapshotForm data={data} onRefresh={onRefresh} showToast={showToast} embedded onDone={() => setRecording(false)} />
+            <SnapshotForm data={data} onRefresh={onRefresh} showToast={showToast} recordedMonths={snapshots.map((s) => s.month)}
+              onCancel={() => setRecording(false)} onDone={() => setRecording(false)} />
           </div>
         </div>
       )}

@@ -1,221 +1,170 @@
-import React, { useState, useEffect } from 'react';
-import { Calendar, CheckCircle, Save, Info } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
 import { InitData } from '../types';
 import { API_BASE_URL } from '../config';
+import { formatINR } from '../format';
+import { AmountInput, Group, Row } from './settings/ui';
 
 interface SnapshotProps {
   data: InitData;
   onRefresh: () => void;
   showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
-  /** Shown in a panel over the Dashboard: no page title, and closes once saved. */
-  embedded?: boolean;
-  onDone?: () => void;
+  /** Months (YYYY-MM) already recorded, to warn before replacing one. */
+  recordedMonths?: string[];
+  onCancel: () => void;
+  onDone: () => void;
 }
 
-export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh, showToast, embedded, onDone }) => {
-  const [month, setMonth] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [success, setSuccess] = useState(false);
+const thisMonth = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+};
+const monthName = (ym: string) => {
+  const m = /^(\d{4})-(\d{2})$/.exec(ym);
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }) : ym;
+};
 
-  // Dynamic balances map state
+/**
+ * Record a month: bring asset values and outstanding balances up to date, then freeze
+ * them (with the ledger-derived account balances) as that month's snapshot. Shown in a
+ * panel from the Dashboard's net worth card.
+ */
+export const Snapshot: React.FC<SnapshotProps> = ({ data, onRefresh, showToast, recordedMonths = [], onCancel, onDone }) => {
+  const [month, setMonth] = useState(thisMonth);
+  const [saving, setSaving] = useState(false);
   // Accounts have no editable balance here: current_balance is derived server-side
   // from the transactions ledger, so it's shown read-only rather than collected as input.
   const [assetValues, setAssetValues] = useState<Record<number, number>>({});
   const [liabilityBalances, setLiabilityBalances] = useState<Record<number, number>>({});
 
   useEffect(() => {
-    const now = new Date();
-    const YYYY = now.getFullYear();
-    const MM = String(now.getMonth() + 1).padStart(2, '0');
-    setMonth(`${YYYY}-${MM}`);
-
-    // Prepopulate form states
-    const asts: Record<number, number> = {};
-    data.assets.forEach(a => { asts[a.id] = a.current_value; });
-    setAssetValues(asts);
-
-    const liabs: Record<number, number> = {};
-    data.liabilities.forEach(l => { liabs[l.id] = l.outstanding; });
-    setLiabilityBalances(liabs);
+    setAssetValues(Object.fromEntries(data.assets.map((a) => [a.id, a.current_value || 0])));
+    setLiabilityBalances(Object.fromEntries(data.liabilities.map((l) => [l.id, l.outstanding || 0])));
   }, [data]);
 
-  const handleSaveSnapshot = async (e: React.FormEvent) => {
+  const assetValue = (a: InitData['assets'][number]) => assetValues[a.id] ?? a.current_value ?? 0;
+  const owedOn = (l: InitData['liabilities'][number]) => liabilityBalances[l.id] ?? l.outstanding ?? 0;
+  const cash = data.accounts.reduce((s, a) => s + (a.current_balance || 0), 0);
+  const owned = cash + data.assets.reduce((s, a) => s + assetValue(a), 0);
+  const owed = data.liabilities.reduce((s, l) => s + owedOn(l), 0);
+  const changed = data.assets.filter((a) => assetValue(a) !== (a.current_value || 0)).length
+    + data.liabilities.filter((l) => owedOn(l) !== (l.outstanding || 0)).length;
+  const replacing = recordedMonths.includes(month);
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!/^\d{4}-\d{2}$/.test(month)) return;
     setSaving(true);
-    setSuccess(false);
-
     try {
-      // Accounts are not written back here: current_balance is derived from the
-      // transactions ledger and always up to date, so there is nothing to save.
-
-      // 2. Update Assets in active database
+      // Write back only the values that changed; accounts are derived, so never written.
       for (const asset of data.assets) {
         const val = assetValues[asset.id];
-        if (val !== asset.current_value) {
+        if (val !== undefined && val !== asset.current_value) {
           await fetch(`${API_BASE_URL}/api/entities/assets/${asset.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...asset, current_value: val })
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...asset, current_value: val }),
           });
         }
       }
-
-      // 3. Update Liabilities in active database
       for (const liab of data.liabilities) {
         const bal = liabilityBalances[liab.id];
-        if (bal !== liab.outstanding) {
+        if (bal !== undefined && bal !== liab.outstanding) {
           await fetch(`${API_BASE_URL}/api/entities/liabilities/${liab.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...liab, outstanding: bal })
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...liab, outstanding: bal }),
           });
         }
       }
 
-      // 4. Compile and Post the frozen snapshot snapshot
       const snapshotPayload = {
         accounts: data.accounts,
-        assets: data.assets.map(a => ({ ...a, current_value: assetValues[a.id] })),
-        liabilities: data.liabilities.map(l => ({ ...l, outstanding: liabilityBalances[l.id] })),
-        goals: data.goals
+        assets: data.assets.map((a) => ({ ...a, current_value: assetValue(a) })),
+        liabilities: data.liabilities.map((l) => ({ ...l, outstanding: owedOn(l) })),
+        goals: data.goals,
       };
-
       const formData = new FormData();
       formData.append('month', month);
       formData.append('snapshot_data_str', JSON.stringify(snapshotPayload));
-
-      const res = await fetch(`${API_BASE_URL}/api/snapshots`, {
-        method: 'POST',
-        body: formData
-      });
-
+      const res = await fetch(`${API_BASE_URL}/api/snapshots`, { method: 'POST', body: formData });
       if (res.ok) {
-        setSuccess(true);
         onRefresh();
-        if (showToast) showToast(`Snapshot for ${month} saved`, "success");
-        onDone?.();
+        showToast?.(`${monthName(month)} recorded`, 'success');
+        onDone();
       } else {
-        if (showToast) showToast("Snapshot save failed", "error");
-        else alert("Snapshot save failed");
+        showToast?.("Couldn't save the snapshot", 'error');
       }
     } catch (err) {
       console.error(err);
-      if (showToast) showToast("Error saving snapshot details", "error");
-      else alert("Error saving snapshot details");
+      showToast?.("Couldn't save the snapshot", 'error');
     } finally {
       setSaving(false);
     }
   };
 
+  const meta = (kind: string, now: number, before: number) => (
+    <>{kind}{now !== before && <> · <span className="snap-was">was {formatINR(before)}</span></>}</>
+  );
+
   return (
-    <div style={embedded ? undefined : { maxWidth: '800px', margin: '0 auto', fontFamily: 'Inter, sans-serif' }}>
-      {!embedded && (
-        <div className="page-header">
-          <h1 className="page-title">Monthly Snapshot</h1>
-          <p className="page-subtitle">Record this month's balances so the Dashboard can show your progress over time.</p>
+    <form className="glass-panel snap" onSubmit={handleSave}>
+      <div className="snap-head">
+        <div>
+          <h2>Record this month</h2>
+          <p className="cc-note">Update what each investment is worth and what you still owe, then save. Account balances come from your transactions.</p>
         </div>
-      )}
-
-      <div className="glass-panel" style={{ padding: embedded ? '24px' : '32px' }}>
-        <form onSubmit={handleSaveSnapshot}>
-          {/* Header Row: Month selection */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '28px', borderBottom: '1px solid var(--border-glass)', paddingBottom: '20px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <Calendar size={18} style={{ color: '#a78bfa' }} />
-              <span style={{ fontWeight: 600, color: '#e2e8f0' }}>Snapshot Month:</span>
-              <input 
-                type="month" 
-                className="form-control" 
-                style={{ padding: '6px 12px', fontSize: '13px', width: '160px' }}
-                value={month} 
-                onChange={e => setMonth(e.target.value)} 
-              />
-            </div>
-            
-            <button type="submit" disabled={saving} className="btn btn-primary">
-              <Save size={16} /> {saving ? 'Saving...' : 'Save Snapshot'}
-            </button>
-          </div>
-
-          {/* Alert Success */}
-          {success && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 16px', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', color: '#10b981', borderRadius: '8px', marginBottom: '24px', fontSize: '13px' }}>
-              <CheckCircle size={16} />
-              <span>Snapshot compiled and saved successfully. Active balances updated!</span>
-            </div>
-          )}
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-            {/* Accounts balances Section (read-only: balance is derived from the transactions ledger) */}
-            {data.accounts.length > 0 && (
-              <div>
-                <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '14px', color: '#a78bfa' }}>Accounts (Liquid Balances)</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                  {data.accounts.map(acc => (
-                    <div key={acc.id} className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{acc.name} ({acc.institution_name || 'Bank'})</label>
-                      <input
-                        type="number"
-                        className="form-control"
-                        value={acc.current_balance ?? 0}
-                        readOnly
-                        disabled
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Assets values Section */}
-            {data.assets.length > 0 && (
-              <div>
-                <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '14px', color: '#a78bfa' }}>Assets Valuation</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                  {data.assets.map(asset => (
-                    <div key={asset.id} className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{asset.name} ({asset.category_name || 'General'})</label>
-                      <input 
-                        type="number" 
-                        className="form-control" 
-                        value={assetValues[asset.id] ?? 0}
-                        onChange={e => setAssetValues({ ...assetValues, [asset.id]: parseFloat(e.target.value) || 0 })}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Liabilities outstanding Section */}
-            {data.liabilities.length > 0 && (
-              <div>
-                <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '14px', color: '#a78bfa' }}>Liabilities Outstanding</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                  {data.liabilities.map(liab => (
-                    <div key={liab.id} className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{liab.name} ({liab.category_name || 'General'})</label>
-                      <input 
-                        type="number" 
-                        className="form-control" 
-                        value={liabilityBalances[liab.id] ?? 0}
-                        onChange={e => setLiabilityBalances({ ...liabilityBalances, [liab.id]: parseFloat(e.target.value) || 0 })}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-          
-          <div style={{ marginTop: '32px', padding: '16px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Info size={16} style={{ color: '#a78bfa', flexShrink: 0 }} />
-            <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0 }}>
-              Note: Account balances are shown for reference only and are always derived automatically. Saving the snapshot updates asset/liability values you've edited above and will overwrite this month's archived entry if it already exists.
-            </p>
-          </div>
-        </form>
+        <label className="snap-month">
+          <span>Month</span>
+          <input type="month" className="form-control" value={month} onChange={(e) => setMonth(e.target.value)} required />
+        </label>
       </div>
-    </div>
+      {replacing && <p className="snap-warn">{monthName(month)} is already recorded. Saving replaces it.</p>}
+
+      <div className="snap-groups">
+        {data.assets.length > 0 && (
+          <Group title="Investments and property" description="Today's value of each.">
+            {data.assets.map((a) => (
+              <Row key={a.id} htmlFor={`snap-a-${a.id}`} label={a.name} description={meta(a.category_name || 'Asset', assetValue(a), a.current_value || 0)}>
+                <AmountInput id={`snap-a-${a.id}`} label={`${a.name} value`} prefix="₹" width={130}
+                  value={assetValue(a)} onChange={(v) => setAssetValues((s) => ({ ...s, [a.id]: v }))} />
+              </Row>
+            ))}
+          </Group>
+        )}
+
+        {data.liabilities.length > 0 && (
+          <Group title="Loans and cards" description="What's still outstanding on each.">
+            {data.liabilities.map((l) => (
+              <Row key={l.id} htmlFor={`snap-l-${l.id}`} label={l.name} description={meta(l.category_name || 'Loan', owedOn(l), l.outstanding || 0)}>
+                <AmountInput id={`snap-l-${l.id}`} label={`${l.name} outstanding`} prefix="₹" width={130}
+                  value={owedOn(l)} onChange={(v) => setLiabilityBalances((s) => ({ ...s, [l.id]: v }))} />
+              </Row>
+            ))}
+          </Group>
+        )}
+
+        {data.accounts.length > 0 && (
+          <Group title="Bank accounts" description="Worked out from your transactions; record a transaction to change one.">
+            {data.accounts.map((a) => (
+              <Row key={a.id} label={a.name} description={a.institution_name || undefined}>
+                <span className="snap-readonly">{formatINR(a.current_balance || 0)}</span>
+              </Row>
+            ))}
+          </Group>
+        )}
+
+        {data.assets.length + data.liabilities.length + data.accounts.length === 0 && (
+          <p className="cc-note">Nothing to record yet. Add accounts, assets or loans first.</p>
+        )}
+      </div>
+
+      <div className="snap-foot">
+        <div>
+          <span className="cc-label">Net worth for {monthName(month)}</span>
+          <strong className="eg-figure">{formatINR(owned - owed)}</strong>
+          <span className="cc-note">{changed === 0 ? 'No values changed' : `${changed} value${changed === 1 ? '' : 's'} updated`}</span>
+        </div>
+        <div className="snap-actions">
+          <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancel</button>
+          <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : replacing ? 'Replace snapshot' : 'Save snapshot'}</button>
+        </div>
+      </div>
+    </form>
   );
 };

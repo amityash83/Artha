@@ -995,6 +995,18 @@ h1, h2, h3, h4, h5 {
 .db-head-actions { display: flex; align-items: center; gap: 10px; }
 .db-modal { position: fixed; inset: 0; z-index: 1000; background: rgba(7, 9, 14, 0.8); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: flex-start; padding: 40px 20px; overflow-y: auto; }
 .db-modal-body { width: 100%; max-width: 760px; display: flex; flex-direction: column; gap: 14px; outline: none; }
-.db-modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
-.db-modal-head h2 { margin: 0 0 4px; font-size: 18px; color: var(--text-primary); }
-.db-modal-head p { margin: 0; }
+
+/* Record this month (components/Snapshot.tsx), in the Dashboard's panel. */
+.snap { padding: 22px 24px; display: flex; flex-direction: column; gap: 18px; }
+.snap-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; flex-wrap: wrap; }
+.snap-head h2 { margin: 0 0 4px; font-size: 18px; color: var(--text-primary); }
+.snap-head p { margin: 0; max-width: 460px; }
+.snap-month { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+.snap-month input { width: 170px; font-size: 13px; padding: 6px 10px; }
+.snap-warn { margin: -6px 0 0; font-size: 12.5px; color: var(--warning); }
+.snap-groups { display: flex; flex-direction: column; gap: 20px; }
+.snap-was { color: var(--warning); }
+.snap-readonly { font-size: 13.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.snap-foot { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; border-top: 1px solid var(--border-glass); padding-top: 14px; }
+.snap-foot > div:first-child { display: flex; flex-direction: column; gap: 2px; }
+.snap-actions { display: flex; gap: 8px; }
