@@ -10,4 +10,10 @@ contextBridge.exposeInMainWorld('artha', {
   selectDbFile: (mode) => ipcRenderer.invoke('select-db-file', mode === 'create' ? 'create' : 'open'),
   /** Save the current page (print layout) as a PDF via a save dialog. Resolves to the saved path, or null if cancelled. */
   savePdf: (suggestedName) => ipcRenderer.invoke('save-pdf', typeof suggestedName === 'string' ? suggestedName : null),
+  /** Menu bar commands (see buildMenu in main.js). Returns an unsubscribe function. */
+  onMenuCommand: (callback) => {
+    const listener = (_event, command) => { if (typeof command === 'string') callback(command); };
+    ipcRenderer.on('menu-command', listener);
+    return () => ipcRenderer.removeListener('menu-command', listener);
+  },
 });

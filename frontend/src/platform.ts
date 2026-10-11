@@ -1,3 +1,5 @@
+import type { AppCommand } from './navigation';
+
 // What the UI can do depends on where it runs: the desktop app (Electron) exposes a
 // small API via electron/preload.js as window.artha; a plain browser (dev server or
 // the Docker/web deployment) has none. Components ask here instead of touching
@@ -7,6 +9,7 @@ interface ArthaDesktopApi {
   isDesktop: true;
   selectDbFile: (mode: 'open' | 'create') => Promise<string | null>;
   savePdf: (suggestedName: string) => Promise<string | null>;
+  onMenuCommand?: (callback: (command: string) => void) => () => void;
 }
 
 declare global {
@@ -26,6 +29,12 @@ export async function saveAsPdf(suggestedName: string): Promise<string | null> {
   if (window.artha) return window.artha.savePdf(suggestedName);
   window.print();
   return 'print-dialog';
+}
+
+/** Commands chosen in the desktop app's menu bar (File > New transaction, View > Go to…). No-op in a browser. */
+export function onMenuCommand(callback: (command: AppCommand) => void): () => void {
+  if (!window.artha?.onMenuCommand) return () => {};
+  return window.artha.onMenuCommand((c) => callback(c as AppCommand));
 }
 
 /** Native file dialog for picking/creating a database file. Desktop only; null if cancelled or unavailable. */

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 
@@ -122,6 +122,68 @@ function startBackend() {
   });
 }
 
+// The menu bar: Artha's own, replacing Electron's default (whose View menu exposed
+// DevTools/Force Reload and whose Help linked to electronjs.org). Items that act on the
+// app send a command to the page (preload.js onMenuCommand -> App.runCommand), the same
+// commands the in-app top bar uses. Hidden until Alt on Windows/Linux (autoHideMenuBar);
+// always present on macOS, where it also carries the standard shortcuts.
+function buildMenu(isDev) {
+  const isMac = process.platform === 'darwin';
+  const send = (command) => () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('menu-command', command);
+  };
+  const settingsItem = { label: isMac ? 'Settings…' : 'Settings', accelerator: 'CmdOrCtrl+,', click: send('settings') };
+  const template = [
+    ...(isMac ? [{
+      // Explicit labels: in development app.name is the package name ("@artha/electron").
+      // (Renaming the app instead would also move Electron's userData folder.)
+      label: 'Artha',
+      submenu: [
+        { role: 'about', label: 'About Artha' }, { type: 'separator' }, settingsItem, { type: 'separator' },
+        { role: 'services' }, { type: 'separator' }, { role: 'hide', label: 'Hide Artha' }, { role: 'hideOthers' }, { role: 'unhide' },
+        { type: 'separator' }, { role: 'quit', label: 'Quit Artha' },
+      ],
+    }] : []),
+    {
+      label: 'File',
+      submenu: [
+        { label: 'New Transaction', accelerator: 'CmdOrCtrl+N', click: send('new-transaction') },
+        {
+          label: 'New',
+          submenu: [
+            { label: 'Account', click: send('new-account') },
+            { label: 'Asset or Investment', click: send('new-asset') },
+            { label: 'Loan', click: send('new-loan') },
+            { label: 'Income Entry', click: send('new-income') },
+            { label: 'Expense Entry', click: send('new-expense') },
+          ],
+        },
+        { type: 'separator' },
+        { label: 'Open Database…', accelerator: 'CmdOrCtrl+O', click: send('open-database') },
+        { label: 'New Database…', click: send('new-database') },
+        { type: 'separator' },
+        { label: 'Back Up Now', click: send('backup-now') },
+        ...(isMac ? [{ type: 'separator' }, { role: 'close' }] : [{ type: 'separator' }, settingsItem, { type: 'separator' }, { role: 'quit', label: 'Exit' }]),
+      ],
+    },
+    { role: 'editMenu' },
+    {
+      label: 'View',
+      submenu: [
+        { label: 'Go To…', accelerator: 'CmdOrCtrl+K', click: send('goto') },
+        { type: 'separator' },
+        { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+        ...(isDev ? [{ type: 'separator' }, { role: 'reload' }, { role: 'toggleDevTools' }] : []),
+      ],
+    },
+    { role: 'windowMenu' },
+    { role: 'help', submenu: [{ label: 'Artha Help', click: send('help') }] },
+  ];
+  return Menu.buildFromTemplate(template);
+}
+
 function createWindow() {
   const isDev = !app.isPackaged;
   // Window icon (Linux/Windows taskbar — macOS uses the app bundle icon set via
@@ -158,6 +220,8 @@ function createWindow() {
     // The web UI build, copied next to this file by scripts/copy-web.mjs before packaging.
     mainWindow.loadFile(path.join(__dirname, 'web', 'index.html'));
   }
+
+  Menu.setApplicationMenu(buildMenu(isDev));
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();

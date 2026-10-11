@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Archive, Database, Landmark, Palette, SlidersHorizontal, Sparkles, Tags, Upload, Users } from 'lucide-react';
 import { BackupsSection, DatabaseSection, ImportSection } from './settings/DataSections';
 import { CategoriesSection, InstitutionsSection, PeopleSection, RulesSection } from './settings/PlanningSections';
@@ -8,6 +8,8 @@ import type { SectionProps } from './settings/ui';
 interface SettingsProps {
   onRefresh: () => void;
   showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
+  /** Open this section (from the top bar or Go-to search); nonce re-triggers the same section. */
+  openSection?: { id: string; nonce: number } | null;
 }
 
 type SectionId = 'database' | 'backups' | 'import' | 'rules' | 'categories' | 'people' | 'institutions' | 'ai' | 'appearance';
@@ -27,6 +29,21 @@ const NAV: { heading: string; items: { id: SectionId; label: string; icon: React
   { heading: 'Assistant', items: [{ id: 'ai', label: 'AI assistant', icon: <Sparkles size={15} /> }] },
   { heading: 'Appearance', items: [{ id: 'appearance', label: 'Appearance', icon: <Palette size={15} /> }] },
 ];
+
+const KEYWORDS: Record<SectionId, string> = {
+  database: 'file switch open new',
+  backups: 'restore copy automatic',
+  import: 'mmex money manager csv',
+  rules: 'emergency fund thresholds savings rate',
+  categories: 'custom fields schema',
+  people: 'household owner spouse',
+  institutions: 'banks brokers insurers lenders',
+  ai: 'assistant ollama openai anthropic claude',
+  appearance: 'branding accent colour logo',
+};
+
+/** Settings sections for the Go-to search. */
+export const SETTINGS_SECTIONS = NAV.flatMap((g) => g.items.map((it) => ({ id: it.id, label: it.label, keywords: KEYWORDS[it.id] })));
 
 const SECTIONS: Record<SectionId, React.FC<SectionProps>> = {
   database: DatabaseSection,
@@ -54,12 +71,15 @@ const initialSection = (): SectionId => {
  * Settings: a section list on the left and, on the right, groups of "label | control"
  * rows (components/settings/ui.tsx). Most changes save as they're made.
  */
-export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast }) => {
-  const [section, setSection] = useState<SectionId>(initialSection);
+export const Settings: React.FC<SettingsProps> = ({ onRefresh, showToast, openSection }) => {
+  const [section, setSection] = useState<SectionId>(() => (openSection && openSection.id in SECTIONS ? openSection.id as SectionId : initialSection()));
   const open = (id: SectionId) => {
     setSection(id);
     try { window.localStorage.setItem(LAST_SECTION_KEY, id); } catch { /* per-device convenience only */ }
   };
+  useEffect(() => {
+    if (openSection && openSection.id in SECTIONS) open(openSection.id as SectionId);
+  }, [openSection?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
   const Section = SECTIONS[section];
   return (
     <div style={{ paddingBottom: '40px' }}>

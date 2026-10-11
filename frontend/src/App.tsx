@@ -1,9 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import {
-  Landmark, LandmarkIcon, PiggyBank,
-  Target, FileText, Database, Compass, Calendar, Calculator, Zap, LineChart, ArrowRightLeft, Sliders,
-  CheckCircle2, AlertCircle, Info, X, CreditCard, Percent, Sparkles, HelpCircle, Wallet
-} from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Database, CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 import { InitData } from './types';
 import { Dashboard } from './components/Dashboard';
 import { EntityGrid } from './components/EntityGrid';
@@ -25,6 +21,9 @@ import { Help } from './components/Help';
 import { ArthaMark } from './components/branding/ArthaMark';
 import { useBranding } from './components/branding/useBranding';
 import { API_BASE_URL } from './config';
+import { TopBar, CommandPalette, NavigateOptions } from './components/TopBar';
+import { AppCommand, NAV_GROUPS, NEW_ITEMS } from './navigation';
+import { isDesktop, onMenuCommand, selectDatabaseFile } from './platform';
 
 const App: React.FC = () => {
   const { variant: brandVariant, accentColor: brandAccent } = useBranding();
@@ -35,6 +34,14 @@ const App: React.FC = () => {
   
   // Cache scenario arguments for simulation redirect
   const [simRedirectParams, setSimRedirectParams] = useState<any>(null);
+
+  // Requests from the top bar, the Go-to search and the desktop menu: open a page's add
+  // form, filter it to a record, or open a Settings section. Cleared on ordinary navigation.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [addRequest, setAddRequest] = useState<{ page: string; view?: 'income' | 'expenses'; nonce: number } | null>(null);
+  const [searchSeed, setSearchSeed] = useState<{ page: string; text: string; nonce: number } | null>(null);
+  const [settingsSection, setSettingsSection] = useState<{ id: string; nonce: number } | null>(null);
+  const [statusTick, setStatusTick] = useState(0);
 
   // Toast notifications state
   interface Toast {
@@ -90,8 +97,72 @@ const App: React.FC = () => {
     } else {
       setSimRedirectParams(null);
     }
+    setAddRequest(null);
+    setSearchSeed(null);
     setActiveTab(tab);
   };
+
+  const navigateTo = (page: string, opts?: NavigateOptions) => {
+    handleNavigate(page);
+    if (opts?.search) setSearchSeed({ page, text: opts.search, nonce: Date.now() });
+    if (opts?.settingsSection) setSettingsSection({ id: opts.settingsSection, nonce: Date.now() });
+  };
+
+  const switchDatabase = async (mode: 'open' | 'create') => {
+    if (!isDesktop()) {
+      showToast('Opening another database file is available in the desktop app.', 'info');
+      return;
+    }
+    const path = await selectDatabaseFile(mode).catch(() => null);
+    if (!path) return;
+    const res = await fetch(`${API_BASE_URL}/api/settings/database`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }),
+    }).catch(() => null);
+    if (res?.ok) {
+      showToast(`Now using ${path.split(/[\\/]/).pop()}`, 'success');
+      fetchFinanceData();
+    } else {
+      showToast("Couldn't open that database file.", 'error');
+    }
+  };
+
+  /** One handler for the top bar, the Go-to search and the desktop menu. */
+  const runCommand = async (cmd: AppCommand) => {
+    const create = NEW_ITEMS.find((n) => n.command === cmd);
+    if (create) {
+      handleNavigate(create.page);
+      setAddRequest({ page: create.page, view: cmd === 'new-expense' ? 'expenses' : cmd === 'new-income' ? 'income' : undefined, nonce: Date.now() });
+      return;
+    }
+    switch (cmd) {
+      case 'goto': setPaletteOpen(true); break;
+      case 'settings': navigateTo('settings'); break;
+      case 'help': navigateTo('help'); break;
+      case 'open-database': await switchDatabase('open'); break;
+      case 'new-database': await switchDatabase('create'); break;
+      case 'backup-now': {
+        const res = await fetch(`${API_BASE_URL}/api/backup/create`, { method: 'POST' }).catch(() => null);
+        showToast(res?.ok ? 'Backup saved' : 'Backup failed', res?.ok ? 'success' : 'error');
+        setStatusTick((t) => t + 1);
+        break;
+      }
+    }
+  };
+
+  // Ctrl/Cmd+K opens Go-to anywhere; the desktop menu's commands arrive over the preload bridge.
+  const commandRef = useRef(runCommand);
+  commandRef.current = runCommand;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    const unsubscribe = onMenuCommand((c) => { void commandRef.current(c); });
+    return () => { window.removeEventListener('keydown', onKey); unsubscribe(); };
+  }, []);
 
   if (loading) {
     return (
@@ -177,212 +248,23 @@ const App: React.FC = () => {
             after the logo row and lets .sidebar-menu shrink and scroll inside it */}
         <nav style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
           <ul className="sidebar-menu">
-            <li>
-              <div 
-                className={`sidebar-item ${activeTab === 'dashboard' ? 'active' : ''}`}
-                aria-current={activeTab === 'dashboard' ? 'page' : undefined}
-                onClick={() => handleNavigate('dashboard')}
-              >
-                <Compass size={16} />
-                Dashboard
-              </div>
-            </li>
-             <li>
-              <div 
-                className={`sidebar-item ${activeTab === 'snapshot' ? 'active' : ''}`}
-                aria-current={activeTab === 'snapshot' ? 'page' : undefined}
-                onClick={() => handleNavigate('snapshot')}
-              >
-                <Calendar size={16} />
-                Monthly Snapshot
-              </div>
-            </li>
-            <li>
-              <div
-                className={`sidebar-item ${activeTab === 'income-expenses' ? 'active' : ''}`}
-                aria-current={activeTab === 'income-expenses' ? 'page' : undefined}
-                onClick={() => handleNavigate('income-expenses')}
-              >
-                <Wallet size={16} />
-                Income &amp; Expenses
-              </div>
-            </li>
-            <li>
-              <div 
-                className={`sidebar-item ${activeTab === 'cash-flow' ? 'active' : ''}`}
-                aria-current={activeTab === 'cash-flow' ? 'page' : undefined}
-                onClick={() => handleNavigate('cash-flow')}
-              >
-                <LineChart size={16} />
-                Cash Flow Planning
-              </div>
-            </li>
-            <li>
-              <div 
-                className={`sidebar-item ${activeTab === 'transactions' ? 'active' : ''}`}
-                aria-current={activeTab === 'transactions' ? 'page' : undefined}
-                onClick={() => handleNavigate('transactions')}
-              >
-                <ArrowRightLeft size={16} />
-                Transactions Ledger
-              </div>
-            </li>
-            <li>
-              <div 
-                className={`sidebar-item ${activeTab === 'budget-planner' ? 'active' : ''}`}
-                aria-current={activeTab === 'budget-planner' ? 'page' : undefined}
-                onClick={() => handleNavigate('budget-planner')}
-              >
-                <Sliders size={16} />
-                Budget Planner
-              </div>
-            </li>
-            <li>
-              <div 
-                className={`sidebar-item ${activeTab === 'financial-calendar' ? 'active' : ''}`}
-                aria-current={activeTab === 'financial-calendar' ? 'page' : undefined}
-                onClick={() => handleNavigate('financial-calendar')}
-              >
-                <Calendar size={16} style={{ opacity: 0.8 }} />
-                Financial Calendar
-              </div>
-            </li>
-            
-            <div style={{ height: '1px', background: 'var(--border-glass)', margin: '12px 8px' }}></div>
-            
-            <li>
-              <div 
-                className={`sidebar-item ${activeTab === 'accounts' ? 'active' : ''}`}
-                aria-current={activeTab === 'accounts' ? 'page' : undefined}
-                onClick={() => handleNavigate('accounts')}
-              >
-                <Landmark size={16} />
-                Accounts
-              </div>
-            </li>
-            <li>
-              <div 
-                className={`sidebar-item ${activeTab === 'assets' ? 'active' : ''}`}
-                aria-current={activeTab === 'assets' ? 'page' : undefined}
-                onClick={() => handleNavigate('assets')}
-              >
-                <PiggyBank size={16} />
-                Assets
-              </div>
-            </li>
-            <li>
-              <div 
-                className={`sidebar-item ${activeTab === 'liabilities' ? 'active' : ''}`}
-                aria-current={activeTab === 'liabilities' ? 'page' : undefined}
-                onClick={() => handleNavigate('liabilities')}
-              >
-                <LandmarkIcon size={16} />
-                Liabilities
-              </div>
-            </li>
-            <li>
-              <div 
-                className={`sidebar-item ${activeTab === 'credit-cards' ? 'active' : ''}`}
-                aria-current={activeTab === 'credit-cards' ? 'page' : undefined}
-                onClick={() => handleNavigate('credit-cards')}
-              >
-                <CreditCard size={16} />
-                Credit Cards
-              </div>
-            </li>
-            <li>
-              <div 
-                className={`sidebar-item ${activeTab === 'goals' ? 'active' : ''}`}
-                aria-current={activeTab === 'goals' ? 'page' : undefined}
-                onClick={() => handleNavigate('goals')}
-              >
-                <Target size={16} />
-                Goals
-              </div>
-            </li>
-
-            <div style={{ height: '1px', background: 'var(--border-glass)', margin: '12px 8px' }}></div>
-
-            <li>
-              <div 
-                className={`sidebar-item ${activeTab === 'simulations' ? 'active' : ''}`}
-                aria-current={activeTab === 'simulations' ? 'page' : undefined}
-                onClick={() => handleNavigate('simulations')}
-              >
-                <LineChart size={16} />
-                Simulations
-              </div>
-            </li>
-            <li>
-              <div 
-                className={`sidebar-item ${activeTab === 'emi-calculator' ? 'active' : ''}`}
-                aria-current={activeTab === 'emi-calculator' ? 'page' : undefined}
-                onClick={() => handleNavigate('emi-calculator')}
-              >
-                <Calculator size={16} />
-                EMI Tool
-              </div>
-            </li>
-            <li>
-              <div 
-                className={`sidebar-item ${activeTab === 'loan-optimizer' ? 'active' : ''}`}
-                aria-current={activeTab === 'loan-optimizer' ? 'page' : undefined}
-                onClick={() => handleNavigate('loan-optimizer')}
-              >
-                <Zap size={16} style={{ color: 'var(--accent-light)' }} />
-                Loan Optimizer
-              </div>
-            </li>
-            <li>
-              <div
-                className={`sidebar-item ${activeTab === 'taxation' ? 'active' : ''}`}
-                aria-current={activeTab === 'taxation' ? 'page' : undefined}
-                onClick={() => handleNavigate('taxation')}
-              >
-                <Percent size={16} />
-                Taxation
-              </div>
-            </li>
-            <li>
-              <div
-                className={`sidebar-item ${activeTab === 'ask-artha' ? 'active' : ''}`}
-                aria-current={activeTab === 'ask-artha' ? 'page' : undefined}
-                onClick={() => handleNavigate('ask-artha')}
-              >
-                <Sparkles size={16} style={{ color: 'var(--accent-light)' }} />
-                Ask Artha
-              </div>
-            </li>
-            <li>
-              <div
-                className={`sidebar-item ${activeTab === 'reports' ? 'active' : ''}`}
-                aria-current={activeTab === 'reports' ? 'page' : undefined}
-                onClick={() => handleNavigate('reports')}
-              >
-                <FileText size={16} />
-                Reports
-              </div>
-            </li>
-            <li>
-              <div
-                className={`sidebar-item ${activeTab === 'settings' ? 'active' : ''}`}
-                aria-current={activeTab === 'settings' ? 'page' : undefined}
-                onClick={() => handleNavigate('settings')}
-              >
-                <Sliders size={16} />
-                Settings
-              </div>
-            </li>
-            <li>
-              <div
-                className={`sidebar-item ${activeTab === 'help' ? 'active' : ''}`}
-                aria-current={activeTab === 'help' ? 'page' : undefined}
-                onClick={() => handleNavigate('help')}
-              >
-                <HelpCircle size={16} />
-                Help
-              </div>
-            </li>
+            {NAV_GROUPS.map((group, gi) => (
+              <React.Fragment key={gi}>
+                {gi > 0 && <li aria-hidden style={{ height: '1px', background: 'var(--border-glass)', margin: '12px 8px', listStyle: 'none' }} />}
+                {group.map((item) => (
+                  <li key={item.id}>
+                    <div
+                      className={`sidebar-item ${activeTab === item.id ? 'active' : ''}`}
+                      aria-current={activeTab === item.id ? 'page' : undefined}
+                      onClick={() => handleNavigate(item.id)}
+                    >
+                      {item.icon}
+                      {item.label}
+                    </div>
+                  </li>
+                ))}
+              </React.Fragment>
+            ))}
           </ul>
 
           <div style={{ padding: '8px', borderTop: '1px solid var(--border-glass)', marginTop: 'auto' }}>
@@ -396,6 +278,7 @@ const App: React.FC = () => {
 
       {/* Main Content Render */}
       <main className="main-content">
+        <TopBar data={data} refreshKey={statusTick} onCommand={(c) => { void runCommand(c); }} onNavigate={navigateTo} />
         {activeTab === 'dashboard' && (
           <Dashboard data={data} onNavigate={handleNavigate} />
         )}
@@ -406,10 +289,12 @@ const App: React.FC = () => {
           <CashFlowPlanning data={data} onRefresh={fetchFinanceData} showToast={showToast} />
         )}
         {activeTab === 'transactions' && (
-          <TransactionsLedger data={data} onRefresh={fetchFinanceData} showToast={showToast} />
+          <TransactionsLedger data={data} onRefresh={fetchFinanceData} showToast={showToast} addRequest={addRequest?.page === 'transactions' ? addRequest.nonce : undefined} />
         )}
         {activeTab === 'income-expenses' && (
-          <IncomeExpenses data={data} onRefresh={fetchFinanceData} showToast={showToast} />
+          <IncomeExpenses data={data} onRefresh={fetchFinanceData} showToast={showToast}
+            addRequest={addRequest?.page === 'income-expenses' && addRequest.view ? { view: addRequest.view, nonce: addRequest.nonce } : null}
+            searchSeed={searchSeed?.page === 'income-expenses' ? searchSeed : null} />
         )}
         {activeTab === 'budget-planner' && (
           <BudgetPlanner data={data} onRefresh={fetchFinanceData} showToast={showToast} />
@@ -418,6 +303,8 @@ const App: React.FC = () => {
           <EntityGrid
             entityType="accounts"
             entities={data.accounts}
+            addRequest={addRequest?.page === 'accounts' ? addRequest.nonce : undefined}
+            searchSeed={searchSeed?.page === 'accounts' ? searchSeed : null}
             categories={data.categories}
             institutions={data.institutions}
             people={data.people}
@@ -430,6 +317,8 @@ const App: React.FC = () => {
           <EntityGrid
             entityType="assets"
             entities={data.assets}
+            addRequest={addRequest?.page === 'assets' ? addRequest.nonce : undefined}
+            searchSeed={searchSeed?.page === 'assets' ? searchSeed : null}
             categories={data.categories}
             institutions={data.institutions}
             people={data.people}
@@ -444,6 +333,8 @@ const App: React.FC = () => {
           <EntityGrid
             entityType="liabilities"
             entities={data.liabilities}
+            addRequest={addRequest?.page === 'liabilities' ? addRequest.nonce : undefined}
+            searchSeed={searchSeed?.page === 'liabilities' ? searchSeed : null}
             categories={data.categories}
             institutions={data.institutions}
             people={data.people}
@@ -459,8 +350,9 @@ const App: React.FC = () => {
         )}
         {activeTab === 'goals' && (
           <EntityGrid 
-            entityType="goals" 
-            entities={data.goals} 
+            entityType="goals"
+            entities={data.goals}
+            searchSeed={searchSeed?.page === 'goals' ? searchSeed : null}
             categories={data.categories} 
             institutions={data.institutions} 
             goals={data.goals}
@@ -490,12 +382,16 @@ const App: React.FC = () => {
           <Reports data={data} />
         )}
         {activeTab === 'settings' && (
-          <Settings onRefresh={fetchFinanceData} showToast={showToast} />
+          <Settings onRefresh={fetchFinanceData} showToast={showToast} openSection={settingsSection} />
         )}
         {activeTab === 'help' && (
           <Help />
         )}
       </main>
+
+      {paletteOpen && (
+        <CommandPalette data={data} onClose={() => setPaletteOpen(false)} onCommand={(c) => { void runCommand(c); }} onNavigate={navigateTo} />
+      )}
 
       {/* Toast Notifications container */}
       <div style={{

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { InitData } from '../types';
 import { EntityGrid } from './EntityGrid';
 import { monthlyEquivalent } from '../frequency';
@@ -14,8 +14,13 @@ export const IncomeExpenses: React.FC<{
   data: InitData;
   onRefresh: () => void;
   showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
-}> = ({ data, onRefresh, showToast }) => {
-  const [view, setView] = useState<'income' | 'expenses'>('income');
+  addRequest?: { view: 'income' | 'expenses'; nonce: number } | null;
+  searchSeed?: { text: string; nonce: number } | null;
+}> = ({ data, onRefresh, showToast, addRequest, searchSeed }) => {
+  const seedView = searchSeed && data.expenses.some((e) => e.name === searchSeed.text) && !data.income.some((i) => i.name === searchSeed.text) ? 'expenses' : null;
+  const [view, setView] = useState<'income' | 'expenses'>(addRequest?.view ?? seedView ?? 'income');
+  useEffect(() => { if (addRequest) setView(addRequest.view); }, [addRequest]);
+  useEffect(() => { if (seedView) setView(seedView); }, [searchSeed?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
   const monthlyIncome = data.income.reduce((t, i) => t + monthlyEquivalent(i.amount, i.frequency), 0);
   const monthlyExpenses = data.expenses.reduce((t, e) => t + monthlyEquivalent(e.amount, e.frequency), 0);
 
@@ -59,6 +64,8 @@ export const IncomeExpenses: React.FC<{
         goals={data.goals}
         onRefresh={onRefresh}
         showToast={showToast}
+        addRequest={addRequest && addRequest.view === view ? addRequest.nonce : undefined}
+        searchSeed={searchSeed}
       />
     </div>
   );

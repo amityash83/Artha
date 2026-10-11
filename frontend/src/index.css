@@ -623,3 +623,146 @@ h1, h2, h3, h4, h5 {
   .settings-nav-item { width: auto; }
   .settings-row { flex-wrap: wrap; }
 }
+
+/* ---------------------------------------------------------------------------
+   Top bar (components/TopBar.tsx): sticks to the top of the scrolling main area.
+   The negative margins cancel .main-content's padding so it spans edge to edge.
+   --------------------------------------------------------------------------- */
+.topbar {
+  position: sticky;
+  top: -32px; /* the sticky offset is measured inside .main-content's 32px padding */
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -32px -32px 28px;
+  padding: 12px 32px;
+  background: rgba(7, 9, 14, 0.78);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-glass);
+}
+.topbar-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(360px, 45%);
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-glass);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted);
+  font: 13px var(--font-sans);
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+.topbar-search:hover { border-color: rgba(255, 255, 255, 0.14); color: var(--text-secondary); }
+.topbar-search span { flex: 1; text-align: left; }
+.topbar kbd, .palette kbd, .topbar-menu kbd {
+  font: 11px var(--font-sans);
+  color: var(--text-muted);
+  border: 1px solid var(--border-glass);
+  border-radius: 5px;
+  padding: 1px 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.topbar-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font: 12.5px var(--font-sans);
+  cursor: pointer;
+  max-width: 360px;
+}
+.topbar-chip:hover { background: rgba(255, 255, 255, 0.05); }
+.topbar-chip-name { color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar-chip-sub { color: var(--text-muted); white-space: nowrap; }
+.topbar-new {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font: 500 13px var(--font-sans);
+  cursor: pointer;
+}
+.topbar-new:hover { background: var(--accent-dark); }
+.topbar-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 220px;
+  padding: 6px;
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-glass-active);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+}
+.topbar-menu-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font: 13px var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+.topbar-menu-item:hover, .topbar-menu-item:focus-visible { background: rgba(139, 92, 246, 0.14); outline: none; }
+@media (max-width: 900px) {
+  .topbar-chip-sub, .topbar-search kbd { display: none; }
+}
+
+/* Go-to search (CommandPalette in components/TopBar.tsx) */
+.palette-overlay { align-items: flex-start; padding-top: 12vh; }
+.palette {
+  width: min(620px, 92vw);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-glass-active);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.palette-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-glass);
+  color: var(--text-muted);
+}
+.palette-input input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font: 15px var(--font-sans);
+}
+.palette-results { list-style: none; margin: 0; padding: 6px; max-height: 52vh; overflow-y: auto; }
+.palette-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.palette-item[aria-selected="true"] { background: rgba(139, 92, 246, 0.16); }
+.palette-hint { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.palette-empty { padding: 16px 12px; color: var(--text-muted); font-size: 13px; }

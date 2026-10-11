@@ -11,6 +11,8 @@ interface TransactionsLedgerProps {
   data: InitData;
   onRefresh: () => void;
   showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
+  /** Open the "Log transaction" form (from "+ New", Go-to search or the desktop menu). */
+  addRequest?: number;
 }
 
 interface Transaction {
@@ -25,7 +27,7 @@ interface Transaction {
   related_entity_id?: number;
 }
 
-export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, onRefresh, showToast }) => {
+export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, onRefresh, showToast, addRequest }) => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [modalOpen, setModalOpen] = useState<boolean>(false);
@@ -265,6 +267,18 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
     setModalOpen(true);
   };
 
+  const openNew = () => {
+    setEditingId(null);
+    setType('Debit');
+    setAmount('');
+    setNotes('');
+    setCounterpartId('');
+    setModalOpen(true);
+  };
+  useEffect(() => {
+    if (addRequest) openNew();
+  }, [addRequest]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleDelete = async (id: number) => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/entities/transactions/${id}`, {
@@ -421,14 +435,7 @@ export const TransactionsLedger: React.FC<TransactionsLedgerProps> = ({ data, on
           <button className="btn btn-secondary" onClick={fetchTransactions} title="Refresh list">
             <RefreshCw size={16} />
           </button>
-          <button className="btn btn-primary" onClick={() => {
-            setEditingId(null);
-            setType('Debit');
-            setAmount('');
-            setNotes('');
-            setCounterpartId('');
-            setModalOpen(true);
-          }}>
+          <button className="btn btn-primary" onClick={openNew}>
             <Plus size={16} /> Log Transaction
           </button>
         </div>

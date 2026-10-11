@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Category, Institution, Asset, Liability, Goal, Person } from '../types';
 import { DynamicForm } from './DynamicForm';
 import { Plus, Edit2, Trash2, Search } from 'lucide-react';
@@ -16,6 +16,10 @@ interface EntityGridProps {
   properties?: Asset[];
   onRefresh: () => void;
   showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
+  /** Open the add form (from "+ New", Go-to search or the desktop menu); each new value re-opens it. */
+  addRequest?: number;
+  /** Filter to a record (Go-to search). */
+  searchSeed?: { text: string; nonce: number } | null;
 }
 
 interface Column {
@@ -113,9 +117,11 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
   properties = [],
   onRefresh,
   showToast,
+  addRequest,
+  searchSeed,
 }) => {
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | 'all'>('all');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(searchSeed?.text ?? '');
   const [editingEntity, setEditingEntity] = useState<any | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [deletingEntityId, setDeletingEntityId] = useState<number | null>(null);
@@ -125,6 +131,13 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
     setIsAdding(false);
     setEditingEntity(null);
   });
+
+  useEffect(() => {
+    if (addRequest) { setEditingEntity(null); setIsAdding(true); }
+  }, [addRequest]);
+  useEffect(() => {
+    if (searchSeed) { setSelectedCategoryId('all'); setSearchQuery(searchSeed.text); }
+  }, [searchSeed?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const typeCategories = categories.filter((c) => c.entity_type.toLowerCase() === entityType.replace(/s$/, '').toLowerCase());
 

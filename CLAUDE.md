@@ -69,6 +69,10 @@ Electron (electron/main.js)
      electron/preload.js (contextBridge -> window.artha). The renderer runs with nodeIntegration off,
      contextIsolation + sandbox on; frontend code reaches desktop features via frontend/src/platform.ts,
      never require('electron'), so the same UI runs unchanged in a plain browser.
+     Artha's own menu bar (buildMenu in main.js, replacing Electron's default) sends 'menu-command'
+     events through the preload's onMenuCommand to App.runCommand, the same handler the in-app top bar
+     (+ New, Ctrl/Cmd+K Go-to search, database/backup chip) uses. Pages for the sidebar and the search
+     come from one list, frontend/src/navigation.tsx.
 
 React/TS frontend (frontend/src/)
   └─ talks to backend purely over HTTP: fetch calls to API_BASE_URL (frontend/src/config.ts, hardcoded 127.0.0.1:8000)
