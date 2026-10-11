@@ -2103,31 +2103,38 @@ def init_db():
     except Exception as e:
         print("[Migration Warning] insurance_details backfill error:", e)
 
-    # H. Backfill holding_lots from existing Stock/Mutual Fund assets (one synthetic opening lot each)
+    # H. Backfill holding_lots from existing Stock/Mutual Fund assets (one opening lot each),
+    # only where there is a real cost to carry over. This runs on every startup, and used to
+    # give every lot-less holding a "1 unit at ₹0" lot dated that day: a cost of nil reads as
+    # the whole value being profit (a 200% return, the full value as a taxable gain). A
+    # holding with no lots is handled everywhere; the Assets list asks for its purchase lots.
     try:
         cursor.execute("""
             SELECT a.id, a.purchase_date, a.quantity, a.cost_price FROM assets a
             JOIN categories c ON a.category_id = c.id
             WHERE c.name IN ('Stock', 'Mutual Fund')
             AND a.id NOT IN (SELECT DISTINCT asset_id FROM holding_lots)
+            AND COALESCE(a.cost_price, 0) > 0 AND COALESCE(a.quantity, 0) > 0
         """)
         holding_rows = cursor.fetchall()
         for row in holding_rows:
-            qty = row['quantity'] if row['quantity'] and row['quantity'] > 0 else 1.0
-            cost = row['cost_price'] if row['cost_price'] and row['cost_price'] > 0 else 0.0
-            price_per_unit = (cost / qty) if qty > 0 else cost
             cursor.execute("""
                 INSERT INTO holding_lots (asset_id, purchase_date, quantity, price_per_unit, notes)
                 VALUES (?, ?, ?, ?, ?)
             """, (
                 row['id'],
                 row['purchase_date'] or datetime.now().strftime('%Y-%m-%d'),
-                qty,
-                price_per_unit,
+                row['quantity'],
+                row['cost_price'] / row['quantity'],
                 'Auto-migrated opening lot'
             ))
         if holding_rows:
             print(f"[Migration] Backfilled holding_lots for {len(holding_rows)} stock/mutual fund asset(s).")
+        # Remove the ₹0 placeholders earlier versions created (only those: tagged by this
+        # migration and carrying no cost). Real lots, including ones the user entered, stay.
+        cursor.execute("DELETE FROM holding_lots WHERE notes = 'Auto-migrated opening lot' AND COALESCE(price_per_unit, 0) <= 0")
+        if cursor.rowcount:
+            print(f"[Migration] Removed {cursor.rowcount} placeholder ₹0 opening lot(s).")
     except Exception as e:
         print("[Migration Warning] holding_lots backfill error:", e)
 
