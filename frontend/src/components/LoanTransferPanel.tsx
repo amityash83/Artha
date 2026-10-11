@@ -8,7 +8,7 @@ import { AmountInput, ConfirmAction } from './settings/ui';
  * property, owner, use and EMI settings; this one closes as "transferred" with its history.
  */
 export const LoanTransferPanel: React.FC<{
-  loan: { id: number; name: string; outstanding: number; interest_rate: number; emi: number; lender_name?: string };
+  loan: { id: number; name: string; outstanding: number; interest_rate: number; emi: number; lender_name?: string; transferred_from?: number };
   institutions: { id: number; name: string }[];
   onDone: (message: string) => void;
 }> = ({ loan, institutions, onDone }) => {
@@ -27,8 +27,23 @@ export const LoanTransferPanel: React.FC<{
   const oldWord = loan.lender_name?.split(' ')[0];
   const newName = name || (short ? (oldWord && loan.name.startsWith(`${oldWord} `) ? `${short} ${loan.name.slice(oldWord.length + 1)}` : `${loan.name} (${short})`) : '');
 
-  if (!(loan.outstanding > 0)) return null;
+  const undo = async () => {
+    const res = await fetch(`${API_BASE_URL}/api/liabilities/${loan.id}/undo-transfer`, { method: 'POST' }).catch(() => null);
+    if (!res?.ok) { setError((await res?.json().catch(() => null))?.detail ?? "Couldn't undo the transfer"); return; }
+    onDone('Transfer undone: the original loan is back');
+  };
+  const undoRow = loan.transferred_from ? (
+    <div className="df-field df-wide">
+      <span className="df-hint">This loan took over another by a balance transfer.{' '}
+        <ConfirmAction label="Undo this transfer" confirmLabel="Undo" danger question="Put the original loan back and remove this one?" onConfirm={undo} />
+      </span>
+      {error && <span className="df-hint" style={{ color: '#fca5a5' }}>{error}</span>}
+    </div>
+  ) : null;
+
+  if (!(loan.outstanding > 0)) return undoRow;
   if (!open) {
+    if (undoRow) return undoRow;
     return (
       <div className="df-field df-wide">
         <button type="button" className="settings-link df-share-link" onClick={() => setOpen(true)}>Moving this loan to another bank?</button>
@@ -41,7 +56,8 @@ export const LoanTransferPanel: React.FC<{
       body: JSON.stringify({ lender_institution_id: bank || null, name: newName, interest_rate: rate, emi, transfer_date: day, fees }),
     }).catch(() => null);
     if (!res?.ok) { setError((await res?.json().catch(() => null))?.detail ?? "Couldn't transfer the loan"); return; }
-    onDone(`${formatINR(loan.outstanding)} moved to ${newName}`);
+    const body = await res.json();
+    onDone(`${formatINR(body.amount)} moved to ${newName}${body.note ? `. ${body.note}` : ''}`);
   };
   return (
     <div className="df-field df-wide lt-panel">

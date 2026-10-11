@@ -1054,6 +1054,16 @@ def create_entity(entity_type: str, payload: dict):
     finally:
         conn.close()
 
+def _refuse_loan_transfer_row(cursor, tx_id: int) -> None:
+    """A balance transfer's loan-to-loan row is undone with "Undo this transfer" on the new
+    loan, which also restores both loans' details. Editing it as an ordinary transaction
+    would re-shape it (the Ledger's form knows only account transfers), and deleting it would
+    move the balances back but leave the old loan marked closed and the new one open."""
+    row = cursor.execute("SELECT source_ref_type, dest_ref_type FROM transactions WHERE id = ?", (tx_id,)).fetchone()
+    if row and row["source_ref_type"] == "Liability" and row["dest_ref_type"] == "Liability":
+        raise HTTPException(status_code=409, detail="This is a balance transfer between loans; use \"Undo this transfer\" on the new loan instead")
+
+
 @app.put("/api/entities/{entity_type}/{id}")
 def update_entity(entity_type: str, id: int, payload: dict):
     allowed_tables = ["accounts", "assets", "liabilities", "income", "expenses", "goals", "transactions"]
@@ -1106,6 +1116,7 @@ def update_entity(entity_type: str, id: int, payload: dict):
             payload["expected_completion"] = comp["expected_date"]
             
         if entity_type == "transactions":
+            _refuse_loan_transfer_row(cursor, id)
             # The Ledger edits with the legacy payload shape — normalize it to the
             # double-entry columns BEFORE the revert/reapply cycle, otherwise the old
             # impact is reverted but the reapply below sees no refs and does nothing.
@@ -1173,6 +1184,9 @@ def update_entity(entity_type: str, id: int, payload: dict):
 
         conn.commit()
         return {"status": "success"}
+    except HTTPException:
+        conn.rollback()
+        raise
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -1189,6 +1203,7 @@ def delete_entity(entity_type: str, id: int):
     cursor = conn.cursor()
     try:
         if entity_type == "transactions":
+            _refuse_loan_transfer_row(cursor, id)
             # Revert old balances first
             cursor.execute("SELECT * FROM transactions WHERE id = ?", (id,))
             old_row = cursor.fetchone()
@@ -1223,6 +1238,9 @@ def delete_entity(entity_type: str, id: int):
             if os.path.exists(file_path):
                 os.remove(file_path)
         return {"status": "success"}
+    except HTTPException:
+        conn.rollback()
+        raise
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -1488,13 +1506,19 @@ def transfer_loan(id: int, req: LoanTransfer):
             raise HTTPException(status_code=404, detail="Loan not found")
         if old["category"] == "Credit Card":
             raise HTTPException(status_code=422, detail="Card balances aren't transferred this way")
+        # Bring the old loan up to date first: automatic EMIs due by the transfer date (never
+        # beyond today) are posted before its balance moves and its auto-EMI is switched off.
+        post_due_emis(cursor, min(day, date.today()))
+        old = cursor.execute("""SELECT l.*, c.name AS category FROM liabilities l LEFT JOIN categories c ON c.id = l.category_id
+                                WHERE l.id = ?""", (id,)).fetchone()
         owed = float(old["outstanding"] or 0)
         if owed <= 0:
             raise HTTPException(status_code=422, detail="Nothing is owed on this loan")
         old_meta = json.loads(old["metadata_json"] or "{}")
         carry = {k: old_meta[k] for k in ("loan_use", "house_share_pct", "emi_day", "emi_account_id", "auto_emi") if k in old_meta}
         if carry.get("auto_emi"):
-            carry["auto_emi_since"] = day.isoformat()
+            # From the day after: an EMI due on the transfer day belongs to the old loan.
+            carry["auto_emi_since"] = date.fromordinal(day.toordinal() + 1).isoformat()
         carry.update({"status": "Active", "transferred_from": id})
         cursor.execute("""INSERT INTO liabilities (name, category_id, owner_id, lender_institution_id, outstanding, interest_rate, emi,
                                                    tenure_months, linked_asset_id, metadata_json)
@@ -1506,14 +1530,69 @@ def transfer_loan(id: int, req: LoanTransfer):
                           VALUES ('Liability', ?, 'Liability', ?, 'Transfer', ?, ?, ?)""",
                        (new_id, id, owed, day.isoformat(), f"Balance transfer to {req.name.strip()}"))
         adjust_double_entry_balances(cursor, "Transfer", owed, "Liability", new_id, "Liability", id, "add")
+        # Keep what "Undo this transfer" needs to put the old loan back exactly.
+        old_meta["before_transfer"] = {k: old_meta.get(k) for k in ("status", "auto_emi", "auto_emi_since", "auto_emi_last")}
         old_meta.update({"status": "Closed", "transferred_to": new_id, "auto_emi": 0})
         old_meta.pop("auto_emi_since", None)
         cursor.execute("UPDATE liabilities SET metadata_json = ? WHERE id = ?", (json.dumps(old_meta), id))
+        fee_recorded = False
         if (req.fees or 0) > 0 and old["linked_asset_id"]:
             cursor.execute("INSERT INTO property_costs (asset_id, cost_date, kind, amount, notes) VALUES (?, ?, 'loan_fee', ?, ?)",
                            (old["linked_asset_id"], day.isoformat(), req.fees, f"Balance transfer to {req.name.strip()}"))
+            carry["transfer_fee_cost_id"] = cursor.lastrowid
+            cursor.execute("UPDATE liabilities SET metadata_json = ? WHERE id = ?", (json.dumps(carry), new_id))
+            fee_recorded = True
         conn.commit()
-        return {"status": "success", "new_loan_id": new_id, "amount": owed}
+        return {"status": "success", "new_loan_id": new_id, "amount": owed,
+                "note": None if fee_recorded or not (req.fees or 0) > 0 else
+                "The fees weren't recorded: the loan isn't linked to a property. Log them as a payment if you want them in the ledger."}
+    finally:
+        conn.close()
+
+
+@app.post("/api/liabilities/{id}/undo-transfer")
+def undo_loan_transfer(id: int):
+    """Undo a balance transfer from the new loan's side: reverse the loan-to-loan row, put the
+    old loan back exactly as it was (status, auto-EMI settings, balance), and remove the new
+    loan and the fee it added to the property's costs. Only while the new loan has nothing
+    else recorded against it; after that, correct it by hand."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        new = cursor.execute("SELECT * FROM liabilities WHERE id = ?", (id,)).fetchone()
+        if not new:
+            raise HTTPException(status_code=404, detail="Loan not found")
+        meta = json.loads(new["metadata_json"] or "{}")
+        old_id = meta.get("transferred_from")
+        if not old_id:
+            raise HTTPException(status_code=422, detail="This loan didn't come from a transfer")
+        rows = cursor.execute("""SELECT * FROM transactions WHERE (source_ref_type = 'Liability' AND source_ref_id = ?)
+                                 OR (dest_ref_type = 'Liability' AND dest_ref_id = ?)""", (id, id)).fetchall()
+        transfer = [r for r in rows if r["source_ref_type"] == "Liability" and r["source_ref_id"] == id
+                    and r["dest_ref_type"] == "Liability" and r["dest_ref_id"] == old_id]
+        if len(transfer) != 1 or len(rows) != 1:
+            raise HTTPException(status_code=409, detail="The new loan already has other entries (EMIs, interest); undo those first or correct the loans by hand")
+        t = transfer[0]
+        adjust_double_entry_balances(cursor, t["type"], t["amount"], t["source_ref_type"], t["source_ref_id"],
+                                     t["dest_ref_type"], t["dest_ref_id"], "revert", bool(t["is_balance_exempt"]))
+        cursor.execute("DELETE FROM transactions WHERE id = ?", (t["id"],))
+        old = cursor.execute("SELECT metadata_json FROM liabilities WHERE id = ?", (old_id,)).fetchone()
+        if old:
+            old_meta = json.loads(old["metadata_json"] or "{}")
+            before = old_meta.pop("before_transfer", {}) or {}
+            old_meta.pop("transferred_to", None)
+            for k in ("status", "auto_emi", "auto_emi_since", "auto_emi_last"):
+                if before.get(k) is None:
+                    old_meta.pop(k, None)
+                else:
+                    old_meta[k] = before[k]
+            old_meta.setdefault("status", "Active")
+            cursor.execute("UPDATE liabilities SET metadata_json = ? WHERE id = ?", (json.dumps(old_meta), old_id))
+        if meta.get("transfer_fee_cost_id"):
+            cursor.execute("DELETE FROM property_costs WHERE id = ?", (meta["transfer_fee_cost_id"],))
+        cursor.execute("DELETE FROM liabilities WHERE id = ?", (id,))
+        conn.commit()
+        return {"status": "success", "restored_loan_id": old_id}
     finally:
         conn.close()
 
