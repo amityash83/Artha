@@ -1072,3 +1072,7 @@ h1, h2, h3, h4, h5 {
 .df-check input { accent-color: var(--accent); width: 15px; height: 15px; }
 .df-check span { display: flex; flex-direction: column; gap: 1px; }
 .df-check small { font-size: 11.5px; color: var(--text-muted); }
+.df-share { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.df-share-link { align-self: flex-start; padding-left: 0; }
+.df-share .settings-affix { width: auto; }
+.df-share .settings-affix input { width: 60px; flex: none; text-align: right; }

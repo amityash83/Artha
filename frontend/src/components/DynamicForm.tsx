@@ -28,6 +28,13 @@ interface DynamicFormProps {
 
 const HOLDING_CATEGORIES = ['Stock', 'Mutual Fund'];
 
+// What a home loan's money went on, and what that means for tax (tax/prefill.py).
+const LOAN_USE_HINT: Record<string, string> = {
+  purchase: 'Interest (24b) and principal (80C) can count, old regime, self-occupied home.',
+  repair: 'Interest can count, up to a lower cap; the principal doesn\'t count under 80C.',
+  other: "Not a home-loan deduction: the Tax Planner leaves this loan out.",
+};
+
 const INSURANCE_TYPE_FIELDS: Record<string, string[]> = {
   Life: ['sum_assured', 'surrender_value'],
   Term: ['sum_assured'],
@@ -56,6 +63,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
   const [rentalLedger, setRentalLedger] = useState<any[]>([]);
   const [insuranceClaims, setInsuranceClaims] = useState<any[]>([]);
   const [premiumPayments, setPremiumPayments] = useState<any[]>([]);
+  const [showShare, setShowShare] = useState(false);
 
   // The effective category tracks the in-form Asset Class selector when present,
   // so switching category re-derives the specialized field set below.
@@ -146,6 +154,10 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         standardFields['owner_id'] = 'person_select';
         if (isHomeLoan) {
           standardFields['linked_asset_id'] = 'property_select';
+          // What the money went on decides its tax treatment (tax/prefill.py _loan_use);
+          // both live in metadata_json.
+          standardFields['loan_use'] = 'select_loan_use';
+          standardFields['house_share_pct'] = 'loan_share';
         }
       }
     } else if (entityType === 'goals') {
@@ -224,6 +236,10 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
         defaultData[k] = isInsurance ? 'Yearly' : 'Monthly';
       } else if (type === 'checkbox') {
         defaultData[k] = 1;
+      } else if (type === 'select_loan_use') {
+        defaultData[k] = 'purchase';
+      } else if (type === 'loan_share') {
+        defaultData[k] = 100;
       } else if (k === 'currency') {
         defaultData[k] = 'INR'; // accounts.currency's column default
       } else {
@@ -513,6 +529,33 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       const options = ['Active', 'Closed', 'Matured'];
       const current = formData[k] || 'Active';
       return field(k, select(k, current, (v) => handleChange(k, v), (options.includes(current) ? options : [current, ...options]).map((o) => ({ value: o, label: o }))));
+    }
+    if (type === 'loan_share') return null; // shown inside "Used for"
+    if (type === 'select_loan_use') {
+      const share = Number(formData.house_share_pct ?? 100);
+      const partial = showShare || share < 100;
+      const use = formData[k] || 'purchase';
+      return (
+        <div key={k} className="df-field df-wide">
+          <label htmlFor={`field-${k}`} className="df-label">Used for</label>
+          {select(k, use, (v) => handleChange(k, v), [
+            { value: 'purchase', label: 'Buying or building the house' },
+            { value: 'repair', label: 'Repairs or renovation' },
+            { value: 'other', label: 'Something else (car, education, wedding…)' },
+          ])}
+          <span className="df-hint">{LOAN_USE_HINT[use]}</span>
+          {use !== 'other' && (partial ? (
+            <span className="df-share">
+              <label htmlFor="field-house_share_pct" className="df-label">Share that went into the house</label>
+              <AmountInput id="field-house_share_pct" label="Share used for the house" suffix="%" width={60}
+                value={share} onChange={(v) => handleChange('house_share_pct', Math.min(v, 100))} />
+              <button type="button" className="settings-link" onClick={() => { handleChange('house_share_pct', 100); setShowShare(false); }}>All of it</button>
+            </span>
+          ) : (
+            <button type="button" className="settings-link df-share-link" onClick={() => setShowShare(true)}>Only part of it?</button>
+          ))}
+        </div>
+      );
     }
     if (type === 'select_priority') {
       return field(k, select(k, formData[k] || 'Medium', (v) => handleChange(k, v), ['High', 'Medium', 'Low'].map((o) => ({ value: o, label: o }))));

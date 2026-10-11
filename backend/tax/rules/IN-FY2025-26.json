@@ -108,6 +108,12 @@
     "legacy_section": "139(1)",
     "note": "Usual due date for individuals not liable to audit; extended in some years. Check the year's notifications."
   },
+  "home_loan_interest_use": {
+    "value": {"repair_interest_cap_self_occupied": 30000},
+    "verification": "secondary_source",
+    "legacy_section": "24(b) second proviso",
+    "note": "Old regime, self-occupied home: interest on money borrowed to repair, renew or reconstruct the house is capped here, inside the overall self-occupied interest cap. The higher cap needs the loan to be for buying or building it. Interest on borrowing spent on anything else is not house-property interest."
+  },
   "regimes": {
     "new": {
       "label": "New Tax Regime",

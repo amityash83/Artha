@@ -26,7 +26,7 @@ Use this to model a Budget proposal early, or to correct a figure before an offi
 
 ## Optional items
 
-`advance_tax` (threshold, instalment dates and cumulative %, safe harbours, interest rates and rounding) and `return_due_date` are optional, so older rule sets and users' copies stay valid; the Advance Tax tab says when a year's set lacks them. Check both each year: return due dates are often extended.
+`advance_tax` (threshold, instalment dates and cumulative %, safe harbours, interest rates and rounding), `return_due_date` and `home_loan_interest_use` (the cap on interest for a self-occupied home's repair or renovation loan, used by the planner's prefill) are optional, so older rule sets and users' copies stay valid; the Advance Tax tab says when a year's set lacks them. Check both each year: return due dates are often extended.
 
 ## What the engine reads
 

@@ -1,6 +1,8 @@
 """'Fill from my Artha data': planner proposals from Artha's own records, and DB-backed planner drafts."""
 from datetime import date
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -172,7 +174,7 @@ def test_explanations_use_indian_digit_grouping():
 def _split(conn, today):
     from backend.tax.prefill import _loan_items
     start, end = fy_bounds(FY)
-    items = _loan_items(conn.cursor(), 1, start, end, today)
+    items, _ = _loan_items(conn.cursor(), 1, start, end, today)
     return {i["target"]: i for i in items}
 
 
@@ -215,7 +217,7 @@ def test_past_year_rolls_back_emis_paid_after_it_ended(data):
 def test_future_year_says_it_uses_todays_balance(data):
     from backend.tax.prefill import _loan_items
     start, end = fy_bounds("2027-28")
-    (interest,) = [i for i in _loan_items(data.cursor(), 1, start, end, TODAY) if "interest" in i["target"]]
+    (interest,) = [i for i in _loan_items(data.cursor(), 1, start, end, TODAY)[0] if "interest" in i["target"]]
     assert "future year" in interest["explanation"]
     assert interest["amount"] == pytest.approx(sum_interest(4900000, 8.5 / 100 / 12, 43391), abs=1)
 
@@ -235,3 +237,54 @@ def test_recorded_premium_payments_this_year_win(data):
     data.commit()
     life = by_target(prefill(data, FY, today=TODAY), "deductions.80C.life_insurance")[0]
     assert life["amount"] == 4000 and life["basis"] == "recorded" and "2 premium payment" in life["explanation"]
+
+
+# --- What a home loan was used for (the loan form's "Used for" / share) -------------
+
+def _use(conn, loan_use=None, share=None):
+    meta = {k: v for k, v in (("loan_use", loan_use), ("house_share_pct", share)) if v is not None}
+    conn.execute("UPDATE liabilities SET metadata_json = ? WHERE name = 'SBI Home Loan'", (json.dumps(meta),))
+    conn.commit()
+
+
+def _with_rules(conn):
+    from backend.tax.prefill import _loan_items
+    from backend.tax.rules_loader import load_rule_set
+    start, end = fy_bounds(FY)
+    items, notes = _loan_items(conn.cursor(), 1, start, end, TODAY, load_rule_set(FY))
+    return {i["target"]: i for i in items}, notes
+
+
+def test_bought_or_built_counts_interest_and_principal_as_before(data):
+    base, _ = _with_rules(data)
+    _use(data, "purchase")
+    items, notes = _with_rules(data)
+    assert set(items) == set(base) and not notes
+    assert items["deductions.80C.home_loan_principal"]["amount"] == base["deductions.80C.home_loan_principal"]["amount"]
+
+
+def test_a_share_used_for_the_house_scales_both_figures(data):
+    base, _ = _with_rules(data)
+    _use(data, "purchase", 40)
+    items, _ = _with_rules(data)
+    for target in ("deductions.home_loan_interest_self_occupied", "deductions.80C.home_loan_principal"):
+        assert items[target]["amount"] == pytest.approx(base[target]["amount"] * 0.4, abs=0.02)
+    assert "40% of the loan went into the house" in items["deductions.home_loan_interest_self_occupied"]["explanation"]
+
+
+def test_repairs_count_capped_interest_and_no_principal(data):
+    from backend.tax.rules_loader import load_rule_set
+    cap = load_rule_set(FY)["home_loan_interest_use"]["value"]["repair_interest_cap_self_occupied"]
+    _use(data, "repair")
+    items, _ = _with_rules(data)
+    assert "deductions.80C.home_loan_principal" not in items
+    interest = items["deductions.home_loan_interest_self_occupied"]
+    assert interest["amount"] == cap  # the fixture's loan pays far more interest than the cap
+    assert "repairs or renovation" in interest["explanation"]
+
+
+def test_money_used_elsewhere_is_left_out_with_a_note(data):
+    _use(data, "other")
+    items, notes = _with_rules(data)
+    assert not any(t.startswith("deductions.home_loan") or "home_loan_principal" in t for t in items)
+    assert any("SBI Home Loan is left out" in n for n in notes)

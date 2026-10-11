@@ -32,7 +32,7 @@ REQUIRED_TOP_LEVEL_ITEMS = (
 )
 # Optional: rule sets made before these existed (including users' copies) stay valid; the
 # features that use them say so when they're missing.
-OPTIONAL_TOP_LEVEL_ITEMS = ("advance_tax", "return_due_date")
+OPTIONAL_TOP_LEVEL_ITEMS = ("advance_tax", "return_due_date", "home_loan_interest_use")
 REQUIRED_REGIME_ITEMS = (
     "slabs", "standard_deduction", "rebate", "surcharge", "professional_tax", "hra",
     "allowance_exemptions", "house_property_loss_setoff_cap", "employer_nps", "deductions",

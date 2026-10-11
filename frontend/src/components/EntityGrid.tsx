@@ -78,7 +78,9 @@ const metaOf = (kind: Kind, e: any, showOwner: boolean): string => {
     if (cat === 'Credit Card') {
       parts.push(e.lender_name, num(e.credit_limit) > 0 ? `limit ${formatINR(e.credit_limit)}` : null, e.due_date ? `due on the ${e.due_date}` : null);
     } else {
-      parts.push(e.lender_name, num(e.interest_rate) > 0 ? `${num(e.interest_rate)}%` : null,
+      parts.push(e.lender_name, e.loan_use === 'repair' ? 'for repairs' : e.loan_use === 'other' ? 'not for the house' : null,
+        num(e.house_share_pct) > 0 && num(e.house_share_pct) < 100 ? `${num(e.house_share_pct)}% for the house` : null,
+        num(e.interest_rate) > 0 ? `${num(e.interest_rate)}%` : null,
         num(e.emi) > 0 ? `EMI ${formatINR(e.emi)}` : null, num(e.remaining_tenure) > 0 ? yearsLeft(num(e.remaining_tenure)) : null);
     }
   } else if (kind === 'goals') {

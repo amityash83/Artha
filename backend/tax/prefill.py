@@ -11,6 +11,7 @@ would fill (target), the amount, where it came from (source rows) and how firm i
 The UI shows the items, the user ticks the ones that apply, and ticked items for the same
 target are summed and replace that field. Everything is filtered to the chosen person.
 """
+import json
 import re
 import sqlite3
 from datetime import date
@@ -219,28 +220,62 @@ def _loan_split(cur, loan, start, end, today) -> Optional[dict]:
     return {"interest": interest, "principal": principal, "explanation": how}
 
 
-def _loan_items(cur, person_id, start, end, today) -> List[dict]:
-    cur.execute("""SELECT l.id, l.name, l.interest_rate, l.emi, l.outstanding, c.name AS category FROM liabilities l
+# What a home loan's money was used for (the loan form's "Used for"), which decides what
+# counts for tax. Loans without it are treated as bought-or-built, as before.
+LOAN_USES = ("purchase", "repair", "other")
+
+
+def _loan_use(loan) -> tuple:
+    try:
+        meta = json.loads(loan["metadata_json"] or "{}")
+    except (TypeError, ValueError):
+        meta = {}
+    use = meta.get("loan_use") if meta.get("loan_use") in LOAN_USES else "purchase"
+    try:
+        share_pct = min(max(float(meta.get("house_share_pct") if meta.get("house_share_pct") not in (None, "") else 100), 0.0), 100.0)
+    except (TypeError, ValueError):
+        share_pct = 100.0
+    return use, share_pct
+
+
+def _loan_items(cur, person_id, start, end, today, rules: Optional[dict] = None) -> tuple:
+    cur.execute("""SELECT l.id, l.name, l.interest_rate, l.emi, l.outstanding, l.metadata_json, c.name AS category FROM liabilities l
                    JOIN categories c ON c.id = l.category_id WHERE l.owner_id = ? ORDER BY l.name""", (person_id,))
-    items = []
+    items, notes = [], []
+    repair_cap = ((rules or {}).get("home_loan_interest_use") or {}).get("value", {}).get("repair_interest_cap_self_occupied")
     for loan in cur.fetchall():
         home = loan["category"] == "Home Loan"
         education = "education" in (loan["category"] or "").lower()
         if not (home or education):
             continue
+        if home:
+            use, share_pct = _loan_use(loan)
+            if use == "other" or share_pct <= 0:
+                notes.append(f"{loan['name']} is left out: its money wasn't used for the house, so its interest and principal don't count as home-loan deductions.")
+                continue
         split = _loan_split(cur, loan, start, end, today)
         if not split:
             continue
         source = {"type": "liability", "id": loan["id"]}
         if home:
+            share = share_pct / 100.0
+            how = split["explanation"] + ("" if share_pct >= 100 else f"; {share_pct:g}% of the loan went into the house, so that share counts")
             note = "Counts only for a self-occupied home in the old regime; check against your lender's interest certificate."
-            items.append(_item("deductions.home_loan_interest_self_occupied", split["interest"], loan["name"], "estimate",
-                               split["explanation"], source, note=note))
-            items.append(_item("deductions.80C.home_loan_principal", split["principal"], loan["name"], "estimate",
-                               split["explanation"], source, note=note))
+            interest = split["interest"] * share
+            if use == "repair":
+                if repair_cap is not None and interest > repair_cap:
+                    how += f"; capped at ₹{_inr(repair_cap)} because the money went on repairs or renovation"
+                    interest = repair_cap
+                elif repair_cap is None:
+                    note += " This rule set has no cap for repair loans, so the full interest is shown."
+                items.append(_item("deductions.home_loan_interest_self_occupied", interest, loan["name"], "estimate", how, source,
+                                   note=note + " Used for repairs or renovation: the principal doesn't count under 80C."))
+            else:
+                items.append(_item("deductions.home_loan_interest_self_occupied", interest, loan["name"], "estimate", how, source, note=note))
+                items.append(_item("deductions.80C.home_loan_principal", split["principal"] * share, loan["name"], "estimate", how, source, note=note))
         else:
             items.append(_item("deductions.80E", split["interest"], loan["name"], "estimate", split["explanation"], source))
-    return items
+    return items, notes
 
 
 def _rental_ledger_items(cur, person_id, start, end) -> List[dict]:
@@ -283,7 +318,8 @@ def _profile_items(cur, person_id, financial_year) -> List[dict]:
                   {"type": "tax_deduction", "id": d["id"]}) for d in cur.fetchall() if d["section"] in targets and d["amount"] > 0]
 
 
-def prefill(conn: sqlite3.Connection, financial_year: str, person_id: Optional[int] = None, today: Optional[date] = None) -> dict:
+def prefill(conn: sqlite3.Connection, financial_year: str, person_id: Optional[int] = None, today: Optional[date] = None,
+            rules: Optional[dict] = None) -> dict:
     today = today or date.today()
     start, end = fy_bounds(financial_year)
     cur = conn.cursor()
@@ -295,9 +331,11 @@ def prefill(conn: sqlite3.Connection, financial_year: str, person_id: Optional[i
         raise TaxInputError(f"Person {person_id} not found")
 
     items: List[dict] = []
+    loan_notes: List[str] = []
     if person_id is not None:
+        loan_items, loan_notes = _loan_items(cur, person_id, start, end, today, rules)
         items += (_income_items(cur, person_id) + _rent_paid_items(cur, person_id) + _rental_ledger_items(cur, person_id, start, end) + _asset_items(cur, person_id, start, end)
-                  + _insurance_items(cur, person_id, start, end) + _loan_items(cur, person_id, start, end, today)
+                  + _insurance_items(cur, person_id, start, end) + loan_items
                   + _gains_items(cur, person_id, financial_year) + _profile_items(cur, person_id, financial_year))
 
     # The same money can show up twice (rent in both the ledger and an income row; a
@@ -326,5 +364,6 @@ def prefill(conn: sqlite3.Connection, financial_year: str, person_id: Optional[i
         "notes": [
             "Income and expenses are this person's entries in Income & Expenses.",
             "Policy premiums use the payments recorded in each policy's premium log this year, else the current premium (an estimate).",
+            *loan_notes,
         ],
     }

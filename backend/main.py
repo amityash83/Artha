@@ -2070,7 +2070,9 @@ def tax_epf_suggestion(req: TaxEpfSuggestionRequest):
 @app.get("/api/tax/prefill")
 def tax_prefill(financial_year: Optional[str] = None, person_id: Optional[int] = None):
     """Proposed planner figures from Artha's own records; the UI applies only what the user ticks."""
-    return _tax_store_call(lambda conn: tax_prefill_mod.prefill(conn, financial_year or _default_financial_year(), person_id))
+    fy = financial_year or _default_financial_year()
+    # The year's rules carry the cap on interest for home loans spent on repairs.
+    return _tax_store_call(lambda conn: tax_prefill_mod.prefill(conn, fy, person_id, rules=_resolve_for(conn, fy, None, None)[0]))
 
 class TaxAdvanceRequest(TaxComputeRequest):
     expected_tds: Optional[float] = None  # default: the tax on salary alone (what an employer deducts)
