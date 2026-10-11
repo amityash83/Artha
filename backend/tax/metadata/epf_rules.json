@@ -6,7 +6,13 @@
     "source": "epf-scheme-1952",
     "note": "Employee share, as a % of EPF wages (basic + DA). Some establishments are notified at 10% (fewer than 20 employees, certain industries); enter your payslip figure if yours differs."
   },
-  "wage_ceiling_monthly": {
+  "employer_eps_pct": {
+   "value": 8.33,
+   "verification": "secondary_source",
+   "source": "epf-scheme-1952",
+   "note": "Pension (EPS) share of the employer's contribution, as a % of EPF wages up to the wage ceiling; the rest of the employer's share goes to EPF. Members who joined on or after 1 September 2014 earning above the then ceiling are not in EPS, so their employer share all goes to EPF. Whether EPS follows the revised 25,000 ceiling is not confirmed; the passbook is authoritative."
+ },
+ "wage_ceiling_monthly": {
     "value": [
       {
         "from": "2014-09-01",

@@ -131,6 +131,14 @@ export const PayslipSimulator: React.FC<OptimizationProps> = ({ inputs, financia
                   </tr>
                   {row('Net monthly in-hand', data.before.net_in_hand_monthly, data.after.net_in_hand_monthly, { strong: true })}
                   {row('Employer NPS (not cash)', data.before.employer_nps_monthly, data.after.employer_nps_monthly)}
+                  {data.employer_pf && data.employer_pf.employer_pf_monthly > 0 && (
+                    <>
+                      {row('Employer PF (not cash)', data.employer_pf.employer_pf_monthly, data.employer_pf.employer_pf_monthly)}
+                      {row('   into your EPF', data.employer_pf.epf_monthly, data.employer_pf.epf_monthly, { hint: 'Earns interest; part of your PF balance.' })}
+                      {row('   into pension (EPS)', data.employer_pf.eps_monthly, data.employer_pf.eps_monthly,
+                        { hint: `${data.employer_pf.eps_pct}% of PF wages up to the ceiling. Usual split; your passbook is authoritative.` })}
+                    </>
+                  )}
                   {row('Taxable salary (annual)', data.before.taxable_salary_annual, data.after.taxable_salary_annual)}
                   {row('Annual tax', data.before.annual_tax, data.after.annual_tax, { strong: true })}
                 </tbody>

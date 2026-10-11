@@ -239,6 +239,11 @@ def validate_epf_rules(rules: dict) -> None:
     rate = rules["employee_rate_pct"]["value"]
     if not isinstance(rate, (int, float)) or not 0 < rate <= 100:
         raise RuleSetError("employee_rate_pct must be a percentage above 0")
+    if "employer_eps_pct" in rules:  # optional: only the payslip's EPF/EPS split uses it
+        _check_item(rules["employer_eps_pct"], "employer_eps_pct")
+        eps = rules["employer_eps_pct"]["value"]
+        if not isinstance(eps, (int, float)) or not 0 <= eps <= rate:
+            raise RuleSetError("employer_eps_pct must be a percentage no higher than the contribution rate")
     periods = (rules.get("wage_ceiling_monthly") or {}).get("value")
     if not isinstance(periods, list) or not periods:
         raise RuleSetError("wage_ceiling_monthly.value must be a non-empty list of {from, amount}")

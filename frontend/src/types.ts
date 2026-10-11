@@ -912,6 +912,8 @@ export interface TaxPayslipResult {
   rule_set: TaxRuleSetRef;
   before: TaxPayslipSide;
   after: TaxPayslipSide;
+  /** The employer's PF split as it usually lands (EPF rules); null when the rules lack the EPS rate. */
+  employer_pf?: { employer_pf_monthly: number; eps_monthly: number; epf_monthly: number; eps_pct: number; verification: string; note: string } | null;
   feasible: boolean;
   notes: string[];
   month: { index: number; label: string; status: 'actual' | 'projected' } | null; // null = average month

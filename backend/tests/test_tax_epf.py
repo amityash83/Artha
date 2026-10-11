@@ -43,7 +43,7 @@ def test_wages_below_a_ceiling_are_not_capped():
 
 def test_full_basis_ignores_the_ceiling():
     r = suggest_epf("2026-27", HIGH, "full")
-    assert r["months"][0]["epf"] == round(0.12 * BASIC / 12)
+    assert r["months"][0]["epf"] == 27023  # 12% of 2,25,187.50 = 27,022.50, rounded half up as EPFO does
     assert r["ceiling_changes"] == []
 
 

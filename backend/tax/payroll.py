@@ -18,6 +18,40 @@ from typing import Optional
 
 from backend.tax.engine import MONTHS_PER_YEAR, TaxInputError, compute, monthly_enabled, normalize_inputs
 from backend.tax.nps import REGIME_CHOICES, apply_employer_nps, salary_base
+from backend.tax.epf import fy_months, month_segments, rupees
+from backend.tax.rules_loader import load_epf_rules
+
+
+def employer_pf_split(inp: dict, financial_year: str, month_index: Optional[int] = None) -> Optional[dict]:
+    """The employer's PF as it usually lands: a pension (EPS) part, at the EPF rules'
+    employer_eps_pct of EPF wages (basic + DA) up to the wage ceiling in force, and the
+    rest to EPF. For information only: tax treats the employer's PF as one figure. Uses the
+    month's own ceiling (split by days when it changes mid-month); the average month is the
+    mean of the year's twelve. None when the rules don't carry the EPS rate."""
+    epf_rules = load_epf_rules()
+    if "employer_eps_pct" not in epf_rules:
+        return None
+    rate = float(epf_rules["employer_eps_pct"]["value"])
+    periods = epf_rules["wage_ceiling_monthly"]["value"]
+    starts = fy_months(financial_year)
+    monthly = monthly_enabled(inp)
+
+    def figures(i: int) -> tuple:
+        if monthly:
+            m = inp["monthly"]["months"][i]
+            wages = m["salary"].get("basic", 0.0) + m["salary"].get("da", 0.0)
+            pf = m["employer_contributions"]["pf"]
+        else:
+            wages = (inp["salary"].get("basic", 0.0) + inp["salary"].get("da", 0.0)) / MONTHS_PER_YEAR
+            pf = inp["employer_contributions"]["pf"] / MONTHS_PER_YEAR
+        capped = sum(min(wages, s["period"]["amount"]) * s["days"] / s["days_in_month"] for s in month_segments(starts[i], periods))
+        return pf, min(rupees(capped * rate / 100.0), pf)
+
+    rows = [figures(i) for i in ([month_index] if month_index is not None else range(len(starts)))]
+    pf = sum(r[0] for r in rows) / len(rows)
+    eps = sum(r[1] for r in rows) / len(rows)
+    return {"employer_pf_monthly": round(pf, 2), "eps_monthly": round(eps, 2), "epf_monthly": round(pf - eps, 2),
+            "eps_pct": rate, "verification": epf_rules["employer_eps_pct"]["verification"], "note": epf_rules["employer_eps_pct"]["note"]}
 
 
 def _side(inp: dict, result: dict, regime: str, actual_monthly_tds: Optional[float],
@@ -119,6 +153,8 @@ def payslip(raw_inputs: dict, rules: dict, optimization: Optional[dict] = None,
         "notes": notes,
         "month": None if month is None else {"index": month, "label": before_inp["monthly"]["months"][month]["label"],
                                              "status": before_inp["monthly"]["months"][month]["status"]},
+        # The employer's PF doesn't change with an NPS restructure, so one split serves both sides.
+        "employer_pf": employer_pf_split(before_inp, rules["financial_year"], month),
         "difference": {
             "monthly_cash_change": round(cash_change, 2),
             "monthly_nps_change": round(nps_change, 2),

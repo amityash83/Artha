@@ -10,6 +10,7 @@ that part's ceiling) x days / days in month. The result is only a suggestion for
 Employee EPF input; the tax engine never derives EPF on its own.
 """
 import calendar
+from decimal import ROUND_HALF_UP, Decimal
 from datetime import date
 from typing import List
 
@@ -19,6 +20,12 @@ from backend.tax.rules_loader import load_epf_rules
 BASES = ("ceiling", "full")
 # Indian financial year order: April of the start year to March of the next.
 FY_FIRST_MONTH = 4
+
+
+def rupees(amount: float) -> int:
+    """To the nearest rupee, halves up, as EPFO rounds contributions (Python's round()
+    sends halves to the even rupee: 2,082.50 would become 2,082, not 2,083)."""
+    return int(Decimal(str(amount)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 def fy_months(financial_year: str) -> List[date]:
@@ -75,12 +82,12 @@ def suggest_epf(financial_year: str, wages: List[float], basis: str = "ceiling",
     for start, wage in zip(fy, wages):
         label = start.strftime("%b %Y")
         if basis == "full":
-            epf = round(rate * wage)
+            epf = rupees(rate * wage)
             how = f"{rules['employee_rate_pct']['value']}% of {wage:,.0f}"
             ceilings = []
         else:
             segs = month_segments(start, periods)
-            epf = round(sum(rate * min(wage, s["period"]["amount"]) * s["days"] / s["days_in_month"] for s in segs))
+            epf = rupees(sum(rate * min(wage, s["period"]["amount"]) * s["days"] / s["days_in_month"] for s in segs))
             ceilings = [{"amount": s["period"]["amount"], "days": s["days"], "first_day": s["first_day"],
                          "verification": s["period"]["verification"]} for s in segs]
             if len(segs) == 1:
