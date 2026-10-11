@@ -14,7 +14,8 @@ Help a salaried user understand and plan their Indian income tax: which regime i
 - **EPF helper** (`epf.py`, `metadata/epf_rules.json`): suggests Employee EPF from basic + DA, either capped at the dated EPFO wage ceiling or on full pay. A month where the ceiling changes (₹15,000 → ₹25,000 from 17 September 2026) is split by calendar days. It only fills the editable EPF input; the engine never derives EPF itself.
 - **Corporate NPS optimiser** (`nps.py`), **payslip simulator** (`payroll.py`), **savings waterfall** (`waterfall.py`), **break-even and sensitivity** (`sensitivity.py`): all built by re-running the engine on adjusted inputs, never by per-rupee shortcuts.
 - **Fill from my Artha data** (`prefill.py`, `PrefillDialog.tsx`): proposes planner figures from Artha's own records: salary/bonus/interest/dividend income rows, Rent expenses, money put into PPF / ELSS (by fund name) / NPS this year, life/term/health premiums, home and education loan interest and principal (an amortisation estimate from the outstanding balance and the EMIs recorded this year), the rental ledger, realised gains and Profile & Deductions entries. Each item is labelled recorded, estimate or guess. The user ticks items, and ticked items for the same field replace that field. Nothing is written until they apply. Everything, including Income & Expenses entries, is filtered to the chosen person.
-- **Planner drafts** are stored in the database (`tax_planner_drafts`), so they travel with the `.db` file; an older browser-only draft is moved there once.
+- **One plan per person and year**: the planner's "Whose tax" and year pickers each open a saved plan (`tax_planner_drafts`, slot `p<person>-<FY>`), stored in the database so plans travel with the `.db` file. A new year for the same person starts from the current year's figures (month-by-month entries folded into annual totals); a new person starts from the sample payroll. The earlier single draft (slot `default`, or browser storage before that) becomes the Primary Owner's plan for its year, once.
+- **Insurance premiums** for 80C/80D come from each policy's premium payment log for the year when recorded; otherwise the current premium for a full year, labelled an estimate.
 - **Saved scenarios** (`scenario_store.py`): immutable snapshots of inputs, the full result and the exact rule-set version/fingerprint; "recalculate under current rules" writes a new scenario.
 - **Reports**: CSV per table or all-in-one, and a printable report saved as PDF (Electron `printToPDF` via the preload bridge; browser print dialog on the web).
 - The older **profile estimate** (Profile & Deductions / Old vs New Estimate tabs, `tax_profiles` + `tax_deductions`) now runs on the same engine and rule resolution.
@@ -51,7 +52,7 @@ From `backend/db.py`'s `init_db()`:
 - `capital_gains_realizations`: realized gains log per Sell transaction.
 - `tax_rule_sets`: user rule-set versions (`rule_set_id`, `version`, FY, name, based-on reference, `content_json`, `content_hash`, status, note). `UNIQUE(rule_set_id, version)`.
 - `tax_rule_set_selection`: FY → rule set in use (no row = official set).
-- `tax_planner_drafts`: the planner's working state (inputs, year, optimisation) per slot; the planner uses `default`.
+- `tax_planner_drafts`: the planner's working state (inputs, year, optimisation) per slot, `p<person id>-<FY>`.
 - `tax_scenarios`: saved scenarios (name, FY, rule set id/version/hash, `inputs_json`, `result_json`, `recalculated_from`, notes).
 
 The legacy Taxation keys in `financial_rules` (`section_80c_limit`, `standard_deduction_salaried`, …) are still seeded but unused; their descriptions say so.
@@ -103,4 +104,4 @@ Reports & Export tab: CSV per table (summary, comparison, computation per regime
 - Confirm `secondary_source`/`unverified` items against the Income-tax Act, 2025, Finance Act 2026 and Income-tax Rules 2026 texts, and upgrade them to `verified`.
 - Model the dividend surcharge cap and accretion tax above the retirement cap.
 - Form 16 / payslip PDF parsing into the monthly grid.
-- Record the actual premiums paid this year (transactions) rather than the current premium, and the real home-loan interest from a lender certificate.
+- Take the real home-loan interest from a lender certificate rather than the amortisation estimate.

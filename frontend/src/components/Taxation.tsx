@@ -255,7 +255,7 @@ export const Taxation: React.FC<TaxationProps> = ({ data, onRefresh, showToast }
         ))}
       </div>
 
-      {activeSubTab === 'planner' && <TaxPlanner showToast={showToast} onOpenRules={() => setActiveSubTab('rules')} />}
+      {activeSubTab === 'planner' && <TaxPlanner people={data.people} showToast={showToast} onOpenRules={() => setActiveSubTab('rules')} />}
       {activeSubTab === 'rules' && <TaxRulesManager showToast={showToast} />}
 
       {!profileTab ? null : people.length === 0 ? (

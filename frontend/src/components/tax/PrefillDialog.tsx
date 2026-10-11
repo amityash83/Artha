@@ -43,11 +43,12 @@ export const PrefillDialog: React.FC<{
   inputs: TaxPlannerInputs;
   metadata: TaxInputMetadata;
   financialYear: string;
+  personId?: number | null; // the planner's person; the dialog can still switch
   onClose: () => void;
   onApply: (next: TaxPlannerInputs, summary: string) => void;
-}> = ({ inputs, metadata, financialYear, onClose, onApply }) => {
+}> = ({ inputs, metadata, financialYear, personId: plannerPerson = null, onClose, onApply }) => {
   const modalRef = useModalA11y(true, onClose);
-  const [personId, setPersonId] = useState<number | null>(null);
+  const [personId, setPersonId] = useState<number | null>(plannerPerson);
   const [data, setData] = useState<TaxPrefillResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ticked, setTicked] = useState<Record<string, boolean>>({});

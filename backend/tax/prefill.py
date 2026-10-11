@@ -155,22 +155,30 @@ def _asset_items(cur, person_id, start, end) -> List[dict]:
     return items
 
 
-def _insurance_items(cur, person_id) -> List[dict]:
+def _insurance_items(cur, person_id, start, end) -> List[dict]:
+    """Premiums paid during the year (the policy's payment log) when any are recorded;
+    otherwise the current premium for a full year, as an estimate."""
     cur.execute("""SELECT a.id, a.name, d.policy_type, d.premium, d.frequency FROM assets a
                    JOIN insurance_details d ON d.asset_id = a.id
                    WHERE a.owner_id = ? AND d.policy_type IN ('Life', 'Term', 'Health') ORDER BY d.policy_type, a.name""",
                 (person_id,))
     items = []
     for p in cur.fetchall():
-        per_year = _per_year(p["frequency"]) or 1
-        annual = float(p["premium"] or 0) * per_year
-        if annual <= 0:
+        paid = cur.execute("""SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS n FROM insurance_premium_payments
+                              WHERE asset_id = ? AND payment_date >= ? AND payment_date < ?""",
+                           (p["id"], start.isoformat(), end.isoformat())).fetchone()
+        if paid["n"]:
+            amount, basis = float(paid["total"]), "recorded"
+            how = f"{p['policy_type']} policy: {paid['n']} premium payment(s) recorded this year"
+        else:
+            amount, basis = float(p["premium"] or 0) * (_per_year(p["frequency"]) or 1), "estimate"
+            how = (f"{p['policy_type']} policy: current premium {_inr(p['premium'])} {p['frequency'] or 'Yearly'} for a full year "
+                   "(no payments recorded this year)")
+        if amount <= 0:
             continue
         target = "deductions.80D_self_family" if p["policy_type"] == "Health" else "deductions.80C.life_insurance"
         note = ("If this policy covers your parents, move it to the parents' 80D line." if p["policy_type"] == "Health" else None)
-        items.append(_item(target, annual, p["name"], "recorded",
-                           f"{p['policy_type']} policy premium {_inr(p['premium'])} {p['frequency'] or 'Yearly'}",
-                           {"type": "insurance", "id": p["id"]}, note=note))
+        items.append(_item(target, amount, p["name"], basis, how, {"type": "insurance", "id": p["id"]}, note=note))
     return items
 
 
@@ -299,7 +307,7 @@ def prefill(conn: sqlite3.Connection, financial_year: str, person_id: Optional[i
     items: List[dict] = []
     if person_id is not None:
         items += (_income_items(cur, person_id) + _rent_paid_items(cur, person_id) + _rental_ledger_items(cur, person_id, start, end) + _asset_items(cur, person_id, start, end)
-                  + _insurance_items(cur, person_id) + _loan_items(cur, person_id, start, end, today)
+                  + _insurance_items(cur, person_id, start, end) + _loan_items(cur, person_id, start, end, today)
                   + _gains_items(cur, person_id, financial_year) + _profile_items(cur, person_id, financial_year))
 
     # The same money can show up twice (rent in both the ledger and an income row; a
@@ -327,6 +335,6 @@ def prefill(conn: sqlite3.Connection, financial_year: str, person_id: Optional[i
         "monthly_grid_targets": list(MONTHLY_GRID_TARGETS),
         "notes": [
             "Income and expenses are this person's entries in Income & Expenses.",
-            "Health and life policy premiums are their current yearly premium, not what was actually paid this year.",
+            "Policy premiums use the payments recorded in each policy's premium log this year, else the current premium (an estimate).",
         ],
     }

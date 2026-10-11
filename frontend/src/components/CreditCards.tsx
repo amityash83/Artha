@@ -110,7 +110,8 @@ const PRESETS = [
 ];
 
 export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showToast }) => {
-  const { liabilities = [], categories = [], institutions = [] } = data;
+  const { liabilities = [], categories = [], institutions = [], people = [] } = data;
+  const primaryOwnerId = (people.find((p) => p.role === 'Primary Owner') ?? people[0])?.id;
 
   const creditCards = useMemo(() => {
     return liabilities.filter((l: any) => l.category_name === 'Credit Card');
@@ -156,6 +157,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
   // Form states
   const [name, setName] = useState('');
   const [lenderId, setLenderId] = useState('');
+  const [ownerId, setOwnerId] = useState('');
   const [outstanding, setOutstanding] = useState(0);
   const [creditLimit, setCreditLimit] = useState(100000);
   const [statementDate, setStatementDate] = useState(15);
@@ -263,6 +265,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
     setEditingCard(card);
     setName(card.name);
     setLenderId(card.lender_institution_id?.toString() || '');
+    setOwnerId(card.owner_id?.toString() || '');
     setOutstanding(card.outstanding || 0);
 
     // credit_card_details columns are flattened directly onto the liability object
@@ -316,6 +319,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
 
   const handleOpenAdd = () => {
     setEditingCard(null);
+    setOwnerId(primaryOwnerId?.toString() || '');
     setSpendBreakdown(null);
     setName('');
     setLenderId('');
@@ -379,6 +383,7 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
       name,
       category_id: creditCardCategoryId,
       lender_institution_id: Number(lenderId),
+      ...(ownerId ? { owner_id: Number(ownerId) } : {}),
       interest_rate: 0.0,
       emi: 0.0,
       outstanding: Number(outstanding),
@@ -1367,6 +1372,17 @@ export const CreditCards: React.FC<CreditCardsProps> = ({ data, onRefresh, showT
                       </select>
                     </div>
                   </div>
+
+                  {people.length > 0 && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                      <div>
+                        <label className="form-label" htmlFor="cc-owner">Cardholder</label>
+                        <select id="cc-owner" className="form-input" value={ownerId} onChange={e => setOwnerId(e.target.value)}>
+                          {people.map(p => <option key={p.id} value={p.id}>{p.name} ({p.role})</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  )}
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                     <div>

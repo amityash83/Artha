@@ -93,7 +93,8 @@ def test_investments_this_year_for_this_person_only(data):
 
 def test_insurance_premiums(data):
     out = prefill(data, FY, today=TODAY)
-    assert by_target(out, "deductions.80C.life_insurance")[0]["amount"] == 24000
+    life = by_target(out, "deductions.80C.life_insurance")[0]
+    assert life["amount"] == 24000 and life["basis"] == "estimate" and "no payments recorded" in life["explanation"]
     health = [i for i in by_target(out, "deductions.80D_self_family") if i["source"]["type"] == "insurance"]
     assert health[0]["amount"] == 30000
 
@@ -225,3 +226,12 @@ def test_asset_to_asset_switches_are_not_new_80c_money(data):
                     VALUES ('Asset', 1, 'Asset', ?, 'Transfer', 10000, '2026-08-01')""", (ppf,))
     data.commit()
     assert by_target(prefill(data, FY, today=TODAY), "deductions.80C.ppf")[0]["amount"] == 75000
+
+
+def test_recorded_premium_payments_this_year_win(data):
+    term = data.execute("SELECT id FROM assets WHERE name = 'HDFC Term'").fetchone()["id"]
+    for when, amt in (("2026-04-10", 2000), ("2026-05-10", 2000), ("2026-03-10", 9999)):  # March 2026: last year
+        data.execute("INSERT INTO insurance_premium_payments (asset_id, payment_date, amount) VALUES (?, ?, ?)", (term, when, amt))
+    data.commit()
+    life = by_target(prefill(data, FY, today=TODAY), "deductions.80C.life_insurance")[0]
+    assert life["amount"] == 4000 and life["basis"] == "recorded" and "2 premium payment" in life["explanation"]
