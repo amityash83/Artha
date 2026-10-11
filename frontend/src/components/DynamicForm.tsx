@@ -121,6 +121,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
       }
       standardFields['goal_mapping'] = 'goal_select';
     } else if (entityType === 'liabilities') {
+      standardFields['category_id'] = 'category_select';
       if (isCreditCard) {
         standardFields['lender_institution_id'] = 'institution_select';
         standardFields['outstanding'] = 'number';
@@ -422,9 +423,9 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
           }
 
           if (type === 'category_select') {
-            const catEntityType = ({ accounts: 'Account', income: 'Income', expenses: 'Expense' } as Record<string, string>)[entityType] ?? 'Asset';
+            const catEntityType = ({ accounts: 'Account', liabilities: 'Liability', income: 'Income', expenses: 'Expense' } as Record<string, string>)[entityType] ?? 'Asset';
             const assetCategories = categories ? categories.filter((c) => c.entity_type === catEntityType) : [];
-            const catLabel = entityType === 'accounts' ? 'Account Type (Category)' : entityType === 'assets' ? 'Asset Class (Category)' : 'Category';
+            const catLabel = entityType === 'accounts' ? 'Account Type (Category)' : entityType === 'assets' ? 'Asset Class (Category)' : entityType === 'liabilities' ? 'Loan type' : 'Category';
             // assets.category_id is NOT NULL; accounts.category_id is nullable —
             // an account that fits no defined type may stay uncategorized.
             const categoryRequired = entityType !== 'accounts';

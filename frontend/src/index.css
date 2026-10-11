@@ -900,3 +900,27 @@ h1, h2, h3, h4, h5 {
 .ie-toggle > span { display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--text-primary); }
 .ie-toggle strong { font-weight: 500; }
 .ie-form-actions { display: flex; align-items: center; gap: 8px; margin-top: 20px; }
+
+/* ---------------------------------------------------------------------------
+   Accounts / Assets / Liabilities / Goals list (components/EntityGrid.tsx);
+   reuses the cc-summary strip, settings-group boxes and ie-row rows.
+   --------------------------------------------------------------------------- */
+.eg-page { display: flex; flex-direction: column; gap: 22px; }
+.eg-head { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 16px; }
+.eg-head .page-subtitle { margin-bottom: 0; }
+.eg-head-actions { display: flex; align-items: center; gap: 10px; }
+.eg-search { position: relative; }
+.eg-search svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
+.eg-search input { padding-left: 32px; width: 220px; font-size: 13px; }
+.eg-add { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.eg-summary { margin-bottom: 0; }
+@media (max-width: 900px) { .eg-summary { grid-template-columns: 1fr 1fr !important; } }
+.eg-figure { font-size: 22px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.eg-figure span { font-size: 13px; font-weight: 400; color: var(--text-secondary); }
+.eg-groups { display: flex; flex-direction: column; gap: 22px; }
+.eg-count { font-weight: 400; color: var(--text-muted); margin-left: 4px; }
+.eg-group-total { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.eg-goal { min-width: 200px; }
+.eg-goal .cc-meter { width: 100%; display: block; }
+.eg-goal .cc-meter > span { display: block; height: 100%; border-radius: 3px; }
+.eg-form-foot { display: flex; justify-content: flex-end; margin-top: 10px; padding: 0 4px; }

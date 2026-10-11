@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Category, Institution, Asset, Liability, Goal, Person } from '../types';
 import { DynamicForm } from './DynamicForm';
-import { Plus, Edit2, Trash2, Search } from 'lucide-react';
+import { Plus, Search } from 'lucide-react';
+import { ConfirmAction } from './settings/ui';
+import { formatDate, formatINR } from '../format';
 import { API_BASE_URL } from '../config';
 import { useModalA11y } from '../hooks/useModalA11y';
 
@@ -22,98 +24,140 @@ interface EntityGridProps {
   searchSeed?: { text: string; nonce: number } | null;
 }
 
-interface Column {
-  label: string;
-  key: string;
-  alignRight?: boolean;
-  suffix?: string;
-}
-
 // Page wording for each kind of record this grid shows.
-const PAGE_TEXT: Record<EntityGridProps['entityType'], { title: string; intro: string; add: string; empty: string }> = {
-  accounts: { title: 'Accounts', intro: 'Bank accounts and wallets. Balances are worked out from your transactions.', add: 'Add account', empty: 'No accounts yet. Add your bank accounts to start tracking balances.' },
-  assets: { title: 'Assets', intro: 'What you own: investments, property, insurance, gold and more.', add: 'Add asset', empty: 'No assets yet. Add investments, property or insurance policies.' },
-  liabilities: { title: 'Liabilities', intro: 'What you owe: home, car and personal loans, and credit cards.', add: 'Add loan', empty: 'No loans yet.' },
-  income: { title: 'Income', intro: 'Regular income.', add: 'Add income', empty: 'No income entries yet.' },
-  expenses: { title: 'Expenses', intro: 'Regular expenses.', add: 'Add expense', empty: 'No expense entries yet.' },
-  goals: { title: 'Goals', intro: "What you're saving for, and how far along you are.", add: 'Add goal', empty: 'No goals yet. Add one, for example an emergency fund or a child\'s education.' },
+const PAGE_TEXT: Record<EntityGridProps['entityType'], { title: string; noun: string; intro: string; add: string; empty: string }> = {
+  accounts: { noun: 'Account', title: 'Accounts', intro: 'Bank accounts and wallets. Balances are worked out from your transactions.', add: 'Add account', empty: 'No accounts yet. Add your bank accounts to start tracking balances.' },
+  assets: { noun: 'Asset', title: 'Assets', intro: 'What you own: investments, property, insurance, gold and more.', add: 'Add asset', empty: 'No assets yet. Add investments, property or insurance policies.' },
+  liabilities: { noun: 'Loan', title: 'Liabilities', intro: 'What you owe: home, car and personal loans, and credit cards.', add: 'Add loan', empty: 'No loans yet.' },
+  income: { noun: 'Income', title: 'Income', intro: 'Regular income.', add: 'Add income', empty: 'No income entries yet.' },
+  expenses: { noun: 'Expense', title: 'Expenses', intro: 'Regular expenses.', add: 'Add expense', empty: 'No expense entries yet.' },
+  goals: { noun: 'Goal', title: 'Goals', intro: "What you're saving for, and how far along you are.", add: 'Add goal', empty: 'No goals yet. Add one, for example an emergency fund or a child\'s education.' },
 };
 
-const COMMON_COLUMNS: Record<string, Column[]> = {
-  accounts: [
-    { label: 'Name', key: 'name' },
-    { label: 'Category', key: 'category_name' },
-    { label: 'Institution', key: 'institution_name' },
-    { label: 'Balance', key: 'current_balance', alignRight: true },
-    { label: 'Owner', key: 'owner_name' },
-    { label: 'Status', key: 'status' },
-  ],
-  assets: [
-    { label: 'Name', key: 'name' },
-    { label: 'Category', key: 'category_name' },
-    { label: 'Institution', key: 'institution_name' },
-    { label: 'Current Value', key: 'current_value', alignRight: true },
-    { label: 'Owner', key: 'owner_name' },
-  ],
-  liabilities: [
-    { label: 'Name', key: 'name' },
-    { label: 'Category', key: 'category_name' },
-    { label: 'Lender', key: 'lender_name' },
-    { label: 'Outstanding Balance', key: 'outstanding', alignRight: true },
-    { label: 'Owner', key: 'owner_name' },
-    { label: 'Status', key: 'status' },
-  ],
-  income: [
-    { label: 'Name', key: 'name' },
-    { label: 'Category', key: 'category_name' },
-    { label: 'Amount', key: 'amount', alignRight: true },
-    { label: 'Frequency', key: 'frequency' },
-    { label: 'Owner', key: 'owner_name' },
-  ],
-  expenses: [
-    { label: 'Name', key: 'name' },
-    { label: 'Category', key: 'category_name' },
-    { label: 'Amount', key: 'amount', alignRight: true },
-    { label: 'Frequency', key: 'frequency' },
-    { label: 'Owner', key: 'owner_name' },
-  ],
-  goals: [
-    { label: 'Goal Name', key: 'name' },
-    { label: 'Target Amount', key: 'target_amount', alignRight: true },
-    { label: 'Current Amount', key: 'current_amount', alignRight: true },
-    { label: 'Monthly SIP', key: 'monthly_contribution', alignRight: true },
-    { label: 'Expected Date', key: 'expected_completion' },
-  ],
+type Kind = EntityGridProps['entityType'];
+
+const CARD_CATEGORIES = ['Credit Card'];
+// categories.entity_type for each kind ("liabilities" doesn't singularise by dropping the s).
+const CATEGORY_ENTITY_TYPE: Record<Kind, string> = { accounts: 'account', assets: 'asset', liabilities: 'liability', income: 'income', expenses: 'expense', goals: 'goal' };
+const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : Number(v) || 0);
+const units = (n: number, category: string) => `${n.toLocaleString('en-IN', { maximumFractionDigits: 3 })} ${category === 'Stock' ? (n === 1 ? 'share' : 'shares') : 'units'}`;
+const monthYear = (iso: string) => {
+  const m = /^(\d{4})-(\d{2})/.exec(iso || '');
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, 1).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }) : '';
+};
+const yearsLeft = (months: number) => (months < 12 ? `${Math.ceil(months)} months left` : `${(months / 12).toFixed(months < 120 ? 1 : 0)} years left`);
+
+/** The figure each kind of record is listed and totalled by. */
+const valueOf = (kind: Kind, e: any): number => {
+  if (kind === 'accounts') return num(e.current_balance);
+  if (kind === 'assets') return num(e.current_value);
+  if (kind === 'liabilities') return num(e.outstanding);
+  if (kind === 'goals') return num(e.current_amount);
+  return num(e.amount);
 };
 
-const CATEGORY_COLUMNS: Record<string, Column[]> = {
-  'Stock': [{ label: 'Ticker', key: 'ticker' }, { label: 'Quantity', key: 'quantity', alignRight: true }, { label: 'XIRR', key: 'xirr', alignRight: true, suffix: '%' }],
-  'Mutual Fund': [{ label: 'Scheme Code', key: 'ticker' }, { label: 'Units', key: 'quantity', alignRight: true }, { label: 'XIRR', key: 'xirr', alignRight: true, suffix: '%' }],
-  'Insurance': [
-    { label: 'Policy Type', key: 'policy_type' },
-    { label: 'Premium', key: 'premium', alignRight: true },
-    // 'cover' is computed by /api/init: sum_assured for Life/Term, sum_insured
-    // for Health, idv for Vehicle — one comparable column across policy types.
-    { label: 'Cover', key: 'cover', alignRight: true },
-    { label: 'Premiums Paid', key: 'premiums_paid', alignRight: true },
-  ],
-  'Property': [{ label: 'Rental Income', key: 'rental_income', alignRight: true }],
-  'Home Loan': [
-    { label: 'Rate (ROI)', key: 'interest_rate', suffix: '%' },
-    { label: 'Monthly EMI', key: 'emi', alignRight: true },
-  ],
-  'Personal Loan': [
-    { label: 'Rate (ROI)', key: 'interest_rate', suffix: '%' },
-    { label: 'Monthly EMI', key: 'emi', alignRight: true },
-  ],
-  'Car Loan': [
-    { label: 'Rate (ROI)', key: 'interest_rate', suffix: '%' },
-    { label: 'Monthly EMI', key: 'emi', alignRight: true },
-  ],
-  'Credit Card': [
-    { label: 'Credit Limit', key: 'credit_limit', alignRight: true },
-    { label: 'Due Date', key: 'due_date' },
-  ],
+/** The short line under a record's name: only the details that matter for its category. */
+const metaOf = (kind: Kind, e: any, showOwner: boolean): string => {
+  const cat = e.category_name || '';
+  const parts: (string | null | undefined)[] = [];
+  if (kind === 'accounts') {
+    parts.push(e.institution_name, e.status && e.status !== 'Active' ? e.status : null);
+  } else if (kind === 'assets') {
+    if (cat === 'Stock' || cat === 'Mutual Fund') {
+      parts.push(e.ticker, num(e.quantity) > 0 ? units(num(e.quantity), cat) : null, e.xirr != null && num(e.quantity) > 0 ? `${num(e.xirr).toFixed(1)}% a year` : null);
+    } else if (cat === 'Insurance') {
+      parts.push(e.policy_type, e.institution_name, num(e.cover) > 0 ? `cover ${formatINR(e.cover)}` : null,
+        num(e.premium) > 0 ? `premium ${formatINR(e.premium)}${e.frequency ? ` ${String(e.frequency).toLowerCase()}` : ''}` : null,
+        e.renewal_date ? `renews ${formatDate(e.renewal_date)}` : null);
+    } else if (cat === 'Property') {
+      parts.push(num(e.rental_income) > 0 ? `rent ${formatINR(e.rental_income)}/mo` : null);
+    } else {
+      parts.push(e.institution_name);
+    }
+  } else if (kind === 'liabilities') {
+    if (cat === 'Credit Card') {
+      parts.push(e.lender_name, num(e.credit_limit) > 0 ? `limit ${formatINR(e.credit_limit)}` : null, e.due_date ? `due on the ${e.due_date}` : null);
+    } else {
+      parts.push(e.lender_name, num(e.interest_rate) > 0 ? `${num(e.interest_rate)}%` : null,
+        num(e.emi) > 0 ? `EMI ${formatINR(e.emi)}` : null, num(e.remaining_tenure) > 0 ? yearsLeft(num(e.remaining_tenure)) : null);
+    }
+  } else if (kind === 'goals') {
+    parts.push(e.priority ? `${e.priority} priority` : null, num(e.monthly_contribution) > 0 ? `${formatINR(e.monthly_contribution)}/mo` : null,
+      e.target_date ? `aim ${monthYear(e.target_date)}` : null);
+  }
+  if (showOwner) parts.push(e.owner_name);
+  return parts.filter(Boolean).join(' · ');
+};
+
+/** Goal outlook from /api/init's expected_date ("Never" when nothing is being put in). */
+const goalOutlook = (g: any): { text: string; late: boolean } => {
+  const gap = num(g.target_amount) - num(g.current_amount);
+  if (gap <= 0) return { text: 'Reached', late: false };
+  if (!g.expected_date || g.expected_date === 'Never') return { text: 'Add a monthly amount to get there', late: true };
+  const when = monthYear(g.expected_date);
+  if (!when) return { text: 'Too far off at this pace', late: true };
+  const late = !!g.target_date && g.expected_date > g.target_date;
+  return { text: `${late ? 'Late: ' : ''}reached by ${when}`, late };
+};
+
+const Summary: React.FC<{ kind: Kind; items: any[] }> = ({ kind, items }) => {
+  const sum = (f: (e: any) => number) => items.reduce((t, e) => t + f(e), 0);
+  const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  let main: React.ReactNode;
+  let stats: { label: string; value: string; note: string }[] = [];
+  if (kind === 'accounts') {
+    const active = items.filter((e) => !e.status || e.status === 'Active');
+    main = <><div className="cc-label">Total balance</div><strong className="eg-figure">{formatINR(sum((e) => valueOf(kind, e)))}</strong>
+      <span className="cc-note">across {count(active.length, 'active account', 'active accounts')}</span></>;
+    const top = [...items].sort((a, b) => valueOf(kind, b) - valueOf(kind, a))[0];
+    stats = [
+      { label: 'Largest balance', value: top ? formatINR(valueOf(kind, top)) : '—', note: top?.name ?? '' },
+      { label: 'Below zero', value: String(items.filter((e) => valueOf(kind, e) < 0).length), note: 'accounts overdrawn' },
+    ];
+  } else if (kind === 'assets') {
+    const total = sum((e) => valueOf(kind, e));
+    const holdings = items.filter((e) => e.category_name === 'Stock' || e.category_name === 'Mutual Fund');
+    const cover = sum((e) => (e.category_name === 'Insurance' ? num(e.cover) : 0));
+    main = <><div className="cc-label">Total value</div><strong className="eg-figure">{formatINR(total)}</strong>
+      <span className="cc-note">{count(items.length, 'asset', 'assets')}</span></>;
+    stats = [
+      { label: 'Stocks and funds', value: formatINR(sum((e) => (holdings.includes(e) ? valueOf(kind, e) : 0))), note: total > 0 ? `${Math.round((sum((e) => (holdings.includes(e) ? valueOf(kind, e) : 0)) / total) * 100)}% of the total` : '' },
+      { label: 'Insurance cover', value: formatINR(cover), note: count(items.filter((e) => e.category_name === 'Insurance').length, 'policy', 'policies') },
+    ];
+  } else if (kind === 'liabilities') {
+    const loans = items.filter((e) => !CARD_CATEGORIES.includes(e.category_name));
+    main = <><div className="cc-label">Total owed</div><strong className="eg-figure">{formatINR(sum((e) => valueOf(kind, e)))}</strong>
+      <span className="cc-note">{count(loans.length, 'loan', 'loans')}{items.length > loans.length ? ` and ${count(items.length - loans.length, 'card', 'cards')}` : ''}</span></>;
+    const dearest = [...loans].filter((e) => num(e.outstanding) > 0).sort((a, b) => num(b.interest_rate) - num(a.interest_rate))[0];
+    stats = [
+      { label: 'EMIs each month', value: formatINR(sum((e) => (loans.includes(e) && num(e.outstanding) > 0 ? num(e.emi) : 0))), note: 'on loans still running' },
+      { label: 'Interest still to pay', value: formatINR(sum((e) => num(e.remaining_interest))), note: 'if you keep paying the EMI' },
+      { label: 'Highest rate', value: dearest ? `${num(dearest.interest_rate)}%` : '—', note: dearest?.name ?? '' },
+    ];
+  } else if (kind === 'goals') {
+    const saved = sum((e) => num(e.current_amount));
+    const target = sum((e) => num(e.target_amount));
+    const behind = items.filter((g) => goalOutlook(g).late).length;
+    main = <><div className="cc-label">Saved towards your goals</div>
+      <strong className="eg-figure">{formatINR(saved)} <span>of {formatINR(target)}</span></strong>
+      <div className="cc-meter"><div style={{ width: `${target > 0 ? Math.min((saved / target) * 100, 100) : 0}%`, background: 'var(--accent)' }} /></div></>;
+    stats = [
+      { label: 'Going in each month', value: formatINR(sum((e) => num(e.monthly_contribution))), note: 'planned contributions' },
+      { label: 'Need attention', value: String(behind), note: behind === 1 ? 'goal is late or unfunded' : 'goals late or unfunded' },
+    ];
+  }
+  return (
+    <div className="glass-panel cc-summary eg-summary" style={{ gridTemplateColumns: `minmax(240px, 2fr) repeat(${stats.length}, minmax(140px, 1fr))` }}>
+      <div className="cc-summary-main">{main}</div>
+      {stats.map((s) => (
+        <div key={s.label} className="cc-summary-stat">
+          <div className="cc-label">{s.label}</div>
+          <strong>{s.value}</strong>
+          <span className="cc-note" title={s.note}>{s.note}</span>
+        </div>
+      ))}
+    </div>
+  );
 };
 
 export const EntityGrid: React.FC<EntityGridProps> = ({
@@ -130,59 +174,45 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
   addRequest,
   searchSeed,
 }) => {
-  const [selectedCategoryId, setSelectedCategoryId] = useState<number | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState(searchSeed?.text ?? '');
   const [editingEntity, setEditingEntity] = useState<any | null>(null);
   const [isAdding, setIsAdding] = useState(false);
-  const [deletingEntityId, setDeletingEntityId] = useState<number | null>(null);
-  const [sortKey, setSortKey] = useState<string>('name');
-  const [sortAsc, setSortAsc] = useState<boolean>(true);
-  const modalRef = useModalA11y(isAdding || !!editingEntity, () => {
-    setIsAdding(false);
-    setEditingEntity(null);
-  });
+  // Category the add form opens on (a group's "Add" link or an empty-state button).
+  const [addCategory, setAddCategory] = useState<Category | undefined>(undefined);
+  const closeForm = () => { setIsAdding(false); setEditingEntity(null); };
+  const modalRef = useModalA11y(isAdding || !!editingEntity, closeForm);
+  const startAdd = (category?: Category) => { setEditingEntity(null); setAddCategory(category); setIsAdding(true); };
 
   useEffect(() => {
-    if (addRequest) { setEditingEntity(null); setIsAdding(true); }
-  }, [addRequest]);
+    if (addRequest) startAdd();
+  }, [addRequest]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (searchSeed) { setSelectedCategoryId('all'); setSearchQuery(searchSeed.text); }
+    if (searchSeed) setSearchQuery(searchSeed.text);
   }, [searchSeed?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const typeCategories = categories.filter((c) => c.entity_type.toLowerCase() === entityType.replace(/s$/, '').toLowerCase());
+  const typeCategories = categories.filter((c) => c.entity_type.toLowerCase() === CATEGORY_ENTITY_TYPE[entityType]);
 
-  // Filter entities
-  const filteredEntities = entities.filter((e) => {
-    const matchesCategory = selectedCategoryId === 'all' || e.category_id === selectedCategoryId;
-    const matchesSearch = e.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (e.institution_name && e.institution_name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (e.lender_name && e.lender_name.toLowerCase().includes(searchQuery.toLowerCase()));
-    return matchesCategory && matchesSearch;
-  });
+  const query = searchQuery.trim().toLowerCase();
+  const visible = entities.filter((e) => !query || [e.name, e.institution_name, e.lender_name, e.category_name, e.owner_name]
+    .some((v) => typeof v === 'string' && v.toLowerCase().includes(query)));
+  const showOwner = new Set(entities.map((e) => e.owner_name).filter(Boolean)).size > 1;
 
-  // Sort client-side, right before render (per docs/memory.md's sorting rule):
-  // numbers numerically, everything else with a case-insensitive natural compare;
-  // null/undefined values always sink to the bottom regardless of direction.
-  const sortedEntities = [...filteredEntities].sort((a, b) => {
-    const av = a[sortKey];
-    const bv = b[sortKey];
-    if (av == null && bv == null) return 0;
-    if (av == null) return 1;
-    if (bv == null) return -1;
-    const cmp = typeof av === 'number' && typeof bv === 'number'
-      ? av - bv
-      : String(av).localeCompare(String(bv), undefined, { sensitivity: 'base', numeric: true });
-    return sortAsc ? cmp : -cmp;
-  });
-
-  const handleSort = (key: string) => {
-    if (key === sortKey) {
-      setSortAsc((prev) => !prev);
-    } else {
-      setSortKey(key);
-      setSortAsc(true);
+  // Records grouped by category, in the categories' own order; biggest first within a group.
+  const groups: { key: string; title: string; category?: Category; items: any[] }[] = [];
+  for (const e of visible) {
+    const key = e.category_id ? String(e.category_id) : 'none';
+    let g = groups.find((x) => x.key === key);
+    if (!g) {
+      const category = typeCategories.find((c) => c.id === e.category_id);
+      g = { key, title: e.category_name || category?.name || 'Other', category, items: [] };
+      groups.push(g);
     }
-  };
+    g.items.push(e);
+  }
+  const rank = (g: { category?: Category }) => (g.category ? typeCategories.indexOf(g.category) : typeCategories.length);
+  groups.sort((a, b) => rank(a) - rank(b));
+  for (const g of groups) g.items.sort((a, b) => Math.abs(valueOf(entityType, b)) - Math.abs(valueOf(entityType, a)) || String(a.name).localeCompare(String(b.name)));
+  const grouped = entityType !== 'goals' && (groups.length > 1 || typeCategories.length > 1);
 
   const handleDelete = async (id: number) => {
     try {
@@ -191,8 +221,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
       });
       if (res.ok) {
         onRefresh();
-        const singularType = entityType.replace(/s$/, '');
-        if (showToast) showToast(`${singularType.charAt(0).toUpperCase() + singularType.slice(1)} deleted successfully!`, "success");
+        if (showToast) showToast(`${PAGE_TEXT[entityType].noun} deleted`, "success");
       } else {
         if (showToast) showToast('Failed to delete entity', "error");
         else alert('Failed to delete entity');
@@ -367,15 +396,12 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
         ? `${API_BASE_URL}/api/entities/${entityType}/${editingEntity.id}`
         : `${API_BASE_URL}/api/entities/${entityType}`;
 
-      // Ensure category_id is set if not 'all'. Accounts are exempt: their category
-      // is nullable and the form offers an explicit "Uncategorized" choice that a
-      // silent fallback here would override.
-      if (entityType !== 'accounts') {
-        if (!formData.category_id && selectedCategoryId !== 'all') {
-          formData.category_id = selectedCategoryId;
-        } else if (!formData.category_id && typeCategories.length > 0) {
-          formData.category_id = typeCategories[0].id;
-        }
+      // Ensure category_id is set. Accounts are exempt: their category is nullable and
+      // the form offers an explicit "Uncategorized" choice that a silent fallback here
+      // would override.
+      if (entityType !== 'accounts' && !formData.category_id) {
+        const fallback = addCategory || (entityType === 'liabilities' ? undefined : typeCategories[0]);
+        if (fallback) formData.category_id = fallback.id;
       }
 
       const categoryName = categories.find((c) => c.id === formData.category_id)?.name;
@@ -394,8 +420,7 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
         setIsAdding(false);
         setEditingEntity(null);
         onRefresh();
-        const singularType = entityType.replace(/s$/, '');
-        if (showToast) showToast(`${singularType.charAt(0).toUpperCase() + singularType.slice(1)} saved successfully!`, "success");
+        if (showToast) showToast(`${PAGE_TEXT[entityType].noun} saved`, "success");
       } else {
         const errorData = await res.json();
         const msg = `Error saving entity: ${errorData.detail || 'Unknown error'}`;
@@ -407,192 +432,118 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
     }
   };
 
-  const getFormatValue = (val: any) => {
-    if (typeof val === 'number') {
-      return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(val);
-    }
-    return val?.toString() || '—';
-  };
+  // Loans have several equally likely types, so a plain "Add loan" makes the user pick
+  // one in the form instead of quietly defaulting to the first (Home Loan).
+  const defaultCategory = entityType === 'liabilities' ? undefined : typeCategories[0];
+  const formCategory = editingEntity
+    ? categories.find((c) => c.id === editingEntity.category_id) || defaultCategory
+    : addCategory || defaultCategory;
 
-  const activeCategory = categories.find((c) => c.id === selectedCategoryId);
-
-  // Determine key columns: common columns for the entity type, plus category-specific
-  // columns appended when a single category is selected (not "All Categories").
-  const getColumns = (): Column[] => {
-    const common = COMMON_COLUMNS[entityType] || [{ label: 'Name', key: 'name' }];
-    if (activeCategory && CATEGORY_COLUMNS[activeCategory.name]) {
-      return [...common, ...CATEGORY_COLUMNS[activeCategory.name]];
+  const renderRow = (e: any) => {
+    const value = valueOf(entityType, e);
+    let right: React.ReactNode;
+    if (entityType === 'goals') {
+      const target = num(e.target_amount);
+      const pct = target > 0 ? Math.min((num(e.current_amount) / target) * 100, 100) : 0;
+      const outlook = goalOutlook(e);
+      right = (
+        <span className="ie-row-amount eg-goal">
+          <strong>{formatINR(value)} <small>of {formatINR(target)}</small></strong>
+          <span className="cc-meter"><span style={{ width: `${pct}%`, background: pct >= 100 ? 'var(--success)' : 'var(--accent)' }} /></span>
+          <span style={outlook.late ? { color: 'var(--warning)' } : undefined}>{outlook.text}</span>
+        </span>
+      );
+    } else {
+      const cat = e.category_name;
+      let sub: string | null = null;
+      if (entityType === 'liabilities' && cat !== 'Credit Card' && num(e.remaining_interest) > 0) sub = `${formatINR(e.remaining_interest)} interest to go`;
+      if (entityType === 'liabilities' && cat === 'Credit Card' && num(e.credit_limit) > 0) sub = `${Math.round((value / num(e.credit_limit)) * 100)}% of limit used`;
+      if (entityType === 'assets' && cat === 'Insurance' && num(e.premiums_paid) > 0) sub = `${formatINR(e.premiums_paid)} paid in`;
+      if (entityType === 'assets' && (cat === 'Stock' || cat === 'Mutual Fund') && num(e.quantity) > 0 && num(e.cost_price) > 0) {
+        const gain = value - num(e.quantity) * num(e.cost_price);
+        sub = `${gain >= 0 ? '+' : '−'}${formatINR(Math.abs(gain))} on cost`;
+      }
+      right = (
+        <span className="ie-row-amount">
+          <strong style={value < 0 ? { color: '#fca5a5' } : undefined}>{formatINR(value)}</strong>
+          {sub && <span>{sub}</span>}
+        </span>
+      );
     }
-    return common;
+    const meta = metaOf(entityType, e, showOwner);
+    return (
+      <button key={e.id} type="button" className={`ie-row${e.status && !['Active', 'Open'].includes(e.status) && entityType !== 'goals' ? ' ie-row--paused' : ''}`} onClick={() => setEditingEntity(e)}>
+        <span className="ie-row-text">
+          <strong>{e.name}</strong>
+          {meta && <span>{meta}</span>}
+        </span>
+        {right}
+      </button>
+    );
   };
-  const columns = getColumns();
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', fontFamily: 'Inter, sans-serif' }}>
-
-      {/* Upper Control Bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+    <div className="eg-page">
+      <div className="eg-head">
         <div>
           <h1 className="page-title">{PAGE_TEXT[entityType].title}</h1>
           <p className="page-subtitle">{PAGE_TEXT[entityType].intro}</p>
         </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {/* Search bar */}
-          <div style={{ position: 'relative' }}>
-            <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-            <input
-              type="text"
-              placeholder="Search..."
-              className="form-control"
-              style={{ paddingLeft: '36px', width: '220px', fontSize: '13px' }}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-
-          <button
-            className="btn btn-primary"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
-            onClick={() => {
-              setEditingEntity(null);
-              setIsAdding(true);
-            }}
-          >
-            <Plus size={16} /> {PAGE_TEXT[entityType].add}
+        <div className="eg-head-actions">
+          {entities.length > 0 && (
+            <div className="eg-search">
+              <Search size={14} />
+              <input type="search" placeholder="Search" className="form-control" aria-label={`Search ${PAGE_TEXT[entityType].title.toLowerCase()}`}
+                value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+            </div>
+          )}
+          <button className="btn btn-primary eg-add" onClick={() => startAdd()}>
+            <Plus size={15} /> {PAGE_TEXT[entityType].add}
           </button>
         </div>
       </div>
 
-      {/* Visual Goal Timeline Planner */}
-      {entityType === 'goals' && entities.length > 0 && (
-        <div className="glass-panel" style={{ padding: '24px', overflowX: 'auto' }}>
-          <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', marginBottom: '20px' }}>
-            Goal Milestones Chronological Timeline
-          </h3>
-          <div style={{ display: 'flex', gap: '32px', paddingBottom: '16px', position: 'relative', minWidth: 'max-content' }}>
-            {/* The Timeline connection line */}
-            <div style={{
-              position: 'absolute',
-              top: '40px',
-              left: '20px',
-              right: '20px',
-              height: '3px',
-              background: 'linear-gradient(90deg, #8b5cf6 0%, #10b981 100%)',
-              opacity: 0.3,
-              zIndex: 1
-            }}></div>
+      {entities.length > 0 && <Summary kind={entityType} items={entities} />}
 
-            {[...entities]
-              .sort((a, b) => {
-                if (a.expected_date === 'Never') return 1;
-                if (b.expected_date === 'Never') return -1;
-                return new Date(a.expected_date).getTime() - new Date(b.expected_date).getTime();
-              })
-              .map((goal) => {
-                const progress = goal.target_amount > 0 ? (goal.current_amount / goal.target_amount) * 100 : 0;
-                const formattedTarget = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(goal.target_amount);
-                const formattedCurrent = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(goal.current_amount);
-                
-                let dateStr = 'Never';
-                if (goal.expected_date && goal.expected_date !== 'Never') {
-                  const d = new Date(goal.expected_date);
-                  dateStr = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-                }
-
-                return (
-                  <div key={goal.id} style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '220px' }}>
-                    {/* Timeline Node dot */}
-                    <div style={{
-                      width: '18px',
-                      height: '18px',
-                      borderRadius: '50%',
-                      background: goal.expected_date === 'Never' ? 'var(--danger)' : '#10b981',
-                      border: '4px solid #0f172a',
-                      boxShadow: '0 0 10px rgba(16, 185, 129, 0.5)',
-                      marginBottom: '20px'
-                    }}></div>
-
-                    {/* Card box */}
-                    <div className="glass-card" style={{
-                      width: '100%',
-                      padding: '16px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '10px',
-                      background: 'rgba(255,255,255,0.02)',
-                      border: '1px solid rgba(255,255,255,0.05)',
-                      borderRadius: '10px',
-                      transition: 'transform 0.2s',
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)' }}>
-                          {dateStr}
-                        </span>
-                        <span style={{
-                          fontSize: '9px',
-                          padding: '2px 6px',
-                          borderRadius: '4px',
-                          fontWeight: 600,
-                          background: goal.priority === 'High' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(245, 158, 11, 0.15)',
-                          color: goal.priority === 'High' ? 'var(--danger-light)' : 'var(--warning-light)'
-                        }}>
-                          {goal.priority}
-                        </span>
-                      </div>
-
-                      <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={goal.name}>
-                        {goal.name}
-                      </h4>
-
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: 'var(--text-secondary)' }}>
-                        <span>Current: {formattedCurrent}</span>
-                        <span>Target: {formattedTarget}</span>
-                      </div>
-
-                      {/* Progress Bar */}
-                      <div style={{ height: '5px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', overflow: 'hidden' }}>
-                        <div style={{
-                          width: `${Math.min(progress, 100)}%`,
-                          height: '100%',
-                          background: 'linear-gradient(90deg, #3b82f6 0%, #10b981 100%)',
-                          boxShadow: '0 0 8px rgba(16, 185, 129, 0.3)'
-                        }}></div>
-                      </div>
-
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)' }}>
-                        <span>Progress</span>
-                        <span>{progress.toFixed(0)}%</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+      {entities.length === 0 ? (
+        <div className="settings-group">
+          <div className="ie-empty">
+            <p>{PAGE_TEXT[entityType].empty}</p>
+            {entityType !== 'goals' && typeCategories.length > 1 ? (
+              <div>
+                {typeCategories.slice(0, 8).map((c) => (
+                  <button key={c.id} type="button" className="settings-btn" onClick={() => startAdd(c)}><Plus size={12} /> {c.name}</button>
+                ))}
+              </div>
+            ) : (
+              <div><button type="button" className="settings-btn" onClick={() => startAdd()}><Plus size={12} /> {PAGE_TEXT[entityType].add}</button></div>
+            )}
           </div>
         </div>
-      )}
-
-      {/* Category Tabs (Dynamic Filters) */}
-      {typeCategories.length > 0 && (
-        <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border-glass)', paddingBottom: '12px', overflowX: 'auto' }}>
-          <button
-            className={`btn ${selectedCategoryId === 'all' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ padding: '6px 16px', fontSize: '12px', borderRadius: '20px' }}
-            onClick={() => setSelectedCategoryId('all')}
-          >
-            All Categories
-          </button>
-          {typeCategories.map((cat) => (
-            <button
-              key={cat.id}
-              className={`btn ${selectedCategoryId === cat.id ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ padding: '6px 16px', fontSize: '12px', borderRadius: '20px' }}
-              onClick={() => setSelectedCategoryId(cat.id)}
-            >
-              {cat.name}
-            </button>
+      ) : visible.length === 0 ? (
+        <div className="settings-group">
+          <div className="ie-empty">
+            <p>Nothing matches “{searchQuery}”.</p>
+            <div><button type="button" className="settings-link" onClick={() => setSearchQuery('')}>Clear search</button></div>
+          </div>
+        </div>
+      ) : grouped ? (
+        <div className="eg-groups">
+          {groups.map((g) => (
+            <section key={g.key} aria-label={g.title}>
+              <div className="settings-group-head">
+                <h3 className="settings-group-title">{g.title} <span className="eg-count">{g.items.length}</span></h3>
+                <span className="eg-group-total">
+                  {formatINR(g.items.reduce((t, e) => t + valueOf(entityType, e), 0))}
+                  {g.category && <button type="button" className="settings-link" onClick={() => startAdd(g.category)}><Plus size={12} style={{ verticalAlign: '-2px' }} /> Add</button>}
+                </span>
+              </div>
+              <div className="settings-group">{g.items.map(renderRow)}</div>
+            </section>
           ))}
         </div>
+      ) : (
+        <div className="settings-group">{groups.flatMap((g) => g.items).map(renderRow)}</div>
       )}
 
       {/* Modal/Form overlay */}
@@ -613,12 +564,12 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
             ref={modalRef}
             role="dialog"
             aria-modal="true"
-            aria-label="Edit entity form"
+            aria-label={editingEntity ? `Edit ${editingEntity.name}` : PAGE_TEXT[entityType].add}
             tabIndex={-1}
           >
             <DynamicForm
               entityType={entityType}
-              category={activeCategory || typeCategories[0]}
+              category={formCategory}
               categories={categories}
               institutions={institutions}
               people={people}
@@ -627,118 +578,18 @@ export const EntityGrid: React.FC<EntityGridProps> = ({
               liabilities={liabilities}
               properties={properties}
               onSubmit={handleFormSubmit}
-              onCancel={() => {
-                setIsAdding(false);
-                setEditingEntity(null);
-              }}
+              onCancel={closeForm}
             />
+            {editingEntity && (
+              <div className="eg-form-foot">
+                <ConfirmAction label={`Delete this ${CARD_CATEGORIES.includes(editingEntity.category_name) ? 'card' : PAGE_TEXT[entityType].noun.toLowerCase()}`} confirmLabel="Delete" danger
+                  question={`Delete ${editingEntity.name}? This can't be undone.`}
+                  onConfirm={async () => { await handleDelete(editingEntity.id); closeForm(); }} />
+              </div>
+            )}
           </div>
         </div>
       )}
-
-      {/* Data Table */}
-      <div className="table-responsive card" style={{ padding: '16px', borderRadius: '12px' }}>
-        <table className="table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-          <thead>
-            <tr>
-              {columns.map((col) => (
-                <th
-                  key={col.key}
-                  onClick={() => handleSort(col.key)}
-                  title={`Sort by ${col.label}`}
-                  style={{
-                    color: sortKey === col.key ? '#e2e8f0' : 'var(--text-muted)',
-                    fontWeight: 600,
-                    fontSize: '12px',
-                    padding: '12px 16px',
-                    textAlign: col.alignRight ? 'right' : 'left',
-                    cursor: 'pointer',
-                    userSelect: 'none',
-                    whiteSpace: 'nowrap'
-                  }}
-                >
-                  {col.label}{sortKey === col.key ? (sortAsc ? ' ▲' : ' ▼') : ''}
-                </th>
-              ))}
-              <th style={{ color: 'var(--text-muted)', fontWeight: 600, fontSize: '12px', padding: '12px 16px', textAlign: 'right' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sortedEntities.length === 0 ? (
-              <tr>
-                <td colSpan={columns.length + 1} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
-                  {entities.length === 0 ? PAGE_TEXT[entityType].empty : 'Nothing matches your search or the selected category.'}
-                </td>
-              </tr>
-            ) : (
-              sortedEntities.map((ent) => (
-                <tr key={ent.id} style={{ borderBottom: '1px solid var(--border-glass)' }} className="table-row">
-                  {columns.map((col) => {
-                    const rawVal = ent[col.key];
-                    const val = col.suffix ? `${rawVal}${col.suffix}` : getFormatValue(rawVal);
-                    return (
-                      <td
-                        key={col.key}
-                        style={{
-                          fontSize: '13px',
-                          color: '#e2e8f0',
-                          padding: '14px 16px',
-                          textAlign: col.alignRight ? 'right' : 'left'
-                        }}
-                      >
-                        {val}
-                      </td>
-                    );
-                  })}
-                  <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                      {deletingEntityId === ent.id ? (
-                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
-                          <span style={{ color: 'var(--danger-light)', fontSize: '11px', fontWeight: 500 }}>Confirm?</span>
-                          <button
-                            className="btn btn-secondary"
-                            style={{ padding: '3px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444' }}
-                            onClick={() => {
-                              handleDelete(ent.id);
-                              setDeletingEntityId(null);
-                            }}
-                          >
-                            Yes
-                          </button>
-                          <button
-                            className="btn btn-secondary"
-                            style={{ padding: '3px 8px', fontSize: '10px', minWidth: 'auto', borderRadius: '6px' }}
-                            onClick={() => setDeletingEntityId(null)}
-                          >
-                            No
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <button
-                            className="btn btn-secondary"
-                            style={{ padding: '6px', minWidth: 'auto', borderRadius: '8px' }}
-                            onClick={() => setEditingEntity(ent)}
-                          >
-                            <Edit2 size={13} style={{ color: '#a78bfa' }} />
-                          </button>
-                          <button
-                            className="btn btn-secondary"
-                            style={{ padding: '6px', minWidth: 'auto', borderRadius: '8px' }}
-                            onClick={() => setDeletingEntityId(ent.id)}
-                          >
-                            <Trash2 size={13} style={{ color: '#ef4444' }} />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
 
     </div>
   );
